@@ -1,0 +1,202 @@
+.card {
+  background-color: var(--color-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.card.compact {
+  padding: 1rem;
+}
+
+.loading,
+.error {
+  text-align: center;
+  padding: 1.5rem;
+  color: var(--color-text-secondary);
+}
+
+.error {
+  color: #ef4444;
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.compact .header {
+  margin-bottom: 0.75rem;
+}
+
+.beltDisplay {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.beltIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.compact .beltIcon {
+  width: 28px;
+  height: 28px;
+}
+
+.beltInfo {
+  display: flex;
+  flex-direction: column;
+}
+
+.currentRank {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.compact .currentRank {
+  font-size: 0.875rem;
+}
+
+.program {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.compact .program {
+  font-size: 0.75rem;
+}
+
+.readyBadge {
+  padding: 0.375rem 0.75rem;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border-radius: 20px;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+}
+
+/* Progress Section */
+.progressSection {
+  margin-bottom: 1rem;
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.nextBeltIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.progressItem {
+  margin-bottom: 0.75rem;
+}
+
+.progressItem:last-child {
+  margin-bottom: 0;
+}
+
+.progressLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.375rem;
+}
+
+.progressBar {
+  height: 8px;
+  background-color: var(--color-dark-grey);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--color-red);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.progressFill.timeFill {
+  background: #3b82f6;
+}
+
+.progressFill.skillsFill {
+  background: #10b981;
+}
+
+/* Notes */
+.notes {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  padding: 0.75rem;
+  background-color: var(--color-dark-grey);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.notes strong {
+  color: var(--color-text-primary);
+}
+
+/* No Requirements */
+.noRequirements {
+  text-align: center;
+  padding: 1rem;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  background-color: var(--color-dark-grey);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+/* Stats */
+.stats {
+  display: flex;
+  gap: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.statValue {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}

@@ -1,0 +1,175 @@
+.scannerWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.scannerContainer {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 1;
+  background: #1a1a2e;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.scanner {
+  width: 100%;
+  height: 100%;
+}
+
+.scanner video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #6c757d;
+  gap: 16px;
+}
+
+.placeholderIcon {
+  opacity: 0.5;
+}
+
+.errorContainer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(26, 26, 46, 0.95);
+  color: #dc3545;
+  gap: 16px;
+  text-align: center;
+}
+
+.errorIcon {
+  opacity: 0.8;
+}
+
+.errorText {
+  font-size: 14px;
+  max-width: 280px;
+  color: #adb5bd;
+}
+
+.retryButton {
+  padding: 12px 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.retryButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.scannerOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scannerFrame {
+  position: relative;
+  width: 250px;
+  height: 250px;
+}
+
+.corner {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border-color: #667eea;
+  border-style: solid;
+  border-width: 0;
+}
+
+.corner[data-position="top-left"] {
+  top: 0;
+  left: 0;
+  border-top-width: 4px;
+  border-left-width: 4px;
+  border-top-left-radius: 8px;
+}
+
+.corner[data-position="top-right"] {
+  top: 0;
+  right: 0;
+  border-top-width: 4px;
+  border-right-width: 4px;
+  border-top-right-radius: 8px;
+}
+
+.corner[data-position="bottom-left"] {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: 4px;
+  border-left-width: 4px;
+  border-bottom-left-radius: 8px;
+}
+
+.corner[data-position="bottom-right"] {
+  bottom: 0;
+  right: 0;
+  border-bottom-width: 4px;
+  border-right-width: 4px;
+  border-bottom-right-radius: 8px;
+}
+
+.scanLine {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #667eea, transparent);
+  animation: scan 2s linear infinite;
+}
+
+@keyframes scan {
+  0% {
+    top: 10px;
+  }
+  50% {
+    top: calc(100% - 12px);
+  }
+  100% {
+    top: 10px;
+  }
+}
+
+.scannerHint {
+  margin-top: 16px;
+  color: #6c757d;
+  font-size: 14px;
+}

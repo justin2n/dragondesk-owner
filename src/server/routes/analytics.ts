@@ -1,0 +1,347 @@
+import express from 'express';
+import { query } from '../models/database';
+import { authenticateToken, AuthRequest } from '../middleware/auth';
+
+const router = express.Router();
+
+// Helper function to generate month periods
+const generateMonthPeriods = (monthsBack: number) => {
+  const now = new Date();
+  const periods: { start: Date; end: Date; label: string; monthKey: string }[] = [];
+
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+
+    periods.push({
+      start,
+      end,
+      label: start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      monthKey: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`,
+    });
+  }
+
+  return periods;
+};
+
+// Get analytics data for dashboard (legacy endpoint)
+router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { timeframe = 'week', program, locationId } = req.query;
+
+    let sql = `SELECT
+        id,
+        accountStatus,
+        programType,
+        locationId,
+        createdAt,
+        updatedAt
+      FROM members
+      WHERE 1=1`;
+    const params: any[] = [];
+
+    if (locationId && locationId !== 'all') {
+      sql += ' AND locationId = ?';
+      params.push(locationId);
+    }
+
+    sql += ' ORDER BY createdAt ASC';
+
+    let members: any[] = await query(sql, params);
+
+    if (program && program !== 'all') {
+      members = members.filter(m => m.programType === program);
+    }
+
+    const now = new Date();
+    const periods: { start: Date; end: Date; label: string }[] = [];
+
+    if (timeframe === 'week') {
+      for (let i = 11; i >= 0; i--) {
+        const end = new Date(now);
+        end.setDate(end.getDate() - (i * 7));
+        const start = new Date(end);
+        start.setDate(start.getDate() - 7);
+
+        const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+        periods.push({ start, end, label: `${startStr} - ${endStr}` });
+      }
+    } else if (timeframe === 'month') {
+      for (let i = 11; i >= 0; i--) {
+        const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+        const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+
+        periods.push({
+          start,
+          end,
+          label: start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        });
+      }
+    } else {
+      for (let i = 4; i >= 0; i--) {
+        const year = now.getFullYear() - i;
+        const start = new Date(year, 0, 1);
+        const end = new Date(year, 11, 31, 23, 59, 59);
+
+        periods.push({ start, end, label: year.toString() });
+      }
+    }
+
+    const timeSeriesData = periods.map(period => {
+      const periodMembers = members.filter(m => {
+        const createdAt = new Date(m.createdAt);
+        return createdAt >= period.start && createdAt < period.end;
+      });
+
+      return {
+        period: period.label,
+        leads: periodMembers.filter(m => m.accountStatus === 'lead').length,
+        trialers: periodMembers.filter(m => m.accountStatus === 'trialer').length,
+        members: periodMembers.filter(m => m.accountStatus === 'member').length,
+      };
+    });
+
+    const totalTrialers = members.filter(m => m.accountStatus === 'trialer' || m.accountStatus === 'member').length;
+    const paidMembers = members.filter(m => m.accountStatus === 'member').length;
+    const conversionRate = totalTrialers > 0 ? (paidMembers / totalTrialers) * 100 : 0;
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const activePaidMembers = members.filter(m =>
+      m.accountStatus === 'member' && new Date(m.updatedAt) >= thirtyDaysAgo
+    ).length;
+    const totalPaidMembers = members.filter(m => m.accountStatus === 'member').length;
+    const churnRate = totalPaidMembers > 0 ? ((totalPaidMembers - activePaidMembers) / totalPaidMembers) * 100 : 0;
+
+    const currentPeriod = periods[periods.length - 1];
+    const currentPeriodMembers = members.filter(m => {
+      const createdAt = new Date(m.createdAt);
+      return createdAt >= currentPeriod.start && createdAt < currentPeriod.end;
+    });
+
+    const currentStats = {
+      leads: currentPeriodMembers.filter(m => m.accountStatus === 'lead').length,
+      trialers: currentPeriodMembers.filter(m => m.accountStatus === 'trialer').length,
+      members: currentPeriodMembers.filter(m => m.accountStatus === 'member').length,
+    };
+
+    res.json({
+      timeSeriesData,
+      metrics: {
+        conversionRate: parseFloat(conversionRate.toFixed(2)),
+        churnRate: parseFloat(churnRate.toFixed(2)),
+      },
+      currentStats,
+    });
+  } catch (error: any) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// NEW: Comprehensive program-based analytics for DragonDesk: Analytics page
+router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { locationId, months = '12' } = req.query;
+    const monthsBack = parseInt(months as string) || 12;
+
+    // Build base query
+    let sql = `SELECT
+        id,
+        accountStatus,
+        programType,
+        locationId,
+        trialStartDate,
+        memberStartDate,
+        createdAt,
+        updatedAt
+      FROM members
+      WHERE 1=1`;
+    const params: any[] = [];
+
+    if (locationId && locationId !== 'all') {
+      sql += ' AND locationId = ?';
+      params.push(locationId);
+    }
+
+    const allMembers: any[] = await query(sql, params);
+    const membersByStatus = {
+      member: allMembers.filter(m => m.accountStatus === 'member').length,
+      trialer: allMembers.filter(m => m.accountStatus === 'trialer').length,
+      lead: allMembers.filter(m => m.accountStatus === 'lead').length,
+    };
+    console.log(`[Analytics] locationId=${locationId}, total=${allMembers.length}, breakdown:`, membersByStatus);
+
+    // Get cancellations from churn_metrics table
+    // Join with members table to filter by location since churn_metrics doesn't have locationId
+    let churnSql = `
+      SELECT cm.*, m.locationId
+      FROM churn_metrics cm
+      LEFT JOIN members m ON cm.memberId = m.id
+      WHERE 1=1
+    `;
+    const churnParams: any[] = [];
+
+    if (locationId && locationId !== 'all') {
+      churnSql += ' AND m.locationId = ?';
+      churnParams.push(locationId);
+    }
+
+    const churnData: any[] = await query(churnSql, churnParams);
+
+    // Get available programs
+    const programs = [...new Set(allMembers.map(m => m.programType))].filter(Boolean);
+
+    // Generate month periods
+    const periods = generateMonthPeriods(monthsBack);
+
+    // Calculate trials data by program and month
+    const trialsData = periods.map(period => {
+      const dataPoint: any = { month: period.label };
+
+      programs.forEach(program => {
+        const programMembers = allMembers.filter(m => m.programType === program);
+
+        // Count trials started in this month
+        const trialsStarted = programMembers.filter(m => {
+          const trialDate = m.trialStartDate ? new Date(m.trialStartDate) : new Date(m.createdAt);
+          return (m.accountStatus === 'trialer' || m.accountStatus === 'member') &&
+            trialDate >= period.start && trialDate <= period.end;
+        }).length;
+
+        // Count conversions (trials that became members) in this month
+        const conversions = programMembers.filter(m => {
+          const memberDate = m.memberStartDate ? new Date(m.memberStartDate) : null;
+          return m.accountStatus === 'member' &&
+            memberDate && memberDate >= period.start && memberDate <= period.end;
+        }).length;
+
+        dataPoint[`${program}_volume`] = trialsStarted;
+        dataPoint[`${program}_conversions`] = conversions;
+        dataPoint[`${program}_conversionRate`] = trialsStarted > 0
+          ? parseFloat(((conversions / trialsStarted) * 100).toFixed(1))
+          : 0;
+      });
+
+      // Total across all programs
+      const totalTrials = programs.reduce((sum, p) => sum + (dataPoint[`${p}_volume`] || 0), 0);
+      const totalConversions = programs.reduce((sum, p) => sum + (dataPoint[`${p}_conversions`] || 0), 0);
+      dataPoint.total_volume = totalTrials;
+      dataPoint.total_conversions = totalConversions;
+      dataPoint.total_conversionRate = totalTrials > 0
+        ? parseFloat(((totalConversions / totalTrials) * 100).toFixed(1))
+        : 0;
+
+      return dataPoint;
+    });
+
+    // Calculate leads data by program and month
+    const leadsData = periods.map(period => {
+      const dataPoint: any = { month: period.label };
+
+      programs.forEach(program => {
+        const newLeads = allMembers.filter(m => {
+          const createdAt = new Date(m.createdAt);
+          return m.programType === program &&
+            m.accountStatus === 'lead' &&
+            createdAt >= period.start && createdAt <= period.end;
+        }).length;
+
+        dataPoint[program] = newLeads;
+      });
+
+      // Total leads across all programs
+      dataPoint.total = programs.reduce((sum, p) => sum + (dataPoint[p] || 0), 0);
+
+      return dataPoint;
+    });
+
+    // Calculate members data (active members and churn) by program and month
+    const membersData = periods.map(period => {
+      const dataPoint: any = { month: period.label };
+
+      programs.forEach(program => {
+        // Active members at end of period
+        const activeMembers = allMembers.filter(m => {
+          const memberDate = m.memberStartDate ? new Date(m.memberStartDate) : new Date(m.createdAt);
+          return m.programType === program &&
+            m.accountStatus === 'member' &&
+            memberDate <= period.end;
+        }).length;
+
+        // Cancellations in this period
+        const cancellations = churnData.filter(c => {
+          const cancelDate = new Date(c.cancelledAt || c.createdAt);
+          return c.programType === program &&
+            cancelDate >= period.start && cancelDate <= period.end;
+        }).length;
+
+        dataPoint[`${program}_active`] = activeMembers;
+        dataPoint[`${program}_cancellations`] = cancellations;
+        dataPoint[`${program}_churnRate`] = activeMembers > 0
+          ? parseFloat(((cancellations / activeMembers) * 100).toFixed(1))
+          : 0;
+      });
+
+      // Totals
+      dataPoint.total_active = programs.reduce((sum, p) => sum + (dataPoint[`${p}_active`] || 0), 0);
+      dataPoint.total_cancellations = programs.reduce((sum, p) => sum + (dataPoint[`${p}_cancellations`] || 0), 0);
+      dataPoint.total_churnRate = dataPoint.total_active > 0
+        ? parseFloat(((dataPoint.total_cancellations / dataPoint.total_active) * 100).toFixed(1))
+        : 0;
+
+      return dataPoint;
+    });
+
+    // Summary statistics
+    const summary = {
+      programs: programs.map(program => {
+        const programMembers = allMembers.filter(m => m.programType === program);
+        const activeMembers = programMembers.filter(m => m.accountStatus === 'member').length;
+        const currentTrials = programMembers.filter(m => m.accountStatus === 'trialer').length;
+        const currentLeads = programMembers.filter(m => m.accountStatus === 'lead').length;
+        const programCancellations = churnData.filter(c => c.programType === program).length;
+
+        return {
+          name: program,
+          activeMembers,
+          currentTrials,
+          currentLeads,
+          totalCancellations: programCancellations,
+          overallChurnRate: activeMembers > 0
+            ? parseFloat(((programCancellations / (activeMembers + programCancellations)) * 100).toFixed(1))
+            : 0,
+        };
+      }),
+      totals: {
+        activeMembers: allMembers.filter(m => m.accountStatus === 'member').length,
+        currentTrials: allMembers.filter(m => m.accountStatus === 'trialer').length,
+        currentLeads: allMembers.filter(m => m.accountStatus === 'lead').length,
+        totalCancellations: churnData.length,
+      },
+    };
+
+    // Program distribution for pie chart
+    const programDistribution = programs.map(program => ({
+      name: program,
+      value: allMembers.filter(m => m.programType === program && m.accountStatus === 'member').length,
+    }));
+
+    res.json({
+      programs,
+      trialsData,
+      leadsData,
+      membersData,
+      summary,
+      programDistribution,
+    });
+  } catch (error: any) {
+    console.error('Error fetching program analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+export default router;

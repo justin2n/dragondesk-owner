@@ -1,0 +1,333 @@
+.container {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.kioskLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.75rem 1.5rem;
+  background-color: var(--color-red);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.kioskLink:hover {
+  background-color: var(--color-red-hover);
+}
+
+/* Stats Grid */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.statCard {
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.statValue {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--color-red);
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.5rem;
+}
+
+/* Breakdown Grid */
+.breakdownGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.breakdownCard {
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.breakdownTitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0 0 1rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.breakdownList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.breakdownItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.breakdownLabel {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+.programLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.programDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.programDot.bjj { background: #7c3aed; }
+.programDot.taekwondo { background: #dc2626; }
+.programDot.muaythai { background: #059669; }
+.programDot.general { background: #6b7280; }
+
+.breakdownValue {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Filters */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.dateFilters {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filterBtn {
+  padding: 0.5rem 1rem;
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filterBtn:hover {
+  background-color: var(--color-grey);
+  color: var(--color-text-primary);
+}
+
+.filterBtn.active {
+  background-color: var(--color-red);
+  border-color: var(--color-red);
+  color: var(--color-text-primary);
+}
+
+.customDateRange {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.dateInput {
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+/* Table */
+.tableContainer {
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.loading,
+.empty {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  padding: 0.875rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background-color: var(--color-grey);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover {
+  background-color: var(--color-grey);
+}
+
+.timeCell {
+  display: flex;
+  flex-direction: column;
+}
+
+.time {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.date {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.memberCell {
+  display: flex;
+  flex-direction: column;
+}
+
+.memberName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.memberEmail {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.programBadge {
+  display: inline-block;
+  padding: 0.25rem 0.625rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+}
+
+.programBadge.bjj { background: #7c3aed; }
+.programBadge.taekwondo { background: #dc2626; }
+.programBadge.muaythai { background: #059669; }
+.programBadge.general { background: #6b7280; }
+
+.ranking {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.methodBadge {
+  display: inline-block;
+  padding: 0.25rem 0.625rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: var(--color-grey);
+  color: var(--color-text-secondary);
+}
+
+.methodBadge.qr_scan { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+.methodBadge.manual { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+.methodBadge.name_search { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+.methodBadge.phone_lookup { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+
+.deleteBtn {
+  padding: 0.375rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.deleteBtn:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container {
+    padding: 1rem;
+  }
+
+  .header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tableContainer {
+    overflow-x: auto;
+  }
+
+  .table {
+    min-width: 700px;
+  }
+}

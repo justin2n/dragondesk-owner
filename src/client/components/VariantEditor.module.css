@@ -1,0 +1,178 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--color-dark-grey);
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--color-grey);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.toolbarGroup {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+  border-right: 1px solid var(--color-border);
+}
+
+.toolbarGroup:last-child {
+  border-right: none;
+}
+
+.modeToggle {
+  padding: 0.5rem 0.75rem;
+  background: var(--color-red);
+  color: var(--color-text-primary);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.modeToggle:hover {
+  background: var(--color-red-hover);
+  transform: translateY(-1px);
+}
+
+.toolBtn {
+  padding: 0.5rem 0.75rem;
+  background: var(--color-dark-grey);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  min-width: 36px;
+}
+
+.toolBtn:hover {
+  background: var(--color-light-grey);
+  border-color: var(--color-red);
+}
+
+.select {
+  padding: 0.5rem;
+  background: var(--color-dark-grey);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--color-red);
+}
+
+.colorPicker {
+  width: 36px;
+  height: 36px;
+  padding: 2px;
+  background: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.colorPicker:hover {
+  border-color: var(--color-red);
+}
+
+.editor {
+  min-height: 300px;
+  padding: 1rem;
+  background: white;
+  color: #000;
+  overflow-y: auto;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.editor:focus {
+  outline: none;
+}
+
+.editor:empty:before {
+  content: attr(data-placeholder);
+  color: #999;
+  font-style: italic;
+}
+
+.htmlEditor {
+  min-height: 300px;
+  padding: 1rem;
+  background: var(--color-dark-grey);
+  color: var(--color-text-primary);
+  border: none;
+  font-family: 'Courier New', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.htmlEditor:focus {
+  outline: none;
+}
+
+/* Style links in the editor */
+.editor a {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+/* Style images in the editor */
+.editor img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem 0;
+}
+
+/* Style lists in the editor */
+.editor ul,
+.editor ol {
+  margin: 1rem 0;
+  padding-left: 2rem;
+}
+
+.editor li {
+  margin: 0.5rem 0;
+}
+
+/* Headings in editor */
+.editor h1 {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 1rem 0;
+}
+
+.editor h2 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin: 1rem 0;
+}
+
+.editor h3 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin: 1rem 0;
+}
+
+/* Paragraphs */
+.editor p {
+  margin: 0.5rem 0;
+}

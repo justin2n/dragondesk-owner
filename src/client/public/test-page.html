@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DojoDesk Visual Editor Test Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+        
+        .hero h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+        
+        .hero p {
+            font-size: 1.25rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background: white;
+            color: #667eea;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: transform 0.2s;
+        }
+        
+        .cta-button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .features {
+            padding: 4rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .features h2 {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 3rem;
+            color: #2d3748;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+        
+        .feature-card {
+            padding: 2rem;
+            background: #f7fafc;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .feature-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #2d3748;
+        }
+        
+        .feature-card p {
+            color: #4a5568;
+        }
+        
+        .testimonial {
+            background: #2d3748;
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+        
+        .testimonial blockquote {
+            font-size: 1.5rem;
+            font-style: italic;
+            max-width: 800px;
+            margin: 0 auto 1rem;
+        }
+        
+        .testimonial cite {
+            font-style: normal;
+            opacity: 0.8;
+        }
+        
+        footer {
+            background: #1a202c;
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <h1>Transform Your Martial Arts School</h1>
+        <p>The complete CRM solution designed specifically for dojo management</p>
+        <a href="#signup" class="cta-button">Start Your Free Trial</a>
+    </div>
+    
+    <section class="features">
+        <h2>Everything You Need to Grow Your Dojo</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <h3>Member Management</h3>
+                <p>Keep track of students, attendance, and progress in one place</p>
+            </div>
+            <div class="feature-card">
+                <h3>Automated Campaigns</h3>
+                <p>Engage members with personalized email and SMS campaigns</p>
+            </div>
+            <div class="feature-card">
+                <h3>A/B Testing</h3>
+                <p>Optimize your marketing with data-driven experiments</p>
+            </div>
+        </div>
+    </section>
+    
+    <section class="testimonial">
+        <blockquote>
+            "DojoDesk has completely transformed how we manage our martial arts school. 
+            Our member retention has increased by 40% since we started using it."
+        </blockquote>
+        <cite>— Sensei Mike Johnson, Dragon Martial Arts</cite>
+    </section>
+    
+    <footer>
+        <p>&copy; 2024 DojoDesk CRM. All rights reserved.</p>
+        <p style="margin-top: 1rem; font-size: 0.875rem; opacity: 0.7;">
+            This is a test page for the DojoDesk Visual Editor
+        </p>
+    </footer>
+</body>
+</html>

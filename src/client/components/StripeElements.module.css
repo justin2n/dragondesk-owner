@@ -1,0 +1,87 @@
+.form {
+  padding: 1rem 0;
+}
+
+.cardWrapper {
+  background-color: var(--color-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.cardWrapper:focus-within {
+  border-color: var(--color-red);
+}
+
+.error {
+  color: var(--color-red);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: rgba(220, 38, 38, 0.1);
+  border-radius: 4px;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.cancelBtn {
+  padding: 0.75rem 1.5rem;
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.cancelBtn:hover {
+  background-color: var(--color-grey);
+}
+
+.cancelBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.submitBtn {
+  padding: 0.75rem 1.5rem;
+  background-color: var(--color-red);
+  border: none;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.submitBtn:hover:not(:disabled) {
+  background-color: var(--color-red-hover);
+}
+
+.submitBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: var(--color-text-secondary);
+}
+
+.errorContainer {
+  text-align: center;
+  padding: 2rem;
+}
+
+.errorContainer p {
+  color: var(--color-text-secondary);
+  margin-bottom: 1rem;
+}

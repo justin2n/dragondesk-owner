@@ -1,0 +1,720 @@
+import { useState, useEffect } from 'react';
+import { api } from '../utils/api';
+import {
+  AddIcon,
+  CalendarIcon,
+  LocationIcon,
+  UsersIcon,
+  DollarIcon,
+  CheckIcon,
+  CloseIcon,
+  OptimizeIcon,
+  EngageIcon,
+  OutreachIcon,
+  SocialIcon,
+} from '../components/Icons';
+import styles from './Events.module.css';
+
+interface Event {
+  id: number;
+  name: string;
+  description: string;
+  eventType: string;
+  programType: string;
+  startDateTime: string;
+  endDateTime: string;
+  location: string;
+  maxAttendees: number;
+  currentAttendees: number;
+  price: number;
+  requiresRegistration: boolean;
+  instructor: string;
+  status: string;
+  attendees?: any[];
+}
+
+interface Audience {
+  id: number;
+  name: string;
+}
+
+const Events = () => {
+  const [events, setEvents] = useState<Event[]>([]);
+  const [audiences, setAudiences] = useState<Audience[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [filterType, setFilterType] = useState<string>('all');
+  const [filterProgram, setFilterProgram] = useState<string>('all');
+
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    eventType: 'class',
+    programType: 'All',
+    startDateTime: '',
+    endDateTime: '',
+    location: '',
+    maxAttendees: '',
+    price: '',
+    requiresRegistration: false,
+    instructor: '',
+  });
+
+  const [campaignData, setCampaignData] = useState({
+    audienceId: '',
+    platforms: [] as string[],
+  });
+
+  useEffect(() => {
+    loadEvents();
+    loadAudiences();
+  }, [filterType, filterProgram]);
+
+  const loadEvents = async () => {
+    try {
+      const params: any = {};
+      if (filterType !== 'all') params.eventType = filterType;
+      if (filterProgram !== 'all') params.programType = filterProgram;
+
+      const queryString = new URLSearchParams(params).toString();
+      const data = await api.get(`/events${queryString ? `?${queryString}` : ''}`);
+      setEvents(data);
+    } catch (error) {
+      console.error('Failed to load events:', error);
+    }
+  };
+
+  const loadAudiences = async () => {
+    try {
+      const data = await api.get('/audiences');
+      setAudiences(data);
+    } catch (error) {
+      console.error('Failed to load audiences:', error);
+    }
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.post('/events', formData);
+      setShowCreateModal(false);
+      resetForm();
+      loadEvents();
+    } catch (error: any) {
+      alert(error.message || 'Failed to create event');
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this event?')) return;
+
+    try {
+      await api.delete(`/events/${id}`);
+      loadEvents();
+      setSelectedEvent(null);
+    } catch (error: any) {
+      alert(error.message || 'Failed to delete event');
+    }
+  };
+
+  const handleSyncMyStudio = async () => {
+    try {
+      const config = localStorage.getItem('myStudioConfig');
+      const myStudioConfig = config ? JSON.parse(config) : null;
+
+      if (!myStudioConfig?.enabled || !myStudioConfig?.apiKey) {
+        alert('Please configure MyStudio API in Settings > MyStudio API first.');
+        return;
+      }
+
+      const result = await api.post('/events/sync-mystudio', { config: myStudioConfig });
+
+      if (result.syncedCount === 0) {
+        alert(result.message + '\n\nNote: ' + result.note);
+      } else {
+        alert(`Synced ${result.syncedCount} events from MyStudio`);
+        loadEvents();
+      }
+    } catch (error: any) {
+      alert(error.message || 'Failed to sync from MyStudio');
+    }
+  };
+
+  const handleCreateCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!selectedEvent) return;
+
+    if (campaignData.platforms.length === 0) {
+      alert('Please select at least one platform');
+      return;
+    }
+
+    if (!campaignData.audienceId) {
+      alert('Please select an audience');
+      return;
+    }
+
+    try {
+      const result = await api.post(`/events/${selectedEvent.id}/create-campaign`, campaignData);
+      alert(`Created ${result.campaigns.length} campaign(s) successfully!`);
+      setShowCampaignModal(false);
+      resetCampaignForm();
+    } catch (error: any) {
+      alert(error.message || 'Failed to create campaigns');
+    }
+  };
+
+  const togglePlatform = (platform: string) => {
+    setCampaignData((prev) => ({
+      ...prev,
+      platforms: prev.platforms.includes(platform)
+        ? prev.platforms.filter((p) => p !== platform)
+        : [...prev.platforms, platform],
+    }));
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      description: '',
+      eventType: 'class',
+      programType: 'All',
+      startDateTime: '',
+      endDateTime: '',
+      location: '',
+      maxAttendees: '',
+      price: '',
+      requiresRegistration: false,
+      instructor: '',
+    });
+  };
+
+  const resetCampaignForm = () => {
+    setCampaignData({
+      audienceId: '',
+      platforms: [],
+    });
+  };
+
+  const getEventsForDate = (date: Date) => {
+    return events.filter((event) => {
+      const eventDate = new Date(event.startDateTime);
+      return (
+        eventDate.getDate() === date.getDate() &&
+        eventDate.getMonth() === date.getMonth() &&
+        eventDate.getFullYear() === date.getFullYear()
+      );
+    });
+  };
+
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+
+    const days = [];
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(new Date(year, month, i));
+    }
+    return days;
+  };
+
+  const navigateMonth = (direction: number) => {
+    setCurrentDate(
+      new Date(currentDate.getFullYear(), currentDate.getMonth() + direction, 1)
+    );
+  };
+
+  const eventTypes = ['class', 'seminar', 'workshop', 'tournament', 'testing', 'social', 'other'];
+  const programTypes = ['All', 'BJJ', 'Muay Thai', 'Taekwondo'];
+
+  return (
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <div>
+          <h1 className={styles.title}>Events & Calendar</h1>
+          <p className={styles.subtitle}>Manage classes, seminars, and special events</p>
+        </div>
+        <div className={styles.actions}>
+          <button onClick={handleSyncMyStudio} className={styles.secondaryBtn}>
+            Sync MyStudio
+          </button>
+          <button onClick={() => setShowCreateModal(true)} className={styles.primaryBtn}>
+            <AddIcon size={20} />
+            Create Event
+          </button>
+        </div>
+      </div>
+
+      <div className={styles.controls}>
+        <div className={styles.filters}>
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className={styles.select}
+          >
+            <option value="all">All Types</option>
+            {eventTypes.map((type) => (
+              <option key={type} value={type}>
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filterProgram}
+            onChange={(e) => setFilterProgram(e.target.value)}
+            className={styles.select}
+          >
+            <option value="all">All Programs</option>
+            {programTypes.map((program) => (
+              <option key={program} value={program}>
+                {program}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className={styles.viewToggle}>
+          <button
+            className={`${styles.toggleBtn} ${viewMode === 'calendar' ? styles.active : ''}`}
+            onClick={() => setViewMode('calendar')}
+          >
+            Calendar
+          </button>
+          <button
+            className={`${styles.toggleBtn} ${viewMode === 'list' ? styles.active : ''}`}
+            onClick={() => setViewMode('list')}
+          >
+            List
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'calendar' ? (
+        <div className={styles.calendar}>
+          <div className={styles.calendarHeader}>
+            <button onClick={() => navigateMonth(-1)} className={styles.navBtn}>
+              &larr;
+            </button>
+            <h2 className={styles.monthTitle}>
+              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </h2>
+            <button onClick={() => navigateMonth(1)} className={styles.navBtn}>
+              &rarr;
+            </button>
+          </div>
+
+          <div className={styles.calendarGrid}>
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+              <div key={day} className={styles.dayHeader}>
+                {day}
+              </div>
+            ))}
+
+            {getDaysInMonth(currentDate).map((date, index) => (
+              <div
+                key={index}
+                className={`${styles.calendarDay} ${!date ? styles.empty : ''}`}
+              >
+                {date && (
+                  <>
+                    <div className={styles.dayNumber}>{date.getDate()}</div>
+                    <div className={styles.dayEvents}>
+                      {getEventsForDate(date).map((event) => (
+                        <div
+                          key={event.id}
+                          className={styles.calendarEvent}
+                          onClick={() => {
+                            setSelectedEvent(event);
+                            setShowCampaignModal(true);
+                          }}
+                        >
+                          <span className={styles.eventDot}></span>
+                          {event.name}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className={styles.eventsList}>
+          {events.map((event) => (
+            <div key={event.id} className={styles.eventCard}>
+              <div className={styles.eventHeader}>
+                <div>
+                  <h3 className={styles.eventName}>{event.name}</h3>
+                  <div className={styles.eventMeta}>
+                    <span className={styles.badge}>{event.eventType}</span>
+                    <span className={styles.badge}>{event.programType}</span>
+                  </div>
+                </div>
+                <div className={styles.eventActions}>
+                  <button
+                    onClick={() => {
+                      setSelectedEvent(event);
+                      setShowCampaignModal(true);
+                    }}
+                    className={styles.campaignBtn}
+                  >
+                    Create Campaign
+                  </button>
+                  <button
+                    onClick={() => handleDelete(event.id)}
+                    className={styles.deleteBtn}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              <p className={styles.eventDescription}>{event.description}</p>
+
+              <div className={styles.eventDetails}>
+                <div className={styles.detail}>
+                  <CalendarIcon size={16} />
+                  <span>
+                    {new Date(event.startDateTime).toLocaleString()} -{' '}
+                    {new Date(event.endDateTime).toLocaleString()}
+                  </span>
+                </div>
+                {event.location && (
+                  <div className={styles.detail}>
+                    <LocationIcon size={16} />
+                    <span>{event.location}</span>
+                  </div>
+                )}
+                {event.instructor && (
+                  <div className={styles.detail}>
+                    <UsersIcon size={16} />
+                    <span>Instructor: {event.instructor}</span>
+                  </div>
+                )}
+                {event.maxAttendees && (
+                  <div className={styles.detail}>
+                    <UsersIcon size={16} />
+                    <span>
+                      {event.currentAttendees} / {event.maxAttendees} registered
+                    </span>
+                  </div>
+                )}
+                {event.price > 0 && (
+                  <div className={styles.detail}>
+                    <DollarIcon size={16} />
+                    <span>${event.price}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {events.length === 0 && (
+            <div className={styles.empty}>
+              <CalendarIcon size={48} />
+              <p>No events found</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create Event Modal */}
+      {showCreateModal && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent}>
+            <div className={styles.modalHeader}>
+              <h2>Create New Event</h2>
+              <button onClick={() => setShowCreateModal(false)} className={styles.closeBtn}>
+                <CloseIcon size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreate} className={styles.form}>
+              <div className={styles.formGroup}>
+                <label>Event Name *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Event Type *</label>
+                  <select
+                    value={formData.eventType}
+                    onChange={(e) => setFormData({ ...formData, eventType: e.target.value })}
+                    className={styles.input}
+                  >
+                    {eventTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Program</label>
+                  <select
+                    value={formData.programType}
+                    onChange={(e) => setFormData({ ...formData, programType: e.target.value })}
+                    className={styles.input}
+                  >
+                    {programTypes.map((program) => (
+                      <option key={program} value={program}>
+                        {program}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className={styles.textarea}
+                  rows={3}
+                />
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Start Date & Time *</label>
+                  <input
+                    type="datetime-local"
+                    value={formData.startDateTime}
+                    onChange={(e) =>
+                      setFormData({ ...formData, startDateTime: e.target.value })
+                    }
+                    required
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>End Date & Time *</label>
+                  <input
+                    type="datetime-local"
+                    value={formData.endDateTime}
+                    onChange={(e) => setFormData({ ...formData, endDateTime: e.target.value })}
+                    required
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>Location</label>
+                <input
+                  type="text"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>Instructor</label>
+                <input
+                  type="text"
+                  value={formData.instructor}
+                  onChange={(e) => setFormData({ ...formData, instructor: e.target.value })}
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Max Attendees</label>
+                  <input
+                    type="number"
+                    value={formData.maxAttendees}
+                    onChange={(e) =>
+                      setFormData({ ...formData, maxAttendees: e.target.value })
+                    }
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.checkbox}>
+                  <input
+                    type="checkbox"
+                    checked={formData.requiresRegistration}
+                    onChange={(e) =>
+                      setFormData({ ...formData, requiresRegistration: e.target.checked })
+                    }
+                  />
+                  <span>Requires Registration</span>
+                </label>
+              </div>
+
+              <div className={styles.modalActions}>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className={styles.secondaryBtn}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={styles.primaryBtn}>
+                  Create Event
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Campaign Modal */}
+      {showCampaignModal && selectedEvent && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent}>
+            <div className={styles.modalHeader}>
+              <h2>Create Campaign for {selectedEvent.name}</h2>
+              <button onClick={() => setShowCampaignModal(false)} className={styles.closeBtn}>
+                <CloseIcon size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCampaign} className={styles.form}>
+              <div className={styles.formGroup}>
+                <label>Select Audience *</label>
+                <select
+                  value={campaignData.audienceId}
+                  onChange={(e) =>
+                    setCampaignData({ ...campaignData, audienceId: e.target.value })
+                  }
+                  required
+                  className={styles.input}
+                >
+                  <option value="">Choose an audience...</option>
+                  {audiences.map((audience) => (
+                    <option key={audience.id} value={audience.id}>
+                      {audience.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>Select Platforms *</label>
+                <div className={styles.platformGrid}>
+                  <div
+                    className={`${styles.platformCard} ${
+                      campaignData.platforms.includes('optimize') ? styles.selected : ''
+                    }`}
+                    onClick={() => togglePlatform('optimize')}
+                  >
+                    <OptimizeIcon size={32} />
+                    <h3>DragonDesk: Optimize</h3>
+                    <p>Website personalization</p>
+                    {campaignData.platforms.includes('optimize') && (
+                      <div className={styles.checkmark}>
+                        <CheckIcon size={20} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className={`${styles.platformCard} ${
+                      campaignData.platforms.includes('engage') ? styles.selected : ''
+                    }`}
+                    onClick={() => togglePlatform('engage')}
+                  >
+                    <EngageIcon size={32} />
+                    <h3>DragonDesk: Engage</h3>
+                    <p>Email marketing</p>
+                    {campaignData.platforms.includes('engage') && (
+                      <div className={styles.checkmark}>
+                        <CheckIcon size={20} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className={`${styles.platformCard} ${
+                      campaignData.platforms.includes('outreach') ? styles.selected : ''
+                    }`}
+                    onClick={() => togglePlatform('outreach')}
+                  >
+                    <OutreachIcon size={32} />
+                    <h3>DragonDesk: Outreach</h3>
+                    <p>AI call agent</p>
+                    {campaignData.platforms.includes('outreach') && (
+                      <div className={styles.checkmark}>
+                        <CheckIcon size={20} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className={`${styles.platformCard} ${
+                      campaignData.platforms.includes('social') ? styles.selected : ''
+                    }`}
+                    onClick={() => togglePlatform('social')}
+                  >
+                    <SocialIcon size={32} />
+                    <h3>DragonDesk: Social</h3>
+                    <p>Social media marketing</p>
+                    {campaignData.platforms.includes('social') && (
+                      <div className={styles.checkmark}>
+                        <CheckIcon size={20} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.modalActions}>
+                <button
+                  type="button"
+                  onClick={() => setShowCampaignModal(false)}
+                  className={styles.secondaryBtn}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={styles.primaryBtn}>
+                  Create Campaigns
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Events;

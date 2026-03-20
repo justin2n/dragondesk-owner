@@ -1,0 +1,540 @@
+.kioskContainer {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 40px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.header .locationName {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.stats {
+  display: flex;
+  gap: 24px;
+}
+
+.statItem {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.statItem strong {
+  color: #10b981;
+  font-size: 20px;
+}
+
+/* Main Content */
+.mainContent {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 32px;
+  padding: 32px 40px;
+}
+
+/* Classes Panel */
+.classesPanel {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+}
+
+.sectionTitle {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 20px 0;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.noClasses {
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.classesList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.classCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  color: #fff;
+}
+
+.classCard:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+.classCard.selected {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: #667eea;
+}
+
+.classTime {
+  font-size: 14px;
+  font-weight: 600;
+  color: #667eea;
+  min-width: 80px;
+}
+
+.classInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.className {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.instructor {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.programBadge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.programBadge.bjj {
+  background: #7c3aed;
+}
+
+.programBadge.taekwondo {
+  background: #dc2626;
+}
+
+.programBadge.muaythai {
+  background: #059669;
+}
+
+.programBadge.general {
+  background: #6b7280;
+}
+
+/* Check-in Panel */
+.checkInPanel {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Scan View */
+.scanView {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.orDivider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 24px 0;
+}
+
+.orDivider::before,
+.orDivider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.orDivider span {
+  padding: 0 16px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+}
+
+.primaryBtn {
+  width: 100%;
+  padding: 20px 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 16px;
+}
+
+.primaryBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+}
+
+.searchBtn {
+  width: 100%;
+  padding: 16px 32px;
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.searchBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+/* Search View */
+.searchView {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.searchBox {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.searchInput {
+  flex: 1;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 18px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.searchInput:focus {
+  border-color: #667eea;
+}
+
+.searchSubmitBtn {
+  padding: 16px 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.searchSubmitBtn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+}
+
+.searchSubmitBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.searchResults {
+  width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.memberCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  color: #fff;
+}
+
+.memberCard:hover {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: #667eea;
+}
+
+.memberName {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.memberDetails {
+  display: flex;
+  gap: 12px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.ranking {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.backBtn {
+  padding: 12px 24px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.backBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Success View */
+.successView,
+.alreadyCheckedInView,
+.errorView {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 40px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.successIcon,
+.infoIcon,
+.errorIcon {
+  margin-bottom: 24px;
+  animation: bounce 0.5s ease;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.successTitle {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: #10b981;
+}
+
+.infoTitle {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: #3b82f6;
+}
+
+.errorTitle {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: #ef4444;
+}
+
+.memberGreeting {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.memberRank {
+  font-size: 18px;
+  color: #fbbf24;
+  margin: 0 0 16px 0;
+}
+
+.checkInMessage,
+.alreadyMessage {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0;
+}
+
+.errorMessage {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 24px 0;
+  max-width: 300px;
+}
+
+.retryBtn {
+  padding: 14px 40px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.retryBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+}
+
+/* Select Location View */
+.selectLocationView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.title {
+  font-size: 36px;
+  font-weight: 700;
+  margin: 0 0 40px 0;
+}
+
+.locationGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  width: 100%;
+  max-width: 800px;
+}
+
+.locationCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #fff;
+}
+
+.locationCard:hover {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: #667eea;
+  transform: translateY(-4px);
+}
+
+.locationCard .locationName {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.locationAddress {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .mainContent {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+
+  .classesPanel {
+    max-height: 200px;
+  }
+}
+
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .header .locationName {
+    font-size: 22px;
+  }
+
+  .mainContent {
+    padding: 16px;
+    gap: 16px;
+  }
+
+  .checkInPanel {
+    padding: 20px;
+  }
+
+  .searchBox {
+    flex-direction: column;
+  }
+}
