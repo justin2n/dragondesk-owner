@@ -359,6 +359,7 @@ export interface Subscription {
   memberEmail?: string;
   planName?: string;
   planAmount?: number;
+  planInterval?: BillingInterval;
 }
 
 export interface PaymentMethod {

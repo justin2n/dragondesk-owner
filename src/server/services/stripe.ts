@@ -343,8 +343,8 @@ export async function createSubscription(
         subscription.id,
         customerId,
         subscription.status,
-        new Date(subscription.current_period_start * 1000).toISOString(),
-        new Date(subscription.current_period_end * 1000).toISOString(),
+        new Date((subscription as any).current_period_start * 1000).toISOString(),
+        new Date((subscription as any).current_period_end * 1000).toISOString(),
         subscription.trial_start ? new Date(subscription.trial_start * 1000).toISOString() : null,
         subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null
       ]
@@ -352,7 +352,7 @@ export async function createSubscription(
 
     // Get client secret for payment confirmation if needed
     const latestInvoice = subscription.latest_invoice as Stripe.Invoice;
-    const paymentIntent = latestInvoice?.payment_intent as Stripe.PaymentIntent;
+    const paymentIntent = (latestInvoice as any)?.payment_intent as Stripe.PaymentIntent;
 
     return {
       success: true,

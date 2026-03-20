@@ -66,7 +66,7 @@ router.post('/', async (req, res) => {
       cancellationReason,
     } = req.body;
 
-    const cancelledBy = req.user?.id || null;
+    const cancelledBy = (req as any).user?.id || null;
 
     const result = await run(
       `INSERT INTO churn_metrics (

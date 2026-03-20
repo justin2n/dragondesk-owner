@@ -92,6 +92,10 @@ export interface ABTest {
   updatedAt: string;
 }
 
+export type LeadSource = 'web_form' | 'inbound_call' | 'manual_add' | 'referral' | 'walk_in' | 'social_media';
+
+export type AccountStatus = 'lead' | 'trialer' | 'member' | 'cancelled';
+
 export interface AudienceFilter {
   membershipType?: MembershipType[];
   accountType?: AccountType[];
@@ -99,4 +103,8 @@ export interface AudienceFilter {
   membershipAge?: MembershipAge[];
   ranking?: string[];
   tags?: string[];
+  accountStatus?: AccountStatus[];
+  leadSource?: LeadSource[];
+  eventIds?: number[];
+  eventAttendanceStatus?: ('registered' | 'attended' | 'no-show' | 'cancelled')[];
 }

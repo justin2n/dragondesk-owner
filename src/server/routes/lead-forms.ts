@@ -124,9 +124,9 @@ router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
         { name: 'lastName', label: 'Last Name', type: 'text', required: true },
         { name: 'email', label: 'Email', type: 'email', required: true },
         { name: 'phone', label: 'Phone', type: 'tel', required: false },
-        { name: 'programType', label: 'Program Interest', type: 'select', required: false, options: programs.map(p => ({ value: p.name, label: p.name })) },
+        { name: 'programType', label: 'Program Interest', type: 'select', required: false, options: programs.map((p: any) => ({ value: p.name, label: p.name })) },
         { name: 'membershipAge', label: 'Age Group', type: 'select', required: false, options: [{ value: 'Adult', label: 'Adult' }, { value: 'Kids', label: 'Kids' }] },
-        { name: 'locationId', label: 'Preferred Location', type: 'select', required: false, options: locations.map(l => ({ value: l.id, label: `${l.name}${l.city ? ` - ${l.city}` : ''}` })) },
+        { name: 'locationId', label: 'Preferred Location', type: 'select', required: false, options: locations.map((l: any) => ({ value: l.id, label: `${l.name}${l.city ? ` - ${l.city}` : ''}` })) },
         { name: 'notes', label: 'Message / Questions', type: 'textarea', required: false }
       ]
     });

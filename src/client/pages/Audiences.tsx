@@ -93,7 +93,7 @@ const Audiences = () => {
   };
 
   const handleFilterChange = (category: keyof AudienceFilter, value: string) => {
-    const currentValues = formData.filters[category] as string[];
+    const currentValues = (formData.filters as any)[category] as string[] || [];
     const newValues = currentValues.includes(value)
       ? currentValues.filter((v) => v !== value)
       : [...currentValues, value];

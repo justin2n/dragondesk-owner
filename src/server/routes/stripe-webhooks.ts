@@ -132,8 +132,8 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
        WHERE stripeSubscriptionId = ?`,
       [
         subscription.status,
-        new Date(subscription.current_period_start * 1000).toISOString(),
-        new Date(subscription.current_period_end * 1000).toISOString(),
+        new Date((subscription as any).current_period_start * 1000).toISOString(),
+        new Date((subscription as any).current_period_end * 1000).toISOString(),
         subscription.cancel_at_period_end ? 1 : 0,
         subscription.canceled_at ? new Date(subscription.canceled_at * 1000).toISOString() : null,
         subscription.id
@@ -212,10 +212,10 @@ async function handleInvoiceCreated(invoice: Stripe.Invoice) {
 
     // Find subscription
     let subscriptionId = null;
-    if (invoice.subscription) {
+    if ((invoice as any).subscription) {
       const subscription = await get(
         'SELECT id FROM subscriptions WHERE stripeSubscriptionId = ?',
-        [invoice.subscription]
+        [(invoice as any).subscription]
       );
       subscriptionId = subscription?.id;
     }
@@ -246,7 +246,7 @@ async function handleInvoiceCreated(invoice: Stripe.Invoice) {
           invoice.amount_paid,
           invoice.amount_remaining,
           invoice.subtotal,
-          invoice.tax || 0,
+          (invoice as any).tax || 0,
           invoice.total,
           invoice.hosted_invoice_url,
           invoice.invoice_pdf,
@@ -270,7 +270,7 @@ async function handleInvoiceCreated(invoice: Stripe.Invoice) {
           invoice.amount_paid,
           invoice.amount_remaining,
           invoice.subtotal,
-          invoice.tax || 0,
+          (invoice as any).tax || 0,
           invoice.total,
           invoice.currency,
           invoice.hosted_invoice_url,
@@ -302,8 +302,8 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
        WHERE stripeInvoiceId = ?`,
       [
         invoice.amount_paid,
-        invoice.payment_intent,
-        invoice.charge,
+        (invoice as any).payment_intent,
+        (invoice as any).charge,
         invoice.id
       ]
     );

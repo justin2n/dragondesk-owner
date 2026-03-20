@@ -28,11 +28,11 @@ export const api = {
     return text ? JSON.parse(text) : {};
   },
 
-  async post(endpoint: string, data: any) {
+  async post(endpoint: string, data?: any) {
     const response = await fetch(`${API_URL}${endpoint}`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data),
+      ...(data && { body: JSON.stringify(data) }),
     });
 
     if (!response.ok) {

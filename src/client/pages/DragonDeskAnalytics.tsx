@@ -144,7 +144,7 @@ const DragonDeskAnalytics = () => {
               cx="50%"
               cy="50%"
               labelLine={true}
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+              label={({ name, percent }) => `${name}: ${((percent || 0) * 100).toFixed(0)}%`}
               outerRadius={150}
               fill="#8884d8"
               dataKey="value"
@@ -342,7 +342,7 @@ const DragonDeskAnalytics = () => {
                   cx="50%"
                   cy="50%"
                   labelLine={true}
-                  label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
+                  label={({ name, value, percent }) => `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)`}
                   outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
