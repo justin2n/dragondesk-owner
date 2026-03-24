@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "DragonDesk CRM - Operations platform for martial arts studios",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "nodemon src/server/index.ts",
