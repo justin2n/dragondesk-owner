@@ -1,5 +1,5 @@
 import express from 'express';
-import * as NodeRSA from 'node-rsa';
+import NodeRSA from 'node-rsa';
 import { query, run, get } from '../models/database';
 import { authenticateToken, authorizeAdmin } from '../middleware/auth';
 
