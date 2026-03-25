@@ -94,8 +94,8 @@ if (process.env.NODE_ENV === 'production') {
   const clientPath = path.join(__dirname, '../client');
   app.use(express.static(clientPath));
 
-  // Catch-all route for client-side routing
-  app.get('*', (req, res) => {
+  // Catch-all route for client-side routing (Express 5 syntax)
+  app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(clientPath, 'index.html'));
   });
 }
