@@ -10,7 +10,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "nodemon src/server/index.ts",
     "dev:client": "vite",
-    "build": "tsc -p tsconfig.server.json && vite build",
+    "build": "node build-server.js && vite build",
     "preview": "vite preview",
     "start": "node dist/server/index.js"
   },
@@ -56,6 +56,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
     "concurrently": "^9.2.1",
+    "esbuild": "^0.27.4",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
