@@ -89,6 +89,17 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
 });
 
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  const clientPath = path.join(__dirname, '../client');
+  app.use(express.static(clientPath));
+
+  // Catch-all route for client-side routing
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientPath, 'index.html'));
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`🐉 DragonDesk CRM server running on port ${PORT}`);
 });
