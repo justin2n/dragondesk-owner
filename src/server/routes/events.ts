@@ -372,36 +372,35 @@ router.post('/:id/create-campaign', async (req: AuthRequest, res) => {
       switch (platform) {
         case 'optimize': {
           // Create an Experience (A/B Test) for Optimize
-          const variations = [
-            {
-              name: 'Control',
-              headline: event.name,
-              description: event.description,
-              ctaText: 'Learn More',
-              ctaUrl: `/events/${event.id}`,
-            },
-            {
-              name: 'Variant A',
-              headline: `Join us for ${event.name}`,
-              description: `${event.description}\n\n📅 ${new Date(event.startDateTime).toLocaleDateString()}\n📍 ${event.location || 'TBA'}`,
-              ctaText: 'Register Now',
-              ctaUrl: `/events/${event.id}`,
-            },
-          ];
+          const variantA = {
+            name: 'Control',
+            headline: event.name,
+            description: event.description,
+            ctaText: 'Learn More',
+            ctaUrl: `/events/${event.id}`,
+          };
+          const variantB = {
+            name: 'Variant A',
+            headline: `Join us for ${event.name}`,
+            description: `${event.description}\n\n📅 ${new Date(event.startDateTime).toLocaleDateString()}\n📍 ${event.location || 'TBA'}`,
+            ctaText: 'Register Now',
+            ctaUrl: `/events/${event.id}`,
+          };
 
           const result = await run(
-            `INSERT INTO abtests (name, audienceId, variations, status, createdBy)
-             VALUES (?, ?, ?, ?, ?)`,
+            `INSERT INTO ab_tests (name, audienceId, variantA, variantB, status, createdBy)
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
               `${event.name} - Event Experience`,
               audienceId,
-              JSON.stringify(variations),
+              JSON.stringify(variantA),
+              JSON.stringify(variantB),
               'draft',
               req.user!.id,
             ]
           );
 
-          const experience = await get('SELECT * FROM abtests WHERE id = ?', [result.id]);
+          const experience = await get('SELECT * FROM ab_tests WHERE id = ?', [result.id]);
           createdItems.push({ type: 'experience', data: experience });
           break;
         }
@@ -465,7 +464,7 @@ router.post('/:id/create-campaign', async (req: AuthRequest, res) => {
 
         case 'social': {
           // Create Social Post for DragonDesk: Social
-          const postContent = {
+          const socialPostContent = {
             eventId: event.id,
             eventName: event.name,
             message: `Join us for ${event.name}! 🥋\n\n${event.description}\n\n📅 ${new Date(event.startDateTime).toLocaleDateString()}\n📍 ${event.location || 'TBA'}\n\nRegister now!`,
@@ -473,12 +472,13 @@ router.post('/:id/create-campaign', async (req: AuthRequest, res) => {
           };
 
           const result = await run(
-            `INSERT INTO social_campaigns (name, platforms, content, scheduledFor, status, createdBy)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO social_campaigns (name, platforms, postContent, accountIds, scheduledFor, status, createdBy)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
               `${event.name} - Social Post`,
               JSON.stringify(['facebook', 'instagram', 'twitter']),
-              JSON.stringify(postContent),
+              JSON.stringify(socialPostContent),
+              '[]', // empty accountIds array for now
               event.startDateTime, // Schedule for event date
               'draft',
               req.user!.id,

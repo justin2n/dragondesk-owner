@@ -74,7 +74,7 @@ router.post('/', authorizeAdmin, async (req: AuthRequest, res) => {
 
     // If setting as primary, unset other primary locations
     if (isPrimary) {
-      await run('UPDATE locations SET isPrimary = 0 WHERE isPrimary = 1');
+      await run('UPDATE locations SET isPrimary = false WHERE isPrimary = true');
     }
 
     const result = await run(
@@ -133,7 +133,7 @@ router.put('/:id', authorizeAdmin, async (req: AuthRequest, res) => {
 
     // If setting as primary, unset other primary locations
     if (isPrimary && !location.isPrimary) {
-      await run('UPDATE locations SET isPrimary = 0 WHERE isPrimary = 1');
+      await run('UPDATE locations SET isPrimary = false WHERE isPrimary = true');
     }
 
     await run(
@@ -211,8 +211,8 @@ router.get('/:id/stats', async (req: AuthRequest, res) => {
       get('SELECT COUNT(*) as count FROM campaigns WHERE locationId = ?', [locationId]),
     ]);
 
-    const membersByType = await query(
-      'SELECT membershipType, COUNT(*) as count FROM members WHERE locationId = ? GROUP BY membershipType',
+    const membersByStatus = await query(
+      'SELECT accountStatus, COUNT(*) as count FROM members WHERE locationId = ? GROUP BY accountStatus',
       [locationId]
     );
 
@@ -220,9 +220,9 @@ router.get('/:id/stats', async (req: AuthRequest, res) => {
       totalMembers: members.count,
       totalEvents: events.count,
       totalCampaigns: campaigns.count,
-      membersByType: membersByType.reduce(
+      membersByStatus: membersByStatus.reduce(
         (acc: any, item: any) => {
-          acc[item.membershipType] = item.count;
+          acc[item.accountStatus] = item.count;
           return acc;
         },
         {}

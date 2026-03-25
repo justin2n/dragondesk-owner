@@ -42,7 +42,7 @@ export interface Member {
   lastName: string;
   email: string;
   phone: string;
-  membershipType: MembershipType;
+  accountStatus: MembershipType;
   accountType: AccountType;
   programType: ProgramType;
   membershipAge: MembershipAge;
@@ -97,13 +97,12 @@ export type LeadSource = 'web_form' | 'inbound_call' | 'manual_add' | 'referral'
 export type AccountStatus = 'lead' | 'trialer' | 'member' | 'cancelled';
 
 export interface AudienceFilter {
-  membershipType?: MembershipType[];
+  accountStatus?: MembershipType[];
   accountType?: AccountType[];
   programType?: ProgramType[];
   membershipAge?: MembershipAge[];
   ranking?: string[];
   tags?: string[];
-  accountStatus?: AccountStatus[];
   leadSource?: LeadSource[];
   eventIds?: number[];
   eventAttendanceStatus?: ('registered' | 'attended' | 'no-show' | 'cancelled')[];

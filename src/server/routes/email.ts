@@ -184,9 +184,9 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     let sql = 'SELECT email, firstName, lastName FROM members WHERE 1=1';
     const params: any[] = [];
 
-    if (filters.membershipType && filters.membershipType.length > 0) {
-      sql += ` AND membershipType IN (${filters.membershipType.map(() => '?').join(',')})`;
-      params.push(...filters.membershipType);
+    if (filters.accountStatus && filters.accountStatus.length > 0) {
+      sql += ` AND accountStatus IN (${filters.accountStatus.map(() => '?').join(',')})`;
+      params.push(...filters.accountStatus);
     }
 
     if (filters.accountType && filters.accountType.length > 0) {

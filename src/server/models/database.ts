@@ -819,7 +819,7 @@ async function seedAdminUser(client: any) {
 
 // List of camelCase column names that need quoting in PostgreSQL
 const camelCaseColumns = [
-  'firstName', 'lastName', 'membershipType', 'accountStatus', 'accountType',
+  'firstName', 'lastName', 'accountStatus', 'accountType',
   'programType', 'membershipAge', 'dateOfBirth', 'emergencyContact', 'emergencyPhone',
   'locationId', 'leadSource', 'trialStartDate', 'memberStartDate', 'totalClassesAttended',
   'lastCheckInAt', 'attendanceStreak', 'lastPromotionDate', 'createdAt', 'updatedAt',

@@ -88,9 +88,9 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
     let whereConditions: string[] = [];
     let params: any[] = [];
 
-    if (filters.membershipType && filters.membershipType.length > 0) {
-      whereConditions.push(`membershipType IN (${filters.membershipType.map(() => '?').join(',')})`);
-      params.push(...filters.membershipType);
+    if (filters.accountStatus && filters.accountStatus.length > 0) {
+      whereConditions.push(`accountStatus IN (${filters.accountStatus.map(() => '?').join(',')})`);
+      params.push(...filters.accountStatus);
     }
     if (filters.programType && filters.programType.length > 0) {
       whereConditions.push(`programType IN (${filters.programType.map(() => '?').join(',')})`);

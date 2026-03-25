@@ -32,11 +32,11 @@ router.post('/submit', async (req, res) => {
     }
 
     // Check if member already exists
-    const existing = await get('SELECT id, membershipType FROM members WHERE email = ?', [email]);
+    const existing = await get('SELECT id, accountStatus FROM members WHERE email = ?', [email]);
 
     if (existing) {
       // Update existing member if they're still a lead
-      if (existing.membershipType === 'lead') {
+      if (existing.accountStatus === 'lead') {
         await run(
           `UPDATE members SET
             firstName = ?,
@@ -73,7 +73,7 @@ router.post('/submit', async (req, res) => {
         lastName,
         email,
         phone,
-        membershipType,
+        accountStatus,
         accountType,
         programType,
         membershipAge,
@@ -159,7 +159,7 @@ router.get('/stats', authenticateToken, async (req: AuthRequest, res) => {
         COUNT(CASE WHEN phone IS NOT NULL THEN 1 END) as leadsWithPhone,
         COUNT(CASE WHEN locationId IS NOT NULL THEN 1 END) as leadsWithLocation
       FROM members
-      WHERE membershipType = 'lead'${dateFilter}`,
+      WHERE accountStatus = 'lead'${dateFilter}`,
       params
     );
 
@@ -167,7 +167,7 @@ router.get('/stats', authenticateToken, async (req: AuthRequest, res) => {
     const byProgram = await query(
       `SELECT programType, COUNT(*) as count
        FROM members
-       WHERE membershipType = 'lead'${dateFilter}
+       WHERE accountStatus = 'lead'${dateFilter}
        GROUP BY programType
        ORDER BY count DESC`,
       params
@@ -178,7 +178,7 @@ router.get('/stats', authenticateToken, async (req: AuthRequest, res) => {
       `SELECT l.name as locationName, COUNT(m.id) as count
        FROM members m
        LEFT JOIN locations l ON m.locationId = l.id
-       WHERE m.membershipType = 'lead'${dateFilter}
+       WHERE m.accountStatus = 'lead'${dateFilter}
        GROUP BY m.locationId
        ORDER BY count DESC`,
       params
@@ -196,7 +196,7 @@ router.get('/stats', authenticateToken, async (req: AuthRequest, res) => {
         membershipAge,
         createdAt
        FROM members
-       WHERE membershipType = 'lead'${dateFilter}
+       WHERE accountStatus = 'lead'${dateFilter}
        ORDER BY createdAt DESC
        LIMIT 10`,
       params
