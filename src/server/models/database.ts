@@ -817,11 +817,65 @@ async function seedAdminUser(client: any) {
   }
 }
 
+// List of camelCase column names that need quoting in PostgreSQL
+const camelCaseColumns = [
+  'firstName', 'lastName', 'membershipType', 'accountStatus', 'accountType',
+  'programType', 'membershipAge', 'dateOfBirth', 'emergencyContact', 'emergencyPhone',
+  'locationId', 'leadSource', 'trialStartDate', 'memberStartDate', 'totalClassesAttended',
+  'lastCheckInAt', 'attendanceStreak', 'lastPromotionDate', 'createdAt', 'updatedAt',
+  'createdBy', 'audienceId', 'eventType', 'startDateTime', 'endDateTime', 'maxAttendees',
+  'currentAttendees', 'requiresRegistration', 'isRecurring', 'recurrencePattern',
+  'instructorId', 'imageUrl', 'syncedFromMyStudio', 'lastSyncedAt', 'myStudioId',
+  'eventId', 'memberId', 'registeredAt', 'checkedInAt', 'checkInMethod', 'dayOfWeek',
+  'startTime', 'endTime', 'specificDate', 'scheduleType', 'syncType', 'recordsImported',
+  'errorMessage', 'syncedAt', 'syncedBy', 'isDefault', 'originalName', 'mimeType',
+  'uploadedBy', 'uploadedAt', 'accountName', 'accountId', 'pageId', 'pageName',
+  'accessToken', 'refreshToken', 'tokenExpiresAt', 'isActive', 'postContent', 'mediaUrls',
+  'accountIds', 'scheduledFor', 'publishedAt', 'campaignId', 'platformPostId', 'postUrl',
+  'platformCommentId', 'authorName', 'authorId', 'authorProfileUrl', 'authorImageUrl',
+  'commentText', 'replyCount', 'parentCommentId', 'isHidden', 'isReplied', 'commentedAt',
+  'commentId', 'platformReplyId', 'replyText', 'sentAt', 'sentBy', 'privateKey', 'publicKey',
+  'testId', 'engagementTime', 'recordedAt', 'sessionId', 'recipientCount', 'successCount',
+  'failureCount', 'phoneNumber', 'messageId', 'deliveredAt', 'stripePublishableKey',
+  'stripeSecretKey', 'stripeWebhookSecret', 'defaultTaxRate', 'trialDays', 'gracePeriodDays',
+  'autoRetryFailedPayments', 'sendPaymentReceipts', 'sendFailedPaymentAlerts',
+  'stripeCustomerId', 'defaultPaymentMethodId', 'stripePriceId', 'stripeProductId',
+  'billingInterval', 'intervalCount', 'pricingPlanId', 'stripeSubscriptionId',
+  'currentPeriodStart', 'currentPeriodEnd', 'trialStart', 'trialEnd', 'canceledAt',
+  'cancelReason', 'cancelAtPeriodEnd', 'stripePaymentMethodId', 'expMonth', 'expYear',
+  'billingName', 'billingEmail', 'billingAddress', 'subscriptionId', 'stripeInvoiceId',
+  'stripePaymentIntentId', 'stripeChargeId', 'invoiceNumber', 'amountDue', 'amountPaid',
+  'amountRemaining', 'invoiceUrl', 'invoicePdfUrl', 'dueDate', 'paidAt', 'periodStart',
+  'periodEnd', 'attemptCount', 'nextPaymentAttempt', 'lastPaymentError', 'stripeEventId',
+  'eventType', 'invoiceId', 'processedAt', 'qrCode', 'qrCodeData', 'applePassSerialNumber',
+  'googlePassId', 'lastUsedAt', 'checkInTime', 'skillId', 'learnedAt', 'proficiencyLevel',
+  'instructorNotes', 'fromRanking', 'toRanking', 'minClassAttendance', 'minTimeInRankDays',
+  'requiredSkillCategories', 'passType', 'recipientEmail', 'submitButtonText',
+  'successMessage', 'redirectUrl', 'formId', 'sourceUrl', 'ipAddress', 'userAgent',
+  'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB',
+  'pageUrl', 'trafficSplit', 'clickThroughRate', 'openRate', 'beltLevel'
+];
+
+// Function to quote camelCase identifiers for PostgreSQL
+function quoteCamelCaseColumns(sql: string): string {
+  let result = sql;
+  for (const col of camelCaseColumns) {
+    // Match column name that's not already quoted and not part of a larger word
+    // Negative lookbehind for " and negative lookahead for "
+    const regex = new RegExp(`(?<!")\\b${col}\\b(?!")`, 'g');
+    result = result.replace(regex, `"${col}"`);
+  }
+  return result;
+}
+
 // Helper functions that maintain API compatibility with the old SQLite interface
 export const query = async (sql: string, params: any[] = []): Promise<any> => {
   // Convert ? placeholders to $1, $2, etc. for PostgreSQL
   let paramIndex = 0;
-  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+  let pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  // Quote camelCase column names
+  pgSql = quoteCamelCaseColumns(pgSql);
 
   const result = await pool.query(pgSql, params);
   return result.rows;
@@ -830,7 +884,10 @@ export const query = async (sql: string, params: any[] = []): Promise<any> => {
 export const run = async (sql: string, params: any[] = []): Promise<any> => {
   // Convert ? placeholders to $1, $2, etc. for PostgreSQL
   let paramIndex = 0;
-  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+  let pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  // Quote camelCase column names
+  pgSql = quoteCamelCaseColumns(pgSql);
 
   // Add RETURNING id for INSERT statements to get the last inserted ID
   let finalSql = pgSql;
@@ -848,7 +905,10 @@ export const run = async (sql: string, params: any[] = []): Promise<any> => {
 export const get = async (sql: string, params: any[] = []): Promise<any> => {
   // Convert ? placeholders to $1, $2, etc. for PostgreSQL
   let paramIndex = 0;
-  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+  let pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  // Quote camelCase column names
+  pgSql = quoteCamelCaseColumns(pgSql);
 
   const result = await pool.query(pgSql, params);
   return result.rows[0];

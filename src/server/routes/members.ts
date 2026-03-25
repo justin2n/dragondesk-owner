@@ -16,31 +16,31 @@ router.get('/', async (req: AuthRequest, res) => {
 
     // Filter by location if specified (if not specified, return all locations)
     if (locationId && locationId !== 'all') {
-      sql += ' AND "locationId" = ?';
+      sql += ' AND locationId = ?';
       params.push(locationId);
     }
 
     if (accountStatus) {
-      sql += ' AND "accountStatus" = ?';
+      sql += ' AND accountStatus = ?';
       params.push(accountStatus);
     }
 
     if (programType) {
-      sql += ' AND "programType" = ?';
+      sql += ' AND programType = ?';
       params.push(programType);
     }
 
     if (membershipAge) {
-      sql += ' AND "membershipAge" = ?';
+      sql += ' AND membershipAge = ?';
       params.push(membershipAge);
     }
 
     if (accountType) {
-      sql += ' AND "accountType" = ?';
+      sql += ' AND accountType = ?';
       params.push(accountType);
     }
 
-    sql += ' ORDER BY "createdAt" DESC';
+    sql += ' ORDER BY createdAt DESC';
 
     const members = await query(sql, params);
     res.json(members);
@@ -100,9 +100,9 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const result = await run(
       `INSERT INTO members (
-        "firstName", "lastName", email, phone, "accountStatus", "accountType",
-        "programType", "membershipAge", ranking, "leadSource", "dateOfBirth", "emergencyContact",
-        "emergencyPhone", notes, tags, "locationId", "trialStartDate", "memberStartDate"
+        firstName, lastName, email, phone, accountStatus, accountType,
+        programType, membershipAge, ranking, leadSource, dateOfBirth, emergencyContact,
+        emergencyPhone, notes, tags, locationId, trialStartDate, memberStartDate
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         firstName, lastName, email, phone, accountStatus, accountType,
@@ -151,11 +151,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
     await run(
       `UPDATE members SET
-        "firstName" = ?, "lastName" = ?, email = ?, phone = ?,
-        "accountStatus" = ?, "accountType" = ?, "programType" = ?,
-        "membershipAge" = ?, ranking = ?, "leadSource" = ?, "dateOfBirth" = ?,
-        "emergencyContact" = ?, "emergencyPhone" = ?, notes = ?, tags = ?,
-        "locationId" = ?, "trialStartDate" = ?, "memberStartDate" = ?, "updatedAt" = CURRENT_TIMESTAMP
+        firstName = ?, lastName = ?, email = ?, phone = ?,
+        accountStatus = ?, accountType = ?, programType = ?,
+        membershipAge = ?, ranking = ?, leadSource = ?, dateOfBirth = ?,
+        emergencyContact = ?, emergencyPhone = ?, notes = ?, tags = ?,
+        locationId = ?, trialStartDate = ?, memberStartDate = ?, updatedAt = CURRENT_TIMESTAMP
       WHERE id = ?`,
       [
         firstName, lastName, email, phone, accountStatus, accountType,
