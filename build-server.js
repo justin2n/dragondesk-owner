@@ -7,7 +7,7 @@ await esbuild.build({
   target: 'node20',
   outfile: 'dist/server/index.js',
   format: 'esm',
-  external: ['sqlite3'],
+  external: ['pg', 'pg-native'],
   banner: {
     js: `
 import { createRequire as _createRequire } from 'module';

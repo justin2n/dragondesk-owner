@@ -1,970 +1,855 @@
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import { Pool } from 'pg';
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../../dragondesk.db');
+// Railway provides DATABASE_URL automatically when PostgreSQL is attached
+const connectionString = process.env.DATABASE_URL || process.env.DATABASE_PRIVATE_URL;
 
-export const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err);
-  } else {
-    console.log('Connected to SQLite database');
-    initializeDatabase();
-  }
+if (!connectionString) {
+  console.error('DATABASE_URL or DATABASE_PRIVATE_URL environment variable is not set');
+}
+
+export const pool = new Pool({
+  connectionString,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
-function initializeDatabase() {
-  db.serialize(() => {
+pool.on('connect', () => {
+  console.log('Connected to PostgreSQL database');
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+});
+
+// Initialize database on startup
+initializeDatabase();
+
+async function initializeDatabase() {
+  const client = await pool.connect();
+  try {
     // Locations table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS locations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         address TEXT,
         city TEXT,
         state TEXT,
-        zipCode TEXT,
+        "zipCode" TEXT,
         country TEXT DEFAULT 'USA',
         phone TEXT,
         email TEXT,
         timezone TEXT DEFAULT 'America/New_York',
-        isActive BOOLEAN DEFAULT 1,
-        isPrimary BOOLEAN DEFAULT 0,
+        "isActive" BOOLEAN DEFAULT true,
+        "isPrimary" BOOLEAN DEFAULT false,
         settings TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Users table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         role TEXT NOT NULL CHECK(role IN ('super_admin', 'admin', 'staff', 'instructor')),
-        firstName TEXT NOT NULL,
-        lastName TEXT NOT NULL,
-        locationId INTEGER,
-        allowedLocations TEXT,
-        isInstructor BOOLEAN DEFAULT 0,
+        "firstName" TEXT NOT NULL,
+        "lastName" TEXT NOT NULL,
+        "locationId" INTEGER REFERENCES locations(id),
+        "allowedLocations" TEXT,
+        "isInstructor" BOOLEAN DEFAULT false,
         certifications TEXT,
         specialties TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id)
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Members table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS members (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        firstName TEXT NOT NULL,
-        lastName TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "firstName" TEXT NOT NULL,
+        "lastName" TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         phone TEXT,
-        membershipType TEXT NOT NULL CHECK(membershipType IN ('lead', 'trialer', 'member')),
-        accountType TEXT NOT NULL CHECK(accountType IN ('basic', 'premium', 'elite', 'family')),
-        programType TEXT NOT NULL CHECK(programType IN ('BJJ', 'Muay Thai', 'Taekwondo')),
-        membershipAge TEXT NOT NULL CHECK(membershipAge IN ('Adult', 'Kids')),
+        "membershipType" TEXT NOT NULL CHECK("membershipType" IN ('lead', 'trialer', 'member')),
+        "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
+        "programType" TEXT NOT NULL CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo')),
+        "membershipAge" TEXT NOT NULL CHECK("membershipAge" IN ('Adult', 'Kids')),
         ranking TEXT NOT NULL,
-        dateOfBirth TEXT,
-        emergencyContact TEXT,
-        emergencyPhone TEXT,
+        "dateOfBirth" TEXT,
+        "emergencyContact" TEXT,
+        "emergencyPhone" TEXT,
         notes TEXT,
         tags TEXT,
-        locationId INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id)
+        "locationId" INTEGER REFERENCES locations(id),
+        "totalClassesAttended" INTEGER DEFAULT 0,
+        "lastCheckInAt" TIMESTAMP,
+        "attendanceStreak" INTEGER DEFAULT 0,
+        "lastPromotionDate" TIMESTAMP,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Audiences table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS audiences (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
         filters TEXT NOT NULL,
-        createdBy INTEGER NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "createdBy" INTEGER NOT NULL REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Campaigns table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS campaigns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('email', 'call', 'website')),
-        audienceId INTEGER NOT NULL,
+        "audienceId" INTEGER NOT NULL REFERENCES audiences(id),
         status TEXT NOT NULL CHECK(status IN ('draft', 'active', 'paused', 'completed')),
         content TEXT,
         settings TEXT,
-        locationId INTEGER,
-        createdBy INTEGER NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (audienceId) REFERENCES audiences(id),
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "locationId" INTEGER REFERENCES locations(id),
+        "createdBy" INTEGER NOT NULL REFERENCES users(id),
+        sent INTEGER DEFAULT 0,
+        delivered INTEGER DEFAULT 0,
+        opens INTEGER DEFAULT 0,
+        clicks INTEGER DEFAULT 0,
+        "openRate" REAL DEFAULT 0,
+        "clickThroughRate" REAL DEFAULT 0,
+        leads INTEGER DEFAULT 0,
+        trialers INTEGER DEFAULT 0,
+        members INTEGER DEFAULT 0,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // AB Tests table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS ab_tests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
-        audienceId INTEGER NOT NULL,
-        pageUrl TEXT,
-        trafficSplit INTEGER DEFAULT 50,
-        variantA TEXT NOT NULL,
-        variantB TEXT NOT NULL,
+        "audienceId" INTEGER NOT NULL REFERENCES audiences(id),
+        "pageUrl" TEXT,
+        "trafficSplit" INTEGER DEFAULT 50,
+        "variantA" TEXT NOT NULL,
+        "variantB" TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('draft', 'running', 'completed')),
         results TEXT,
-        createdBy INTEGER NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (audienceId) REFERENCES audiences(id),
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "createdBy" INTEGER NOT NULL REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Events table
-    db.run(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        myStudioId TEXT,
+        id SERIAL PRIMARY KEY,
+        "myStudioId" TEXT,
         name TEXT NOT NULL,
         description TEXT,
-        eventType TEXT NOT NULL CHECK(eventType IN ('class', 'seminar', 'workshop', 'tournament', 'testing', 'social', 'other')),
-        programType TEXT CHECK(programType IN ('BJJ', 'Muay Thai', 'Taekwondo', 'All')),
-        startDateTime DATETIME NOT NULL,
-        endDateTime DATETIME NOT NULL,
+        "eventType" TEXT NOT NULL CHECK("eventType" IN ('class', 'seminar', 'workshop', 'tournament', 'testing', 'social', 'other')),
+        "programType" TEXT CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo', 'All')),
+        "startDateTime" TIMESTAMP NOT NULL,
+        "endDateTime" TIMESTAMP NOT NULL,
         location TEXT,
-        locationId INTEGER,
-        maxAttendees INTEGER,
-        currentAttendees INTEGER DEFAULT 0,
+        "locationId" INTEGER REFERENCES locations(id),
+        "maxAttendees" INTEGER,
+        "currentAttendees" INTEGER DEFAULT 0,
         price REAL DEFAULT 0,
-        requiresRegistration BOOLEAN DEFAULT 0,
-        isRecurring BOOLEAN DEFAULT 0,
-        recurrencePattern TEXT,
+        "requiresRegistration" BOOLEAN DEFAULT false,
+        "isRecurring" BOOLEAN DEFAULT false,
+        "recurrencePattern" TEXT,
         instructor TEXT,
-        instructorId INTEGER,
+        "instructorId" INTEGER REFERENCES users(id),
         tags TEXT,
-        imageUrl TEXT,
-        status TEXT NOT NULL CHECK(status IN ('scheduled', 'cancelled', 'completed')) DEFAULT 'scheduled',
-        syncedFromMyStudio BOOLEAN DEFAULT 0,
-        lastSyncedAt DATETIME,
-        createdBy INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (instructorId) REFERENCES users(id),
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "imageUrl" TEXT,
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'cancelled', 'completed')),
+        "syncedFromMyStudio" BOOLEAN DEFAULT false,
+        "lastSyncedAt" TIMESTAMP,
+        "createdBy" INTEGER REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Event Attendees table (many-to-many relationship)
-    db.run(`
+    // Event Attendees table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS event_attendees (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        eventId INTEGER NOT NULL,
-        memberId INTEGER NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('registered', 'attended', 'no-show', 'cancelled')) DEFAULT 'registered',
-        registeredAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (eventId) REFERENCES events(id) ON DELETE CASCADE,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE,
-        UNIQUE(eventId, memberId)
+        id SERIAL PRIMARY KEY,
+        "eventId" INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'registered' CHECK(status IN ('registered', 'attended', 'no-show', 'cancelled')),
+        "registeredAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "checkedInAt" TIMESTAMP,
+        "checkInMethod" TEXT,
+        UNIQUE("eventId", "memberId")
       )
     `);
 
-    // Work Schedules table for instructor and front desk staff availability
-    db.run(`
+    // Work Schedules table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS work_schedules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        instructorId INTEGER NOT NULL,
-        locationId INTEGER,
-        dayOfWeek TEXT NOT NULL CHECK(dayOfWeek IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')),
-        startTime TIME NOT NULL,
-        endTime TIME NOT NULL,
-        isRecurring BOOLEAN DEFAULT 1,
-        specificDate DATE,
-        scheduleType TEXT DEFAULT 'instructor' CHECK(scheduleType IN ('instructor', 'front_desk')),
-        status TEXT NOT NULL CHECK(status IN ('scheduled', 'completed', 'cancelled')) DEFAULT 'scheduled',
+        id SERIAL PRIMARY KEY,
+        "instructorId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        "locationId" INTEGER REFERENCES locations(id),
+        "dayOfWeek" TEXT NOT NULL CHECK("dayOfWeek" IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')),
+        "startTime" TIME NOT NULL,
+        "endTime" TIME NOT NULL,
+        "isRecurring" BOOLEAN DEFAULT true,
+        "specificDate" DATE,
+        "scheduleType" TEXT DEFAULT 'instructor' CHECK("scheduleType" IN ('instructor', 'front_desk')),
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'completed', 'cancelled')),
         notes TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (instructorId) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (locationId) REFERENCES locations(id)
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // MyStudio sync log for tracking imports
-    db.run(`
+    // MyStudio sync log
+    await client.query(`
       CREATE TABLE IF NOT EXISTS mystudio_sync_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        syncType TEXT NOT NULL CHECK(syncType IN ('events', 'members', 'schedule')),
+        id SERIAL PRIMARY KEY,
+        "syncType" TEXT NOT NULL CHECK("syncType" IN ('events', 'members', 'schedule')),
         status TEXT NOT NULL CHECK(status IN ('success', 'failed', 'partial')),
-        recordsImported INTEGER DEFAULT 0,
-        errorMessage TEXT,
-        syncedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        syncedBy INTEGER,
-        FOREIGN KEY (syncedBy) REFERENCES users(id)
+        "recordsImported" INTEGER DEFAULT 0,
+        "errorMessage" TEXT,
+        "syncedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "syncedBy" INTEGER REFERENCES users(id)
       )
     `);
 
-    // Email templates for DragonDesk: Engage
-    db.run(`
+    // Email templates
+    await client.query(`
       CREATE TABLE IF NOT EXISTS email_templates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
         subject TEXT,
         body TEXT NOT NULL,
         thumbnail TEXT,
-        isDefault BOOLEAN DEFAULT 0,
-        createdBy INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "isDefault" BOOLEAN DEFAULT false,
+        "createdBy" INTEGER REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Uploaded images for email campaigns
-    db.run(`
+    // Email images
+    await client.query(`
       CREATE TABLE IF NOT EXISTS email_images (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         filename TEXT NOT NULL,
-        originalName TEXT NOT NULL,
-        mimeType TEXT NOT NULL,
+        "originalName" TEXT NOT NULL,
+        "mimeType" TEXT NOT NULL,
         size INTEGER NOT NULL,
         url TEXT NOT NULL,
-        uploadedBy INTEGER,
-        uploadedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (uploadedBy) REFERENCES users(id)
+        "uploadedBy" INTEGER REFERENCES users(id),
+        "uploadedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Social Accounts table for storing connected social media accounts
-    db.run(`
+    // Social Accounts
+    await client.query(`
       CREATE TABLE IF NOT EXISTS social_accounts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         platform TEXT NOT NULL CHECK(platform IN ('facebook', 'instagram', 'twitter', 'linkedin')),
-        accountName TEXT NOT NULL,
-        accountId TEXT NOT NULL,
-        pageId TEXT,
-        pageName TEXT,
-        accessToken TEXT NOT NULL,
-        refreshToken TEXT,
-        tokenExpiresAt DATETIME,
-        isActive BOOLEAN DEFAULT 1,
-        locationId INTEGER,
-        createdBy INTEGER NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "accountName" TEXT NOT NULL,
+        "accountId" TEXT NOT NULL,
+        "pageId" TEXT,
+        "pageName" TEXT,
+        "accessToken" TEXT NOT NULL,
+        "refreshToken" TEXT,
+        "tokenExpiresAt" TIMESTAMP,
+        "isActive" BOOLEAN DEFAULT true,
+        "locationId" INTEGER REFERENCES locations(id),
+        "createdBy" INTEGER NOT NULL REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Social Campaigns table for managing social media posts
-    db.run(`
+    // Social Campaigns
+    await client.query(`
       CREATE TABLE IF NOT EXISTS social_campaigns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
-        audienceId INTEGER,
-        postContent TEXT NOT NULL,
-        mediaUrls TEXT,
+        "audienceId" INTEGER REFERENCES audiences(id),
+        "postContent" TEXT NOT NULL,
+        "mediaUrls" TEXT,
         platforms TEXT NOT NULL,
-        accountIds TEXT NOT NULL,
-        scheduledFor DATETIME,
-        status TEXT NOT NULL CHECK(status IN ('draft', 'scheduled', 'published', 'failed')) DEFAULT 'draft',
-        publishedAt DATETIME,
+        "accountIds" TEXT NOT NULL,
+        "scheduledFor" TIMESTAMP,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'scheduled', 'published', 'failed')),
+        "publishedAt" TIMESTAMP,
         results TEXT,
-        locationId INTEGER,
-        createdBy INTEGER NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (audienceId) REFERENCES audiences(id),
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "locationId" INTEGER REFERENCES locations(id),
+        "createdBy" INTEGER NOT NULL REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Social Posts table for storing published posts from platforms
-    db.run(`
+    // Social Posts
+    await client.query(`
       CREATE TABLE IF NOT EXISTS social_posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        campaignId INTEGER,
-        accountId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "campaignId" INTEGER REFERENCES social_campaigns(id) ON DELETE SET NULL,
+        "accountId" INTEGER NOT NULL REFERENCES social_accounts(id) ON DELETE CASCADE,
         platform TEXT NOT NULL CHECK(platform IN ('facebook', 'instagram', 'twitter', 'linkedin')),
-        platformPostId TEXT NOT NULL,
-        postContent TEXT NOT NULL,
-        mediaUrls TEXT,
-        postUrl TEXT,
+        "platformPostId" TEXT NOT NULL,
+        "postContent" TEXT NOT NULL,
+        "mediaUrls" TEXT,
+        "postUrl" TEXT,
         likes INTEGER DEFAULT 0,
         shares INTEGER DEFAULT 0,
         comments INTEGER DEFAULT 0,
         impressions INTEGER DEFAULT 0,
         engagement INTEGER DEFAULT 0,
-        publishedAt DATETIME,
-        lastSyncedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (campaignId) REFERENCES social_campaigns(id) ON DELETE SET NULL,
-        FOREIGN KEY (accountId) REFERENCES social_accounts(id) ON DELETE CASCADE,
-        UNIQUE(platform, platformPostId)
+        "publishedAt" TIMESTAMP,
+        "lastSyncedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(platform, "platformPostId")
       )
     `);
 
-    // Social Comments table for storing comments on posts
-    db.run(`
+    // Social Comments
+    await client.query(`
       CREATE TABLE IF NOT EXISTS social_comments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        postId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "postId" INTEGER NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,
         platform TEXT NOT NULL CHECK(platform IN ('facebook', 'instagram', 'twitter', 'linkedin')),
-        platformCommentId TEXT NOT NULL,
-        authorName TEXT NOT NULL,
-        authorId TEXT NOT NULL,
-        authorProfileUrl TEXT,
-        authorImageUrl TEXT,
-        commentText TEXT NOT NULL,
+        "platformCommentId" TEXT NOT NULL,
+        "authorName" TEXT NOT NULL,
+        "authorId" TEXT NOT NULL,
+        "authorProfileUrl" TEXT,
+        "authorImageUrl" TEXT,
+        "commentText" TEXT NOT NULL,
         likes INTEGER DEFAULT 0,
-        replyCount INTEGER DEFAULT 0,
-        parentCommentId INTEGER,
+        "replyCount" INTEGER DEFAULT 0,
+        "parentCommentId" INTEGER REFERENCES social_comments(id) ON DELETE CASCADE,
         sentiment TEXT CHECK(sentiment IN ('positive', 'negative', 'neutral')),
-        isHidden BOOLEAN DEFAULT 0,
-        isReplied BOOLEAN DEFAULT 0,
-        commentedAt DATETIME NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (postId) REFERENCES social_posts(id) ON DELETE CASCADE,
-        FOREIGN KEY (parentCommentId) REFERENCES social_comments(id) ON DELETE CASCADE,
-        UNIQUE(platform, platformCommentId)
+        "isHidden" BOOLEAN DEFAULT false,
+        "isReplied" BOOLEAN DEFAULT false,
+        "commentedAt" TIMESTAMP NOT NULL,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(platform, "platformCommentId")
       )
     `);
 
-    // Social Comment Replies table for storing our replies to comments
-    db.run(`
+    // Social Comment Replies
+    await client.query(`
       CREATE TABLE IF NOT EXISTS social_comment_replies (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        commentId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "commentId" INTEGER NOT NULL REFERENCES social_comments(id) ON DELETE CASCADE,
         platform TEXT NOT NULL CHECK(platform IN ('facebook', 'instagram', 'twitter', 'linkedin')),
-        platformReplyId TEXT,
-        replyText TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('draft', 'sent', 'failed')) DEFAULT 'draft',
-        sentAt DATETIME,
-        sentBy INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (commentId) REFERENCES social_comments(id) ON DELETE CASCADE,
-        FOREIGN KEY (sentBy) REFERENCES users(id)
+        "platformReplyId" TEXT,
+        "replyText" TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'failed')),
+        "sentAt" TIMESTAMP,
+        "sentBy" INTEGER REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // DKIM Configuration table for email authentication
-    db.run(`
+    // DKIM Configuration
+    await client.query(`
       CREATE TABLE IF NOT EXISTS dkim_config (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         domain TEXT NOT NULL UNIQUE,
         selector TEXT NOT NULL DEFAULT 'dragondesk',
-        privateKey TEXT NOT NULL,
-        publicKey TEXT NOT NULL,
-        isActive BOOLEAN DEFAULT 1,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "privateKey" TEXT NOT NULL,
+        "publicKey" TEXT NOT NULL,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // A/B Test Analytics table for tracking performance metrics
-    db.run(`
+    // AB Test Analytics
+    await client.query(`
       CREATE TABLE IF NOT EXISTS ab_test_analytics (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        testId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "testId" INTEGER NOT NULL REFERENCES ab_tests(id) ON DELETE CASCADE,
         variant TEXT NOT NULL CHECK(variant IN ('A', 'B')),
         views INTEGER DEFAULT 0,
         clicks INTEGER DEFAULT 0,
         leads INTEGER DEFAULT 0,
-        engagementTime INTEGER DEFAULT 0,
+        "engagementTime" INTEGER DEFAULT 0,
         bounces INTEGER DEFAULT 0,
-        recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (testId) REFERENCES ab_tests(id) ON DELETE CASCADE
+        "recordedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // A/B Test Events table for detailed event tracking
-    db.run(`
+    // AB Test Events
+    await client.query(`
       CREATE TABLE IF NOT EXISTS ab_test_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        testId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "testId" INTEGER NOT NULL REFERENCES ab_tests(id) ON DELETE CASCADE,
         variant TEXT NOT NULL CHECK(variant IN ('A', 'B')),
-        eventType TEXT NOT NULL CHECK(eventType IN ('view', 'click', 'lead', 'engagement', 'bounce')),
-        sessionId TEXT,
+        "eventType" TEXT NOT NULL CHECK("eventType" IN ('view', 'click', 'lead', 'engagement', 'bounce')),
+        "sessionId" TEXT,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (testId) REFERENCES ab_tests(id) ON DELETE CASCADE
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Programs table for managing martial arts programs
-    db.run(`
+    // Programs table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS programs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         description TEXT,
-        isActive BOOLEAN DEFAULT 1,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Insert default programs if table is empty
-    db.get("SELECT COUNT(*) as count FROM programs", (err, row: any) => {
-      if (!err && row && row.count === 0) {
-        db.run(`
-          INSERT INTO programs (name, description) VALUES
-          ('BJJ', 'Brazilian Jiu Jitsu'),
-          ('Muay Thai', 'Muay Thai'),
-          ('Taekwondo', 'Taekwondo')
-        `, (err) => {
-          if (err) {
-            console.error('Error inserting default programs:', err);
-          } else {
-            console.log('Inserted default programs');
-          }
-        });
-      }
-    });
-
-    // SMS Campaigns table for managing SMS marketing
-    db.run(`
+    // SMS Campaigns
+    await client.query(`
       CREATE TABLE IF NOT EXISTS sms_campaigns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
-        audienceId INTEGER NOT NULL,
+        "audienceId" INTEGER NOT NULL REFERENCES audiences(id),
         message TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('draft', 'scheduled', 'sending', 'sent', 'failed')) DEFAULT 'draft',
-        scheduledFor DATETIME,
-        sentAt DATETIME,
-        recipientCount INTEGER DEFAULT 0,
-        successCount INTEGER DEFAULT 0,
-        failureCount INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'scheduled', 'sending', 'sent', 'failed')),
+        "scheduledFor" TIMESTAMP,
+        "sentAt" TIMESTAMP,
+        "recipientCount" INTEGER DEFAULT 0,
+        "successCount" INTEGER DEFAULT 0,
+        "failureCount" INTEGER DEFAULT 0,
         cost REAL DEFAULT 0,
         provider TEXT DEFAULT 'twilio',
-        locationId INTEGER,
-        createdBy INTEGER NOT NULL,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (audienceId) REFERENCES audiences(id),
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (createdBy) REFERENCES users(id)
+        "locationId" INTEGER REFERENCES locations(id),
+        "createdBy" INTEGER NOT NULL REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // SMS Campaign Recipients table for tracking individual message status
-    db.run(`
+    // SMS Campaign Recipients
+    await client.query(`
       CREATE TABLE IF NOT EXISTS sms_campaign_recipients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        campaignId INTEGER NOT NULL,
-        memberId INTEGER NOT NULL,
-        phoneNumber TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'delivered', 'failed', 'unsubscribed')) DEFAULT 'pending',
-        messageId TEXT,
-        errorMessage TEXT,
-        sentAt DATETIME,
-        deliveredAt DATETIME,
-        cost REAL DEFAULT 0,
-        FOREIGN KEY (campaignId) REFERENCES sms_campaigns(id) ON DELETE CASCADE,
-        FOREIGN KEY (memberId) REFERENCES members(id)
+        id SERIAL PRIMARY KEY,
+        "campaignId" INTEGER NOT NULL REFERENCES sms_campaigns(id) ON DELETE CASCADE,
+        "memberId" INTEGER NOT NULL REFERENCES members(id),
+        "phoneNumber" TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'delivered', 'failed', 'unsubscribed')),
+        "messageId" TEXT,
+        "errorMessage" TEXT,
+        "sentAt" TIMESTAMP,
+        "deliveredAt" TIMESTAMP,
+        cost REAL DEFAULT 0
       )
     `);
 
-    // Billing Settings table - Location-level Stripe configuration
-    db.run(`
+    // Billing Settings
+    await client.query(`
       CREATE TABLE IF NOT EXISTS billing_settings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        locationId INTEGER,
-        stripePublishableKey TEXT,
-        stripeSecretKey TEXT,
-        stripeWebhookSecret TEXT,
+        id SERIAL PRIMARY KEY,
+        "locationId" INTEGER REFERENCES locations(id),
+        "stripePublishableKey" TEXT,
+        "stripeSecretKey" TEXT,
+        "stripeWebhookSecret" TEXT,
         currency TEXT DEFAULT 'usd',
-        defaultTaxRate REAL DEFAULT 0,
-        trialDays INTEGER DEFAULT 7,
-        gracePeriodDays INTEGER DEFAULT 3,
-        autoRetryFailedPayments BOOLEAN DEFAULT 1,
-        sendPaymentReceipts BOOLEAN DEFAULT 1,
-        sendFailedPaymentAlerts BOOLEAN DEFAULT 1,
-        isActive BOOLEAN DEFAULT 1,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id)
+        "defaultTaxRate" REAL DEFAULT 0,
+        "trialDays" INTEGER DEFAULT 7,
+        "gracePeriodDays" INTEGER DEFAULT 3,
+        "autoRetryFailedPayments" BOOLEAN DEFAULT true,
+        "sendPaymentReceipts" BOOLEAN DEFAULT true,
+        "sendFailedPaymentAlerts" BOOLEAN DEFAULT true,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Stripe Customers table - Link members to Stripe customers
-    db.run(`
+    // Stripe Customers
+    await client.query(`
       CREATE TABLE IF NOT EXISTS stripe_customers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL UNIQUE,
-        stripeCustomerId TEXT NOT NULL UNIQUE,
-        defaultPaymentMethodId TEXT,
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL UNIQUE REFERENCES members(id) ON DELETE CASCADE,
+        "stripeCustomerId" TEXT NOT NULL UNIQUE,
+        "defaultPaymentMethodId" TEXT,
         email TEXT,
         name TEXT,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Pricing Plans table - Subscription pricing tiers
-    db.run(`
+    // Pricing Plans
+    await client.query(`
       CREATE TABLE IF NOT EXISTS pricing_plans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
-        stripePriceId TEXT,
-        stripeProductId TEXT,
-        accountType TEXT NOT NULL CHECK(accountType IN ('basic', 'premium', 'elite', 'family')),
-        programType TEXT CHECK(programType IN ('BJJ', 'Muay Thai', 'Taekwondo', 'All')),
-        membershipAge TEXT CHECK(membershipAge IN ('Adult', 'Kids', 'All')),
+        "stripePriceId" TEXT,
+        "stripeProductId" TEXT,
+        "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
+        "programType" TEXT CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo', 'All')),
+        "membershipAge" TEXT CHECK("membershipAge" IN ('Adult', 'Kids', 'All')),
         amount INTEGER NOT NULL,
         currency TEXT DEFAULT 'usd',
-        billingInterval TEXT NOT NULL CHECK(billingInterval IN ('month', 'year', 'week')),
-        intervalCount INTEGER DEFAULT 1,
-        trialDays INTEGER DEFAULT 0,
-        locationId INTEGER,
-        isActive BOOLEAN DEFAULT 1,
+        "billingInterval" TEXT NOT NULL CHECK("billingInterval" IN ('month', 'year', 'week')),
+        "intervalCount" INTEGER DEFAULT 1,
+        "trialDays" INTEGER DEFAULT 0,
+        "locationId" INTEGER REFERENCES locations(id),
+        "isActive" BOOLEAN DEFAULT true,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id)
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Subscriptions table - Member subscriptions
-    db.run(`
+    // Subscriptions
+    await client.query(`
       CREATE TABLE IF NOT EXISTS subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL,
-        pricingPlanId INTEGER NOT NULL,
-        stripeSubscriptionId TEXT UNIQUE,
-        stripeCustomerId TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "pricingPlanId" INTEGER NOT NULL REFERENCES pricing_plans(id),
+        "stripeSubscriptionId" TEXT UNIQUE,
+        "stripeCustomerId" TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'trialing', 'unpaid', 'paused')),
-        currentPeriodStart DATETIME,
-        currentPeriodEnd DATETIME,
-        trialStart DATETIME,
-        trialEnd DATETIME,
-        canceledAt DATETIME,
-        cancelReason TEXT,
-        cancelAtPeriodEnd BOOLEAN DEFAULT 0,
+        "currentPeriodStart" TIMESTAMP,
+        "currentPeriodEnd" TIMESTAMP,
+        "trialStart" TIMESTAMP,
+        "trialEnd" TIMESTAMP,
+        "canceledAt" TIMESTAMP,
+        "cancelReason" TEXT,
+        "cancelAtPeriodEnd" BOOLEAN DEFAULT false,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE,
-        FOREIGN KEY (pricingPlanId) REFERENCES pricing_plans(id)
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Payment Methods table - Stored payment methods
-    db.run(`
+    // Payment Methods
+    await client.query(`
       CREATE TABLE IF NOT EXISTS payment_methods (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL,
-        stripePaymentMethodId TEXT NOT NULL UNIQUE,
-        stripeCustomerId TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "stripePaymentMethodId" TEXT NOT NULL UNIQUE,
+        "stripeCustomerId" TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('card', 'bank_account', 'us_bank_account')),
         brand TEXT,
         last4 TEXT,
-        expMonth INTEGER,
-        expYear INTEGER,
-        isDefault BOOLEAN DEFAULT 0,
-        billingName TEXT,
-        billingEmail TEXT,
-        billingAddress TEXT,
+        "expMonth" INTEGER,
+        "expYear" INTEGER,
+        "isDefault" BOOLEAN DEFAULT false,
+        "billingName" TEXT,
+        "billingEmail" TEXT,
+        "billingAddress" TEXT,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Invoices table - Payment history
-    db.run(`
+    // Invoices
+    await client.query(`
       CREATE TABLE IF NOT EXISTS invoices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL,
-        subscriptionId INTEGER,
-        stripeInvoiceId TEXT UNIQUE,
-        stripePaymentIntentId TEXT,
-        stripeChargeId TEXT,
-        invoiceNumber TEXT,
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "subscriptionId" INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+        "stripeInvoiceId" TEXT UNIQUE,
+        "stripePaymentIntentId" TEXT,
+        "stripeChargeId" TEXT,
+        "invoiceNumber" TEXT,
         status TEXT NOT NULL CHECK(status IN ('draft', 'open', 'paid', 'void', 'uncollectible')),
-        amountDue INTEGER NOT NULL,
-        amountPaid INTEGER DEFAULT 0,
-        amountRemaining INTEGER DEFAULT 0,
+        "amountDue" INTEGER NOT NULL,
+        "amountPaid" INTEGER DEFAULT 0,
+        "amountRemaining" INTEGER DEFAULT 0,
         subtotal INTEGER,
         tax INTEGER DEFAULT 0,
         total INTEGER,
         currency TEXT DEFAULT 'usd',
         description TEXT,
-        invoiceUrl TEXT,
-        invoicePdfUrl TEXT,
-        dueDate DATETIME,
-        paidAt DATETIME,
-        periodStart DATETIME,
-        periodEnd DATETIME,
-        attemptCount INTEGER DEFAULT 0,
-        nextPaymentAttempt DATETIME,
-        lastPaymentError TEXT,
+        "invoiceUrl" TEXT,
+        "invoicePdfUrl" TEXT,
+        "dueDate" TIMESTAMP,
+        "paidAt" TIMESTAMP,
+        "periodStart" TIMESTAMP,
+        "periodEnd" TIMESTAMP,
+        "attemptCount" INTEGER DEFAULT 0,
+        "nextPaymentAttempt" TIMESTAMP,
+        "lastPaymentError" TEXT,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE,
-        FOREIGN KEY (subscriptionId) REFERENCES subscriptions(id) ON DELETE SET NULL
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Billing Events table - Webhook event log for auditing
-    db.run(`
+    // Billing Events
+    await client.query(`
       CREATE TABLE IF NOT EXISTS billing_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        stripeEventId TEXT UNIQUE,
-        eventType TEXT NOT NULL,
-        memberId INTEGER,
-        subscriptionId INTEGER,
-        invoiceId INTEGER,
+        id SERIAL PRIMARY KEY,
+        "stripeEventId" TEXT UNIQUE,
+        "eventType" TEXT NOT NULL,
+        "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        "subscriptionId" INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+        "invoiceId" INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
         data TEXT NOT NULL,
-        processed BOOLEAN DEFAULT 0,
-        processedAt DATETIME,
+        processed BOOLEAN DEFAULT false,
+        "processedAt" TIMESTAMP,
         error TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE SET NULL,
-        FOREIGN KEY (subscriptionId) REFERENCES subscriptions(id) ON DELETE SET NULL,
-        FOREIGN KEY (invoiceId) REFERENCES invoices(id) ON DELETE SET NULL
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Member QR Codes table - QR code management for check-ins
-    db.run(`
+    // Member QR Codes
+    await client.query(`
       CREATE TABLE IF NOT EXISTS member_qr_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL UNIQUE,
-        qrCode TEXT NOT NULL UNIQUE,
-        qrCodeData TEXT,
-        applePassSerialNumber TEXT,
-        googlePassId TEXT,
-        isActive BOOLEAN DEFAULT 1,
-        lastUsedAt DATETIME,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL UNIQUE REFERENCES members(id) ON DELETE CASCADE,
+        "qrCode" TEXT NOT NULL UNIQUE,
+        "qrCodeData" TEXT,
+        "applePassSerialNumber" TEXT,
+        "googlePassId" TEXT,
+        "isActive" BOOLEAN DEFAULT true,
+        "lastUsedAt" TIMESTAMP,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Check-ins table - Daily check-in records
-    db.run(`
+    // Check-ins
+    await client.query(`
       CREATE TABLE IF NOT EXISTS check_ins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL,
-        locationId INTEGER NOT NULL,
-        checkInTime DATETIME DEFAULT CURRENT_TIMESTAMP,
-        checkInMethod TEXT NOT NULL CHECK(checkInMethod IN ('qr_scan', 'manual', 'name_search', 'phone_lookup')),
-        eventId INTEGER,
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "locationId" INTEGER NOT NULL REFERENCES locations(id),
+        "checkInTime" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "checkInMethod" TEXT NOT NULL CHECK("checkInMethod" IN ('qr_scan', 'manual', 'name_search', 'phone_lookup')),
+        "eventId" INTEGER REFERENCES events(id),
         notes TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE,
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (eventId) REFERENCES events(id)
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Class Skills table - Skills/techniques taught in classes
-    db.run(`
+    // Class Skills
+    await client.query(`
       CREATE TABLE IF NOT EXISTS class_skills (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         category TEXT,
-        programType TEXT NOT NULL CHECK(programType IN ('BJJ', 'Muay Thai', 'Taekwondo')),
-        beltLevel TEXT,
+        "programType" TEXT NOT NULL CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo')),
+        "beltLevel" TEXT,
         description TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Member Skills Learned table - Track skills per member
-    db.run(`
+    // Member Skills Learned
+    await client.query(`
       CREATE TABLE IF NOT EXISTS member_skills_learned (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL,
-        skillId INTEGER NOT NULL,
-        eventId INTEGER,
-        learnedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        proficiencyLevel TEXT DEFAULT 'introduced' CHECK(proficiencyLevel IN ('introduced', 'practiced', 'proficient')),
-        instructorNotes TEXT,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE,
-        FOREIGN KEY (skillId) REFERENCES class_skills(id) ON DELETE CASCADE,
-        FOREIGN KEY (eventId) REFERENCES events(id),
-        UNIQUE(memberId, skillId)
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "skillId" INTEGER NOT NULL REFERENCES class_skills(id) ON DELETE CASCADE,
+        "eventId" INTEGER REFERENCES events(id),
+        "learnedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "proficiencyLevel" TEXT DEFAULT 'introduced' CHECK("proficiencyLevel" IN ('introduced', 'practiced', 'proficient')),
+        "instructorNotes" TEXT,
+        UNIQUE("memberId", "skillId")
       )
     `);
 
-    // Belt Requirements table - Belt promotion requirements per program
-    db.run(`
+    // Belt Requirements
+    await client.query(`
       CREATE TABLE IF NOT EXISTS belt_requirements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        programType TEXT NOT NULL CHECK(programType IN ('BJJ', 'Muay Thai', 'Taekwondo')),
-        fromRanking TEXT NOT NULL,
-        toRanking TEXT NOT NULL,
-        minClassAttendance INTEGER DEFAULT 0,
-        minTimeInRankDays INTEGER DEFAULT 0,
-        requiredSkillCategories TEXT,
+        id SERIAL PRIMARY KEY,
+        "programType" TEXT NOT NULL CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo')),
+        "fromRanking" TEXT NOT NULL,
+        "toRanking" TEXT NOT NULL,
+        "minClassAttendance" INTEGER DEFAULT 0,
+        "minTimeInRankDays" INTEGER DEFAULT 0,
+        "requiredSkillCategories" TEXT,
         notes TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(programType, fromRanking, toRanking)
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE("programType", "fromRanking", "toRanking")
       )
     `);
 
-    // Wallet Pass Logs table - Pass generation/send logs
-    db.run(`
+    // Wallet Pass Logs
+    await client.query(`
       CREATE TABLE IF NOT EXISTS wallet_pass_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memberId INTEGER NOT NULL,
-        passType TEXT NOT NULL CHECK(passType IN ('apple', 'google')),
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "passType" TEXT NOT NULL CHECK("passType" IN ('apple', 'google')),
         action TEXT NOT NULL CHECK(action IN ('generated', 'sent', 'downloaded', 'updated', 'revoked')),
-        recipientEmail TEXT,
+        "recipientEmail" TEXT,
         status TEXT DEFAULT 'success' CHECK(status IN ('success', 'failed', 'pending')),
-        errorMessage TEXT,
+        "errorMessage" TEXT,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE CASCADE
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Kiosk Activity Logs table - Audit trail for kiosk operations
-    db.run(`
+    // Kiosk Activity Logs
+    await client.query(`
       CREATE TABLE IF NOT EXISTS kiosk_activity_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        locationId INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "locationId" INTEGER NOT NULL REFERENCES locations(id),
         action TEXT NOT NULL,
-        memberId INTEGER,
+        "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
         metadata TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (locationId) REFERENCES locations(id),
-        FOREIGN KEY (memberId) REFERENCES members(id) ON DELETE SET NULL
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Seed default belt requirements if empty
-    db.get("SELECT COUNT(*) as count FROM belt_requirements", (err, row: any) => {
-      if (!err && row && row.count === 0) {
-        const beltRequirements = [
-          // BJJ belt requirements
-          ['BJJ', 'White', 'Blue', 100, 365, null],
-          ['BJJ', 'Blue', 'Purple', 150, 730, null],
-          ['BJJ', 'Purple', 'Brown', 150, 730, null],
-          ['BJJ', 'Brown', 'Black', 150, 730, null],
-          // Taekwondo belt requirements
-          ['Taekwondo', 'White', 'Yellow', 30, 90, null],
-          ['Taekwondo', 'Yellow', 'Orange', 40, 120, null],
-          ['Taekwondo', 'Orange', 'Green', 40, 120, null],
-          ['Taekwondo', 'Green', 'Purple', 50, 150, null],
-          ['Taekwondo', 'Purple', 'Blue', 50, 150, null],
-          ['Taekwondo', 'Blue', 'Red', 60, 180, null],
-          ['Taekwondo', 'Red', 'Brown', 60, 180, null],
-          ['Taekwondo', 'Brown', 'Il Dan Bo', 80, 270, null],
-          ['Taekwondo', 'Il Dan Bo', 'Black', 100, 365, null],
-          // Muay Thai armband requirements
-          ['Muay Thai', 'White', 'Green', 50, 180, null],
-          ['Muay Thai', 'Green', 'Purple', 60, 180, null],
-          ['Muay Thai', 'Purple', 'Blue', 80, 270, null],
-          ['Muay Thai', 'Blue', 'Red', 100, 365, null],
-        ];
+    // Lead Forms table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lead_forms (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        fields TEXT NOT NULL,
+        "submitButtonText" TEXT DEFAULT 'Submit',
+        "successMessage" TEXT DEFAULT 'Thank you for your submission!',
+        "redirectUrl" TEXT,
+        styling TEXT,
+        "isActive" BOOLEAN DEFAULT true,
+        "locationId" INTEGER REFERENCES locations(id),
+        "createdBy" INTEGER REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-        const stmt = db.prepare(`INSERT INTO belt_requirements (programType, fromRanking, toRanking, minClassAttendance, minTimeInRankDays, requiredSkillCategories) VALUES (?, ?, ?, ?, ?, ?)`);
-        beltRequirements.forEach(req => stmt.run(req));
-        stmt.finalize();
-        console.log('Inserted default belt requirements');
-      }
-    });
+    // Lead Form Submissions
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lead_form_submissions (
+        id SERIAL PRIMARY KEY,
+        "formId" INTEGER NOT NULL REFERENCES lead_forms(id) ON DELETE CASCADE,
+        "memberId" INTEGER REFERENCES members(id),
+        data TEXT NOT NULL,
+        "sourceUrl" TEXT,
+        "ipAddress" TEXT,
+        "userAgent" TEXT,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-    // Migration: Add attendance tracking columns to members table
-    db.all("PRAGMA table_info(members)", (err, columns) => {
-      if (!err && columns) {
-        const attendanceColumns = [
-          { name: 'totalClassesAttended', type: 'INTEGER DEFAULT 0' },
-          { name: 'lastCheckInAt', type: 'DATETIME' },
-          { name: 'attendanceStreak', type: 'INTEGER DEFAULT 0' },
-          { name: 'lastPromotionDate', type: 'DATETIME' }
-        ];
+    // Seed default programs
+    const programsResult = await client.query('SELECT COUNT(*) as count FROM programs');
+    if (parseInt(programsResult.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO programs (name, description) VALUES
+        ('BJJ', 'Brazilian Jiu Jitsu'),
+        ('Muay Thai', 'Muay Thai'),
+        ('Taekwondo', 'Taekwondo')
+      `);
+      console.log('Inserted default programs');
+    }
 
-        attendanceColumns.forEach(col => {
-          const hasColumn = columns.some((c: any) => c.name === col.name);
-          if (!hasColumn) {
-            db.run(`ALTER TABLE members ADD COLUMN ${col.name} ${col.type}`, (err) => {
-              if (err && !err.message.includes('duplicate column')) {
-                console.error(`Error adding ${col.name} column to members:`, err);
-              }
-            });
-          }
-        });
-      }
-    });
+    // Seed default belt requirements
+    const beltResult = await client.query('SELECT COUNT(*) as count FROM belt_requirements');
+    if (parseInt(beltResult.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO belt_requirements ("programType", "fromRanking", "toRanking", "minClassAttendance", "minTimeInRankDays") VALUES
+        ('BJJ', 'White', 'Blue', 100, 365),
+        ('BJJ', 'Blue', 'Purple', 150, 730),
+        ('BJJ', 'Purple', 'Brown', 150, 730),
+        ('BJJ', 'Brown', 'Black', 150, 730),
+        ('Taekwondo', 'White', 'Yellow', 30, 90),
+        ('Taekwondo', 'Yellow', 'Orange', 40, 120),
+        ('Taekwondo', 'Orange', 'Green', 40, 120),
+        ('Taekwondo', 'Green', 'Purple', 50, 150),
+        ('Taekwondo', 'Purple', 'Blue', 50, 150),
+        ('Taekwondo', 'Blue', 'Red', 60, 180),
+        ('Taekwondo', 'Red', 'Brown', 60, 180),
+        ('Taekwondo', 'Brown', 'Il Dan Bo', 80, 270),
+        ('Taekwondo', 'Il Dan Bo', 'Black', 100, 365),
+        ('Muay Thai', 'White', 'Green', 50, 180),
+        ('Muay Thai', 'Green', 'Purple', 60, 180),
+        ('Muay Thai', 'Purple', 'Blue', 80, 270),
+        ('Muay Thai', 'Blue', 'Red', 100, 365)
+      `);
+      console.log('Inserted default belt requirements');
+    }
 
-    // Migration: Add check-in columns to event_attendees table
-    db.all("PRAGMA table_info(event_attendees)", (err, columns) => {
-      if (!err && columns) {
-        const checkInColumns = [
-          { name: 'checkedInAt', type: 'DATETIME' },
-          { name: 'checkInMethod', type: 'TEXT' }
-        ];
-
-        checkInColumns.forEach(col => {
-          const hasColumn = columns.some((c: any) => c.name === col.name);
-          if (!hasColumn) {
-            db.run(`ALTER TABLE event_attendees ADD COLUMN ${col.name} ${col.type}`, (err) => {
-              if (err && !err.message.includes('duplicate column')) {
-                console.error(`Error adding ${col.name} column to event_attendees:`, err);
-              }
-            });
-          }
-        });
-      }
-    });
-
-    // Migration: Add pageUrl and trafficSplit columns to ab_tests if they don't exist
-    db.all("PRAGMA table_info(ab_tests)", (err, columns) => {
-      if (!err && columns) {
-        const hasPageUrl = columns.some((col: any) => col.name === 'pageUrl');
-        const hasTrafficSplit = columns.some((col: any) => col.name === 'trafficSplit');
-
-        if (!hasPageUrl) {
-          db.run("ALTER TABLE ab_tests ADD COLUMN pageUrl TEXT", (err) => {
-            if (err) {
-              console.error('Error adding pageUrl column:', err);
-            } else {
-              console.log('Added pageUrl column to ab_tests table');
-            }
-          });
-        }
-
-        if (!hasTrafficSplit) {
-          db.run("ALTER TABLE ab_tests ADD COLUMN trafficSplit INTEGER DEFAULT 50", (err) => {
-            if (err) {
-              console.error('Error adding trafficSplit column:', err);
-            } else {
-              console.log('Added trafficSplit column to ab_tests table');
-            }
-          });
-        }
-      }
-    });
-
-    // Migration: Add analytics columns to campaigns table if they don't exist
-    db.all("PRAGMA table_info(campaigns)", (err, columns) => {
-      if (!err && columns) {
-        const analyticsColumns = [
-          { name: 'sent', type: 'INTEGER DEFAULT 0' },
-          { name: 'delivered', type: 'INTEGER DEFAULT 0' },
-          { name: 'opens', type: 'INTEGER DEFAULT 0' },
-          { name: 'clicks', type: 'INTEGER DEFAULT 0' },
-          { name: 'openRate', type: 'REAL DEFAULT 0' },
-          { name: 'clickThroughRate', type: 'REAL DEFAULT 0' },
-          { name: 'leads', type: 'INTEGER DEFAULT 0' },
-          { name: 'trialers', type: 'INTEGER DEFAULT 0' },
-          { name: 'members', type: 'INTEGER DEFAULT 0' }
-        ];
-
-        analyticsColumns.forEach(col => {
-          const hasColumn = columns.some((c: any) => c.name === col.name);
-          if (!hasColumn) {
-            db.run(`ALTER TABLE campaigns ADD COLUMN ${col.name} ${col.type}`, (err) => {
-              if (err) {
-                console.error(`Error adding ${col.name} column to campaigns:`, err);
-              } else {
-                console.log(`Added ${col.name} column to campaigns table`);
-              }
-            });
-          }
-        });
-      }
-    });
+    // Seed admin user if none exists
+    await seedAdminUser(client);
 
     console.log('Database tables initialized');
-
-    // Auto-seed admin user if none exists
-    seedAdminUser();
-  });
+  } catch (err) {
+    console.error('Error initializing database:', err);
+  } finally {
+    client.release();
+  }
 }
 
-async function seedAdminUser() {
+async function seedAdminUser(client: any) {
   const bcrypt = await import('bcryptjs');
 
-  db.get('SELECT id FROM users WHERE role = ?', ['admin'], async (err, row) => {
-    if (err) {
-      console.error('Error checking for admin user:', err);
-      return;
-    }
+  const result = await client.query('SELECT id FROM users WHERE role = $1', ['admin']);
 
-    if (!row) {
-      const hashedPassword = await bcrypt.default.hash('admin123', 10);
-      db.run(
-        'INSERT INTO users (username, email, password, role, firstName, lastName) VALUES (?, ?, ?, ?, ?, ?)',
-        ['admin', 'admin@dragondesk.com', hashedPassword, 'admin', 'System', 'Administrator'],
-        (err) => {
-          if (err) {
-            console.error('Error creating admin user:', err);
-          } else {
-            console.log('Default admin user created (username: admin, password: admin123)');
-          }
-        }
-      );
-    }
-  });
+  if (result.rows.length === 0) {
+    const hashedPassword = await bcrypt.default.hash('admin123', 10);
+    await client.query(
+      'INSERT INTO users (username, email, password, role, "firstName", "lastName") VALUES ($1, $2, $3, $4, $5, $6)',
+      ['admin', 'admin@dragondesk.com', hashedPassword, 'admin', 'System', 'Administrator']
+    );
+    console.log('Default admin user created (username: admin, password: admin123)');
+  }
 }
 
-export const query = (sql: string, params: any[] = []): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(rows);
-      }
-    });
-  });
+// Helper functions that maintain API compatibility with the old SQLite interface
+export const query = async (sql: string, params: any[] = []): Promise<any> => {
+  // Convert ? placeholders to $1, $2, etc. for PostgreSQL
+  let paramIndex = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  const result = await pool.query(pgSql, params);
+  return result.rows;
 };
 
-export const run = (sql: string, params: any[] = []): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve({ id: this.lastID, changes: this.changes });
-      }
-    });
-  });
+export const run = async (sql: string, params: any[] = []): Promise<any> => {
+  // Convert ? placeholders to $1, $2, etc. for PostgreSQL
+  let paramIndex = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  // Add RETURNING id for INSERT statements to get the last inserted ID
+  let finalSql = pgSql;
+  if (pgSql.trim().toUpperCase().startsWith('INSERT') && !pgSql.toUpperCase().includes('RETURNING')) {
+    finalSql = pgSql.replace(/;?\s*$/, ' RETURNING id');
+  }
+
+  const result = await pool.query(finalSql, params);
+  return {
+    id: result.rows[0]?.id,
+    changes: result.rowCount
+  };
 };
 
-export const get = (sql: string, params: any[] = []): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(row);
-      }
-    });
-  });
+export const get = async (sql: string, params: any[] = []): Promise<any> => {
+  // Convert ? placeholders to $1, $2, etc. for PostgreSQL
+  let paramIndex = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  const result = await pool.query(pgSql, params);
+  return result.rows[0];
 };
+
+// Export db as pool for compatibility (some files might use db directly)
+export const db = pool;
