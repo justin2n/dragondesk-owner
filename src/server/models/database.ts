@@ -901,6 +901,35 @@ function initializeDatabase() {
     });
 
     console.log('Database tables initialized');
+
+    // Auto-seed admin user if none exists
+    seedAdminUser();
+  });
+}
+
+async function seedAdminUser() {
+  const bcrypt = await import('bcryptjs');
+
+  db.get('SELECT id FROM users WHERE role = ?', ['admin'], async (err, row) => {
+    if (err) {
+      console.error('Error checking for admin user:', err);
+      return;
+    }
+
+    if (!row) {
+      const hashedPassword = await bcrypt.default.hash('admin123', 10);
+      db.run(
+        'INSERT INTO users (username, email, password, role, firstName, lastName) VALUES (?, ?, ?, ?, ?, ?)',
+        ['admin', 'admin@dragondesk.com', hashedPassword, 'admin', 'System', 'Administrator'],
+        (err) => {
+          if (err) {
+            console.error('Error creating admin user:', err);
+          } else {
+            console.log('Default admin user created (username: admin, password: admin123)');
+          }
+        }
+      );
+    }
   });
 }
 
