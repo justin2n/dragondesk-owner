@@ -483,3 +483,82 @@
   border-radius: 50%;
   padding: 0.25rem;
 }
+
+/* Date/Time Section */
+.dateTimeSection {
+  background-color: var(--color-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 1rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Enhanced date/time inputs */
+.input[type="date"],
+.input[type="time"] {
+  cursor: pointer;
+}
+
+.input[type="date"]::-webkit-calendar-picker-indicator,
+.input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+/* Recurring Event Section */
+.recurringSection {
+  background-color: var(--color-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.recurringSection .checkbox {
+  margin-bottom: 0;
+}
+
+.recurringSection .checkbox span {
+  font-weight: 500;
+}
+
+.recurrenceOptions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.recurrenceOptions .formRow {
+  margin-bottom: 1rem;
+}
+
+.recurrenceOptions .formGroup {
+  margin-bottom: 0;
+}
+
+.recurrencePreview {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background-color: rgba(220, 38, 38, 0.1);
+  border: 1px solid var(--color-red);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+}
+
+.recurrencePreview svg {
+  color: var(--color-red);
+  flex-shrink: 0;
+}

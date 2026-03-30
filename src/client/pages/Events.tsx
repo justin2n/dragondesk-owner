@@ -28,6 +28,8 @@ interface Event {
   currentAttendees: number;
   price: number;
   requiresRegistration: boolean;
+  isRecurring: boolean;
+  recurrencePattern: string | null;
   instructor: string;
   status: string;
   attendees?: any[];
@@ -54,12 +56,17 @@ const Events = () => {
     description: '',
     eventType: 'class',
     programType: 'All',
-    startDateTime: '',
-    endDateTime: '',
+    startDate: '',
+    startTime: '',
+    endDate: '',
+    endTime: '',
     location: '',
     maxAttendees: '',
     price: '',
     requiresRegistration: false,
+    isRecurring: false,
+    recurrencePattern: '',
+    recurrenceEndDate: '',
     instructor: '',
   });
 
@@ -99,7 +106,34 @@ const Events = () => {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post('/events', formData);
+      // Combine date and time into ISO datetime strings
+      const startDateTime = formData.startDate && formData.startTime
+        ? `${formData.startDate}T${formData.startTime}`
+        : '';
+      const endDateTime = formData.endDate && formData.endTime
+        ? `${formData.endDate}T${formData.endTime}`
+        : '';
+
+      const eventData = {
+        name: formData.name,
+        description: formData.description,
+        eventType: formData.eventType,
+        programType: formData.programType,
+        startDateTime,
+        endDateTime,
+        location: formData.location,
+        maxAttendees: formData.maxAttendees,
+        price: formData.price,
+        requiresRegistration: formData.requiresRegistration,
+        isRecurring: formData.isRecurring,
+        recurrencePattern: formData.isRecurring ? JSON.stringify({
+          frequency: formData.recurrencePattern,
+          endDate: formData.recurrenceEndDate || null,
+        }) : null,
+        instructor: formData.instructor,
+      };
+
+      await api.post('/events', eventData);
       setShowCreateModal(false);
       resetForm();
       loadEvents();
@@ -183,12 +217,17 @@ const Events = () => {
       description: '',
       eventType: 'class',
       programType: 'All',
-      startDateTime: '',
-      endDateTime: '',
+      startDate: '',
+      startTime: '',
+      endDate: '',
+      endTime: '',
       location: '',
       maxAttendees: '',
       price: '',
       requiresRegistration: false,
+      isRecurring: false,
+      recurrencePattern: '',
+      recurrenceEndDate: '',
       instructor: '',
     });
   };
@@ -496,30 +535,126 @@ const Events = () => {
                 />
               </div>
 
-              <div className={styles.formRow}>
-                <div className={styles.formGroup}>
-                  <label>Start Date & Time *</label>
-                  <input
-                    type="datetime-local"
-                    value={formData.startDateTime}
-                    onChange={(e) =>
-                      setFormData({ ...formData, startDateTime: e.target.value })
-                    }
-                    required
-                    className={styles.input}
-                  />
+              <div className={styles.dateTimeSection}>
+                <h3 className={styles.sectionTitle}>Schedule</h3>
+
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label>Start Date *</label>
+                    <input
+                      type="date"
+                      value={formData.startDate}
+                      onChange={(e) => {
+                        setFormData({
+                          ...formData,
+                          startDate: e.target.value,
+                          // Auto-set end date to same day if not set
+                          endDate: formData.endDate || e.target.value
+                        });
+                      }}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Start Time *</label>
+                    <input
+                      type="time"
+                      value={formData.startTime}
+                      onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
                 </div>
 
-                <div className={styles.formGroup}>
-                  <label>End Date & Time *</label>
-                  <input
-                    type="datetime-local"
-                    value={formData.endDateTime}
-                    onChange={(e) => setFormData({ ...formData, endDateTime: e.target.value })}
-                    required
-                    className={styles.input}
-                  />
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label>End Date *</label>
+                    <input
+                      type="date"
+                      value={formData.endDate}
+                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                      min={formData.startDate}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>End Time *</label>
+                    <input
+                      type="time"
+                      value={formData.endTime}
+                      onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
                 </div>
+              </div>
+
+              <div className={styles.recurringSection}>
+                <div className={styles.formGroup}>
+                  <label className={styles.checkbox}>
+                    <input
+                      type="checkbox"
+                      checked={formData.isRecurring}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          isRecurring: e.target.checked,
+                          recurrencePattern: e.target.checked ? 'weekly' : '',
+                          recurrenceEndDate: ''
+                        })
+                      }
+                    />
+                    <span>Make this a recurring event</span>
+                  </label>
+                </div>
+
+                {formData.isRecurring && (
+                  <div className={styles.recurrenceOptions}>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label>Repeat</label>
+                        <select
+                          value={formData.recurrencePattern}
+                          onChange={(e) => setFormData({ ...formData, recurrencePattern: e.target.value })}
+                          className={styles.input}
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="biweekly">Every 2 Weeks</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+
+                      <div className={styles.formGroup}>
+                        <label>Repeat Until (Optional)</label>
+                        <input
+                          type="date"
+                          value={formData.recurrenceEndDate}
+                          onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                          min={formData.startDate}
+                          className={styles.input}
+                        />
+                      </div>
+                    </div>
+
+                    <div className={styles.recurrencePreview}>
+                      <CalendarIcon size={16} />
+                      <span>
+                        {formData.recurrencePattern === 'daily' && 'Repeats every day'}
+                        {formData.recurrencePattern === 'weekly' && `Repeats every ${formData.startDate ? new Date(formData.startDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }) : 'week'}`}
+                        {formData.recurrencePattern === 'biweekly' && `Repeats every 2 weeks on ${formData.startDate ? new Date(formData.startDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }) : 'the same day'}`}
+                        {formData.recurrencePattern === 'monthly' && `Repeats monthly on day ${formData.startDate ? new Date(formData.startDate + 'T12:00:00').getDate() : ''}`}
+                        {formData.recurrenceEndDate && ` until ${new Date(formData.recurrenceEndDate + 'T12:00:00').toLocaleDateString()}`}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className={styles.formGroup}>
