@@ -40,9 +40,25 @@ interface Audience {
   name: string;
 }
 
+interface Location {
+  id: number;
+  name: string;
+  address?: string;
+  isActive: boolean;
+}
+
+interface Instructor {
+  id: number;
+  firstName: string;
+  lastName: string;
+  isInstructor: boolean;
+}
+
 const Events = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
@@ -60,14 +76,14 @@ const Events = () => {
     startTime: '',
     endDate: '',
     endTime: '',
-    location: '',
+    locationId: '',
     maxAttendees: '',
     price: '',
     requiresRegistration: false,
     isRecurring: false,
     recurrencePattern: '',
     recurrenceEndDate: '',
-    instructor: '',
+    instructorId: '',
   });
 
   const [campaignData, setCampaignData] = useState({
@@ -78,6 +94,8 @@ const Events = () => {
   useEffect(() => {
     loadEvents();
     loadAudiences();
+    loadLocations();
+    loadInstructors();
   }, [filterType, filterProgram]);
 
   const loadEvents = async () => {
@@ -103,6 +121,26 @@ const Events = () => {
     }
   };
 
+  const loadLocations = async () => {
+    try {
+      const data = await api.get('/locations?isActive=true');
+      setLocations(data);
+    } catch (error) {
+      console.error('Failed to load locations:', error);
+    }
+  };
+
+  const loadInstructors = async () => {
+    try {
+      const data = await api.get('/users');
+      // Filter to only show instructors
+      const instructorList = data.filter((user: Instructor) => user.isInstructor);
+      setInstructors(instructorList);
+    } catch (error) {
+      console.error('Failed to load instructors:', error);
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -114,6 +152,16 @@ const Events = () => {
         ? `${formData.endDate}T${formData.endTime}`
         : '';
 
+      // Get location name for display
+      const selectedLocation = locations.find(l => l.id === Number(formData.locationId));
+      const locationName = selectedLocation ? selectedLocation.name : '';
+
+      // Get instructor name for display
+      const selectedInstructor = instructors.find(i => i.id === Number(formData.instructorId));
+      const instructorName = selectedInstructor
+        ? `${selectedInstructor.firstName} ${selectedInstructor.lastName}`
+        : '';
+
       const eventData = {
         name: formData.name,
         description: formData.description,
@@ -121,7 +169,8 @@ const Events = () => {
         programType: formData.programType,
         startDateTime,
         endDateTime,
-        location: formData.location,
+        location: locationName,
+        locationId: formData.locationId || null,
         maxAttendees: formData.maxAttendees,
         price: formData.price,
         requiresRegistration: formData.requiresRegistration,
@@ -130,7 +179,8 @@ const Events = () => {
           frequency: formData.recurrencePattern,
           endDate: formData.recurrenceEndDate || null,
         }) : null,
-        instructor: formData.instructor,
+        instructor: instructorName,
+        instructorId: formData.instructorId || null,
       };
 
       await api.post('/events', eventData);
@@ -221,14 +271,14 @@ const Events = () => {
       startTime: '',
       endDate: '',
       endTime: '',
-      location: '',
+      locationId: '',
       maxAttendees: '',
       price: '',
       requiresRegistration: false,
       isRecurring: false,
       recurrencePattern: '',
       recurrenceEndDate: '',
-      instructor: '',
+      instructorId: '',
     });
   };
 
@@ -657,24 +707,38 @@ const Events = () => {
                 )}
               </div>
 
-              <div className={styles.formGroup}>
-                <label>Location</label>
-                <input
-                  type="text"
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className={styles.input}
-                />
-              </div>
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Location</label>
+                  <select
+                    value={formData.locationId}
+                    onChange={(e) => setFormData({ ...formData, locationId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">Select a location...</option>
+                    {locations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className={styles.formGroup}>
-                <label>Instructor</label>
-                <input
-                  type="text"
-                  value={formData.instructor}
-                  onChange={(e) => setFormData({ ...formData, instructor: e.target.value })}
-                  className={styles.input}
-                />
+                <div className={styles.formGroup}>
+                  <label>Instructor</label>
+                  <select
+                    value={formData.instructorId}
+                    onChange={(e) => setFormData({ ...formData, instructorId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">Select an instructor...</option>
+                    {instructors.map((instructor) => (
+                      <option key={instructor.id} value={instructor.id}>
+                        {instructor.firstName} {instructor.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className={styles.formRow}>
