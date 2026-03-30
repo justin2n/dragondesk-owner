@@ -132,10 +132,8 @@ const Events = () => {
 
   const loadInstructors = async () => {
     try {
-      const data = await api.get('/users');
-      // Filter to only show instructors
-      const instructorList = data.filter((user: Instructor) => user.isInstructor);
-      setInstructors(instructorList);
+      const data = await api.get('/users/instructors');
+      setInstructors(data);
     } catch (error) {
       console.error('Failed to load instructors:', error);
     }

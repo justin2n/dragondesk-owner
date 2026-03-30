@@ -7,6 +7,20 @@ const router = Router();
 
 router.use(authenticateToken);
 
+// Get instructors only - available to all authenticated users
+router.get('/instructors', async (req: AuthRequest, res) => {
+  try {
+    const instructors = await query(
+      `SELECT id, firstName, lastName, specialties
+       FROM users WHERE isInstructor = true ORDER BY firstName, lastName`
+    );
+    res.json(instructors);
+  } catch (error) {
+    console.error('Get instructors error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/', authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const users = await query(
