@@ -254,7 +254,7 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
       setChanges([]);
       onChange({ ...variant, changes: [] });
       if (iframeRef.current) {
-        iframeRef.current.src = iframeRef.current.src; // Reload iframe
+        iframeRef.current.src = `/api/proxy?url=${encodeURIComponent(pageUrl)}`; // Reload iframe
       }
     }
   };
@@ -410,7 +410,7 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
 
         <iframe
           ref={iframeRef}
-          src={pageUrl}
+          src={`/api/proxy?url=${encodeURIComponent(pageUrl)}`}
           className={styles.iframe}
           title={`${variantLabel} Preview`}
         />

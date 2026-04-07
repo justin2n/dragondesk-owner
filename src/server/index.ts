@@ -35,6 +35,7 @@ import qrCodesRoutes from './routes/qr-codes';
 import kioskRoutes from './routes/kiosk';
 import attendanceRoutes from './routes/attendance';
 import walletPassesRoutes from './routes/wallet-passes';
+import proxyRoutes from './routes/proxy';
 
 dotenv.config();
 
@@ -82,6 +83,7 @@ app.use('/api/stripe/webhooks', stripeWebhooksRoutes);
 app.use('/api/check-ins', checkInsRoutes);
 app.use('/api/qr-codes', qrCodesRoutes);
 app.use('/api/kiosk', kioskRoutes);
+app.use('/api/proxy', proxyRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/wallet-passes', walletPassesRoutes);
 
