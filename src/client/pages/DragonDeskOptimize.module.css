@@ -77,6 +77,12 @@
   box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
 
+.headerActions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
 .cancelBtn {
   padding: 0.75rem 1.5rem;
   background: var(--color-grey);
