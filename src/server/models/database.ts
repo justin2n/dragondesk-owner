@@ -791,6 +791,52 @@ async function initializeDatabase() {
       console.log('Inserted default belt requirements');
     }
 
+    // Behavior Tracking — site config
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tracking_site_config (
+        id SERIAL PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        "createdBy" INTEGER REFERENCES users(id),
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Behavior Tracking — visitors
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tracking_visitors (
+        id SERIAL PRIMARY KEY,
+        "visitorId" TEXT NOT NULL,
+        token TEXT NOT NULL,
+        "firstSeen" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "lastSeen" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "eventCount" INTEGER DEFAULT 0,
+        "pageCount" INTEGER DEFAULT 0,
+        UNIQUE("visitorId", token)
+      )
+    `);
+
+    // Behavior Tracking — events
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tracking_events (
+        id SERIAL PRIMARY KEY,
+        "visitorId" TEXT NOT NULL,
+        "sessionId" TEXT,
+        token TEXT NOT NULL,
+        "eventType" TEXT NOT NULL,
+        "pageUrl" TEXT,
+        "pagePath" TEXT,
+        "pageTitle" TEXT,
+        selector TEXT,
+        "elementText" TEXT,
+        metadata TEXT,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_token ON tracking_events(token)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_visitor ON tracking_events("visitorId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_type ON tracking_events("eventType")`);
+
     // Seed admin user if none exists
     await seedAdminUser(client);
 
@@ -853,7 +899,9 @@ const camelCaseColumns = [
   'requiredSkillCategories', 'passType', 'recipientEmail', 'submitButtonText',
   'successMessage', 'redirectUrl', 'formId', 'sourceUrl', 'ipAddress', 'userAgent',
   'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB',
-  'pageUrl', 'trafficSplit', 'clickThroughRate', 'openRate', 'beltLevel'
+  'pageUrl', 'trafficSplit', 'clickThroughRate', 'openRate', 'beltLevel',
+  'visitorId', 'firstSeen', 'lastSeen', 'eventCount', 'pageCount',
+  'pagePath', 'pageTitle', 'elementText'
 ];
 
 // Function to quote camelCase identifiers for PostgreSQL

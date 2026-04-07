@@ -37,6 +37,7 @@ import attendanceRoutes from './routes/attendance';
 import walletPassesRoutes from './routes/wallet-passes';
 import proxyRoutes from './routes/proxy';
 import assistantRoutes from './routes/assistant';
+import trackingRoutes from './routes/tracking';
 
 dotenv.config();
 
@@ -86,6 +87,7 @@ app.use('/api/qr-codes', qrCodesRoutes);
 app.use('/api/kiosk', kioskRoutes);
 app.use('/api/proxy', proxyRoutes);
 app.use('/api/assistant', assistantRoutes);
+app.use('/api/tracking', trackingRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/wallet-passes', walletPassesRoutes);
 
