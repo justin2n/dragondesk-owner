@@ -171,7 +171,7 @@ const DragonDeskOptimize = () => {
         </div>
         <div className={styles.headerActions}>
           <button onClick={() => { setViewMode('tracking'); loadTrackingData(); }} className={styles.cancelBtn}>
-            Behavior Tracking
+            Experience Signals
           </button>
           <button onClick={handleCreateTest} className={styles.primaryBtn}>
             + Create Experience
@@ -524,8 +524,8 @@ const DragonDeskOptimize = () => {
       <>
         <div className={styles.pageHeader}>
           <div>
-            <h2 className={styles.pageTitle}>Behavior Tracking</h2>
-            <p className={styles.pageSubtitle}>Track visitor interactions and build behavior-based audiences</p>
+            <h2 className={styles.pageTitle}>Experience Signals</h2>
+            <p className={styles.pageSubtitle}>Understand how visitors engage with your site and build audiences from their interactions</p>
           </div>
           <button onClick={() => setViewMode('list')} className={styles.cancelBtn}>← Back</button>
         </div>
