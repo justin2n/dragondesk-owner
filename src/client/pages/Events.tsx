@@ -66,6 +66,7 @@ const Events = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const [calendarPopupEventId, setCalendarPopupEventId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [filterType, setFilterType] = useState<string>('all');
@@ -488,7 +489,7 @@ const Events = () => {
             </button>
           </div>
 
-          <div className={styles.calendarGrid}>
+          <div className={styles.calendarGrid} onClick={() => setCalendarPopupEventId(null)}>
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
               <div key={day} className={styles.dayHeader}>
                 {day}
@@ -505,16 +506,42 @@ const Events = () => {
                     <div className={styles.dayNumber}>{date.getDate()}</div>
                     <div className={styles.dayEvents}>
                       {getEventsForDate(date).map((event) => (
-                        <div
-                          key={event.id}
-                          className={styles.calendarEvent}
-                          onClick={() => {
-                            setSelectedEvent(event);
-                            setShowCampaignModal(true);
-                          }}
-                        >
-                          <span className={styles.eventDot}></span>
-                          {event.name}
+                        <div key={event.id} className={styles.calendarEventWrapper}>
+                          <div
+                            className={styles.calendarEvent}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCalendarPopupEventId(calendarPopupEventId === event.id ? null : event.id);
+                            }}
+                          >
+                            <span className={styles.eventDot}></span>
+                            {event.name}
+                          </div>
+                          {calendarPopupEventId === event.id && (
+                            <div className={styles.calendarPopup}>
+                              <button
+                                className={styles.calendarPopupBtn}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCalendarPopupEventId(null);
+                                  handleOpenEdit(event);
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className={styles.calendarPopupBtn}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCalendarPopupEventId(null);
+                                  setSelectedEvent(event);
+                                  setShowCampaignModal(true);
+                                }}
+                              >
+                                Create Campaign
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

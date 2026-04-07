@@ -179,6 +179,39 @@
   gap: 0.25rem;
 }
 
+.calendarEventWrapper {
+  position: relative;
+}
+
+.calendarPopup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.calendarPopupBtn {
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.calendarPopupBtn:hover {
+  background-color: var(--color-light-grey);
+}
+
 .calendarEvent {
   background-color: var(--color-red);
   padding: 0.25rem 0.5rem;
