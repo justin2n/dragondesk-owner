@@ -38,11 +38,11 @@ interface SearchResult {
   ranking?: string;
 }
 
-type ViewMode = 'scan' | 'search' | 'success' | 'already-checked-in' | 'error' | 'select-location';
+type ViewMode = 'loading' | 'scan' | 'search' | 'success' | 'already-checked-in' | 'error' | 'select-location';
 
 const Kiosk: React.FC = () => {
   const { locationId: paramLocationId } = useParams<{ locationId?: string }>();
-  const [viewMode, setViewMode] = useState<ViewMode>('scan');
+  const [viewMode, setViewMode] = useState<ViewMode>('loading');
   const [location, setLocation] = useState<Location | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [todaysClasses, setTodaysClasses] = useState<ClassEvent[]>([]);
@@ -57,7 +57,9 @@ const Kiosk: React.FC = () => {
 
   // Load locations if no locationId in URL
   useEffect(() => {
-    if (!locationId) {
+    if (locationId) {
+      setViewMode('scan');
+    } else {
       loadLocations();
     }
   }, []);
@@ -231,6 +233,16 @@ const Kiosk: React.FC = () => {
     setLocationId(id);
     setViewMode('scan');
   };
+
+  if (viewMode === 'loading') {
+    return (
+      <div className={styles.kioskContainer}>
+        <div className={styles.loadingView}>
+          <div className={styles.loadingSpinner} />
+        </div>
+      </div>
+    );
+  }
 
   if (viewMode === 'select-location') {
     return (
