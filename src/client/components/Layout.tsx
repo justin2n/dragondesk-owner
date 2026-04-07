@@ -52,18 +52,15 @@ const Layout = () => {
     { path: '/analytics', label: 'DragonDesk: Analytics', Icon: AnalyticsIcon },
   ];
 
-  const superAdminNavItems = user?.role === 'super_admin'
-    ? [{ path: '/workforce', label: 'Workforce Management', Icon: WorkforceIcon }]
-    : [];
-
   const adminNavItems = user?.role === 'admin' || user?.role === 'super_admin'
     ? [
+        { path: '/workforce', label: 'Workforce Management', Icon: WorkforceIcon },
         { path: '/billing', label: 'Billing', Icon: BillingIcon },
         { path: '/settings', label: 'Settings', Icon: SettingsIcon }
       ]
     : [];
 
-  const allNavItems = [...navItems, ...superAdminNavItems, ...adminNavItems];
+  const allNavItems = [...navItems, ...adminNavItems];
 
   return (
     <div className={styles.layout}>

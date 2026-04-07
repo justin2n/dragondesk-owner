@@ -24,6 +24,7 @@ interface Event {
   startDateTime: string;
   endDateTime: string;
   location: string;
+  locationId: number | null;
   maxAttendees: number;
   currentAttendees: number;
   price: number;
@@ -31,6 +32,7 @@ interface Event {
   isRecurring: boolean;
   recurrencePattern: string | null;
   instructor: string;
+  instructorId: number | null;
   status: string;
   attendees?: any[];
 }
@@ -61,6 +63,8 @@ const Events = () => {
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -199,6 +203,88 @@ const Events = () => {
       setSelectedEvent(null);
     } catch (error: any) {
       alert(error.message || 'Failed to delete event');
+    }
+  };
+
+  const handleOpenEdit = (event: Event) => {
+    const startDT = new Date(event.startDateTime);
+    const endDT = new Date(event.endDateTime);
+
+    let recurrencePattern = '';
+    let recurrenceEndDate = '';
+    if (event.recurrencePattern) {
+      try {
+        const parsed = JSON.parse(event.recurrencePattern);
+        recurrencePattern = parsed.frequency || '';
+        recurrenceEndDate = parsed.endDate || '';
+      } catch {}
+    }
+
+    setFormData({
+      name: event.name || '',
+      description: event.description || '',
+      eventType: event.eventType || 'class',
+      programType: event.programType || 'All',
+      startDate: startDT.toISOString().slice(0, 10),
+      startTime: startDT.toTimeString().slice(0, 5),
+      endDate: endDT.toISOString().slice(0, 10),
+      endTime: endDT.toTimeString().slice(0, 5),
+      locationId: event.locationId ? String(event.locationId) : '',
+      maxAttendees: event.maxAttendees ? String(event.maxAttendees) : '',
+      price: event.price ? String(event.price) : '',
+      requiresRegistration: event.requiresRegistration || false,
+      isRecurring: event.isRecurring || false,
+      recurrencePattern,
+      recurrenceEndDate,
+      instructorId: event.instructorId ? String(event.instructorId) : '',
+    });
+    setEditingEvent(event);
+    setShowEditModal(true);
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+    try {
+      const startDateTime = `${formData.startDate}T${formData.startTime}`;
+      const endDateTime = `${formData.endDate}T${formData.endTime}`;
+
+      const selectedLocation = locations.find(l => l.id === Number(formData.locationId));
+      const locationName = selectedLocation ? selectedLocation.name : '';
+
+      const selectedInstructor = instructors.find(i => i.id === Number(formData.instructorId));
+      const instructorName = selectedInstructor
+        ? `${selectedInstructor.firstName} ${selectedInstructor.lastName}`
+        : '';
+
+      const eventData = {
+        name: formData.name,
+        description: formData.description,
+        eventType: formData.eventType,
+        programType: formData.programType,
+        startDateTime,
+        endDateTime,
+        location: locationName,
+        locationId: formData.locationId || null,
+        maxAttendees: formData.maxAttendees,
+        price: formData.price,
+        requiresRegistration: formData.requiresRegistration,
+        isRecurring: formData.isRecurring,
+        recurrencePattern: formData.isRecurring ? JSON.stringify({
+          frequency: formData.recurrencePattern,
+          endDate: formData.recurrenceEndDate || null,
+        }) : null,
+        instructor: instructorName,
+        instructorId: formData.instructorId || null,
+      };
+
+      await api.put(`/events/${editingEvent.id}`, eventData);
+      setShowEditModal(false);
+      setEditingEvent(null);
+      resetForm();
+      loadEvents();
+    } catch (error: any) {
+      alert(error.message || 'Failed to update event');
     }
   };
 
@@ -459,6 +545,12 @@ const Events = () => {
                     className={styles.campaignBtn}
                   >
                     Create Campaign
+                  </button>
+                  <button
+                    onClick={() => handleOpenEdit(event)}
+                    className={styles.secondaryBtn}
+                  >
+                    Edit
                   </button>
                   <button
                     onClick={() => handleDelete(event.id)}
@@ -787,6 +879,260 @@ const Events = () => {
                 </button>
                 <button type="submit" className={styles.primaryBtn}>
                   Create Event
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Event Modal */}
+      {showEditModal && editingEvent && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent}>
+            <div className={styles.modalHeader}>
+              <h2>Edit Event</h2>
+              <button onClick={() => { setShowEditModal(false); setEditingEvent(null); resetForm(); }} className={styles.closeBtn}>
+                <CloseIcon size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdate} className={styles.form}>
+              <div className={styles.formGroup}>
+                <label>Event Name *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Event Type *</label>
+                  <select
+                    value={formData.eventType}
+                    onChange={(e) => setFormData({ ...formData, eventType: e.target.value })}
+                    className={styles.input}
+                  >
+                    {eventTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Program</label>
+                  <select
+                    value={formData.programType}
+                    onChange={(e) => setFormData({ ...formData, programType: e.target.value })}
+                    className={styles.input}
+                  >
+                    {programTypes.map((program) => (
+                      <option key={program} value={program}>
+                        {program}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className={styles.textarea}
+                  rows={3}
+                />
+              </div>
+
+              <div className={styles.dateTimeSection}>
+                <h3 className={styles.sectionTitle}>Schedule</h3>
+
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label>Start Date *</label>
+                    <input
+                      type="date"
+                      value={formData.startDate}
+                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value, endDate: formData.endDate || e.target.value })}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Start Time *</label>
+                    <input
+                      type="time"
+                      value={formData.startTime}
+                      onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
+                </div>
+
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label>End Date *</label>
+                    <input
+                      type="date"
+                      value={formData.endDate}
+                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                      min={formData.startDate}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>End Time *</label>
+                    <input
+                      type="time"
+                      value={formData.endTime}
+                      onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+                      required
+                      className={styles.input}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.recurringSection}>
+                <div className={styles.formGroup}>
+                  <label className={styles.checkbox}>
+                    <input
+                      type="checkbox"
+                      checked={formData.isRecurring}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          isRecurring: e.target.checked,
+                          recurrencePattern: e.target.checked ? (formData.recurrencePattern || 'weekly') : '',
+                          recurrenceEndDate: e.target.checked ? formData.recurrenceEndDate : '',
+                        })
+                      }
+                    />
+                    <span>Make this a recurring event</span>
+                  </label>
+                </div>
+
+                {formData.isRecurring && (
+                  <div className={styles.recurrenceOptions}>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label>Repeat</label>
+                        <select
+                          value={formData.recurrencePattern}
+                          onChange={(e) => setFormData({ ...formData, recurrencePattern: e.target.value })}
+                          className={styles.input}
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="biweekly">Every 2 Weeks</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+
+                      <div className={styles.formGroup}>
+                        <label>Repeat Until (Optional)</label>
+                        <input
+                          type="date"
+                          value={formData.recurrenceEndDate}
+                          onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                          min={formData.startDate}
+                          className={styles.input}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Location</label>
+                  <select
+                    value={formData.locationId}
+                    onChange={(e) => setFormData({ ...formData, locationId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">Select a location...</option>
+                    {locations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Instructor</label>
+                  <select
+                    value={formData.instructorId}
+                    onChange={(e) => setFormData({ ...formData, instructorId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">Select an instructor...</option>
+                    {instructors.map((instructor) => (
+                      <option key={instructor.id} value={instructor.id}>
+                        {instructor.firstName} {instructor.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Max Attendees</label>
+                  <input
+                    type="number"
+                    value={formData.maxAttendees}
+                    onChange={(e) => setFormData({ ...formData, maxAttendees: e.target.value })}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.checkbox}>
+                  <input
+                    type="checkbox"
+                    checked={formData.requiresRegistration}
+                    onChange={(e) => setFormData({ ...formData, requiresRegistration: e.target.checked })}
+                  />
+                  <span>Requires Registration</span>
+                </label>
+              </div>
+
+              <div className={styles.modalActions}>
+                <button
+                  type="button"
+                  onClick={() => { setShowEditModal(false); setEditingEvent(null); resetForm(); }}
+                  className={styles.secondaryBtn}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={styles.primaryBtn}>
+                  Save Changes
                 </button>
               </div>
             </form>
