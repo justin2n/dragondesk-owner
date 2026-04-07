@@ -23,6 +23,7 @@ import {
   CheckIcon,
 } from './Icons';
 import styles from './Layout.module.css';
+import AIAssistant from './AIAssistant';
 
 const Layout = () => {
   const { user, logout } = useAuth();
@@ -173,6 +174,7 @@ const Layout = () => {
           <Outlet />
         </main>
       </div>
+      <AIAssistant />
     </div>
   );
 };
