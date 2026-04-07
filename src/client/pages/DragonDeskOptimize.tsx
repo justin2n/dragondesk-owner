@@ -14,6 +14,7 @@ const DragonDeskOptimize = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [editingTest, setEditingTest] = useState<ABTest | null>(null);
   const [activeTab, setActiveTab] = useState<'variantA' | 'variantB'>('variantA');
+  const [previewUrl, setPreviewUrl] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -75,6 +76,7 @@ const DragonDeskOptimize = () => {
 
   const handleCreateTest = () => {
     setEditingTest(null);
+    setPreviewUrl('');
     setFormData({
       name: '',
       audienceId: '',
@@ -90,10 +92,12 @@ const DragonDeskOptimize = () => {
 
   const handleEditTest = (test: ABTest) => {
     setEditingTest(test);
+    const url = (test as any).pageUrl || '';
+    setPreviewUrl(url);
     setFormData({
       name: test.name,
       audienceId: test.audienceId.toString(),
-      pageUrl: (test as any).pageUrl || '',
+      pageUrl: url,
       trafficSplit: (test as any).trafficSplit || 50,
       variantA: { ...test.variantA, changes: test.variantA.changes || [] },
       variantB: { ...test.variantB, changes: test.variantB.changes || [] },
@@ -279,16 +283,27 @@ const DragonDeskOptimize = () => {
 
           <div className={styles.formGroup}>
             <label>Page URL *</label>
-            <input
-              type="url"
-              value={formData.pageUrl}
-              onChange={(e) => setFormData({ ...formData, pageUrl: e.target.value })}
-              className={styles.input}
-              placeholder="https://yourdomain.com/page-to-test"
-              required
-            />
+            <div className={styles.urlInputRow}>
+              <input
+                type="url"
+                value={formData.pageUrl}
+                onChange={(e) => setFormData({ ...formData, pageUrl: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setPreviewUrl(formData.pageUrl); } }}
+                className={styles.input}
+                placeholder="https://yourdomain.com/page-to-test"
+                required
+              />
+              <button
+                type="button"
+                className={styles.loadPreviewBtn}
+                onClick={() => setPreviewUrl(formData.pageUrl)}
+                disabled={!formData.pageUrl}
+              >
+                Load Preview
+              </button>
+            </div>
             <p className={styles.fieldHelp}>
-              Enter a URL from your website or a staging environment
+              Enter a URL then click Load Preview to open the visual editor
             </p>
           </div>
 
@@ -358,7 +373,7 @@ const DragonDeskOptimize = () => {
         </div>
 
         <div className={styles.editorMain}>
-          {formData.pageUrl ? (
+          {previewUrl ? (
             <>
               <div className={styles.tabsContainer}>
                 <div className={styles.tabs}>
@@ -390,7 +405,7 @@ const DragonDeskOptimize = () => {
               <div className={styles.tabContent}>
                 {activeTab === 'variantA' && (
                   <VisualPageEditor
-                    pageUrl={formData.pageUrl}
+                    pageUrl={previewUrl}
                     variant={formData.variantA}
                     onChange={(updatedVariant) =>
                       setFormData({ ...formData, variantA: updatedVariant })
@@ -401,7 +416,7 @@ const DragonDeskOptimize = () => {
 
                 {activeTab === 'variantB' && (
                   <VisualPageEditor
-                    pageUrl={formData.pageUrl}
+                    pageUrl={previewUrl}
                     variant={formData.variantB}
                     onChange={(updatedVariant) =>
                       setFormData({ ...formData, variantB: updatedVariant })

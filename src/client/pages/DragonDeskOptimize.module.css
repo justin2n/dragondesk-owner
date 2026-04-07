@@ -614,6 +614,37 @@
   font-style: italic;
 }
 
+.urlInputRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.urlInputRow .input {
+  flex: 1;
+}
+
+.loadPreviewBtn {
+  padding: 0 1rem;
+  background-color: var(--color-red);
+  color: var(--color-text-primary);
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.2s;
+}
+
+.loadPreviewBtn:hover:not(:disabled) {
+  background-color: var(--color-red-hover);
+}
+
+.loadPreviewBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
   .editorForm {
