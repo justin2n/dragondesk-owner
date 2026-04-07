@@ -8,6 +8,11 @@ const BLOCKED_HEADERS = new Set([
   'content-security-policy',
   'content-security-policy-report-only',
   'x-content-type-options',
+  // fetch() auto-decompresses the body, so these would cause double-decode
+  'content-encoding',
+  'transfer-encoding',
+  // content-length is wrong after we rewrite the HTML
+  'content-length',
 ]);
 
 // Basic SSRF protection: block private/loopback ranges
@@ -31,8 +36,11 @@ function isPrivateUrl(urlStr: string): boolean {
 // Inject a <base> tag so relative URLs resolve against the target origin,
 // and strip inline CSP meta tags.
 function rewriteHtml(html: string, targetUrl: string): string {
-  const origin = new URL(targetUrl).origin;
-  const baseTag = `<base href="${origin}/">`;
+  // Use the full URL (with trailing slash on the directory) so that relative
+  // paths like "../assets/" resolve correctly, not just same-origin paths.
+  const parsed = new URL(targetUrl);
+  const baseHref = parsed.origin + parsed.pathname.replace(/\/[^/]*$/, '/');
+  const baseTag = `<base href="${baseHref}">`;
 
   // Remove existing <base> tags
   let result = html.replace(/<base[^>]*>/gi, '');
