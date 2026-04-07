@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import QRScanner from '../components/QRScanner';
 import styles from './Kiosk.module.css';
 
 interface Location {
@@ -313,13 +312,6 @@ const Kiosk: React.FC = () => {
               >
                 Find Your Name to Check In
               </button>
-              <div className={styles.orDivider}>
-                <span>or scan QR code</span>
-              </div>
-              <QRScanner
-                onScan={handleQRScan}
-                isActive={viewMode === 'scan'}
-              />
             </div>
           )}
 
@@ -367,7 +359,7 @@ const Kiosk: React.FC = () => {
                 className={styles.backBtn}
                 onClick={resetToScan}
               >
-                Back to QR Scan
+                ← Back
               </button>
             </div>
           )}
