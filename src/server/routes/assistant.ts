@@ -353,9 +353,11 @@ router.post('/chat', authenticateToken, async (req: AuthRequest, res: Response) 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering (Railway)
 
   const send = (event: string, data: object) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    (res as any).flush?.(); // Force flush through proxy buffers
   };
 
   const systemPrompt = `You are the DragonDesk AI assistant — a helpful assistant built into the DragonDesk martial arts CRM platform. You can read and manage data across the entire platform including members, events, campaigns, audiences, and analytics.
