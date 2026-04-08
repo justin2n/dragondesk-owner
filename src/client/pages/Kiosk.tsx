@@ -90,6 +90,7 @@ const Kiosk: React.FC = () => {
       setLocations(data);
       if (data.length === 1) {
         setLocationId(data[0].id);
+        setViewMode('scan');
       } else {
         setViewMode('select-location');
       }
