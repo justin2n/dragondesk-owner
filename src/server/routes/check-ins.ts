@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { query, get, run } from '../models/database';
+import { pool } from '../models/database';
 
 const router = express.Router();
 
@@ -22,47 +22,47 @@ router.get('/', async (req: AuthRequest, res) => {
 
     let sql = `
       SELECT ci.*,
-        m.firstName, m.lastName, m.email, m.programType, m.ranking,
-        l.name as locationName,
-        e.name as eventName
+        m."firstName", m."lastName", m.email, m."programType", m.ranking,
+        l.name as "locationName",
+        e.name as "eventName"
       FROM check_ins ci
-      JOIN members m ON ci.memberId = m.id
-      LEFT JOIN locations l ON ci.locationId = l.id
-      LEFT JOIN events e ON ci.eventId = e.id
+      JOIN members m ON ci."memberId" = m.id
+      LEFT JOIN locations l ON ci."locationId" = l.id
+      LEFT JOIN events e ON ci."eventId" = e.id
       WHERE 1=1
     `;
     const params: any[] = [];
 
     if (locationId && locationId !== 'all') {
-      sql += ' AND ci.locationId = ?';
       params.push(locationId);
+      sql += ` AND ci."locationId" = $${params.length}`;
     }
 
     if (memberId) {
-      sql += ' AND ci.memberId = ?';
       params.push(memberId);
+      sql += ` AND ci."memberId" = $${params.length}`;
     }
 
     if (startDate) {
-      sql += ' AND DATE(ci.checkInTime) >= DATE(?)';
       params.push(startDate);
+      sql += ` AND DATE(ci."checkInTime") >= $${params.length}`;
     }
 
     if (endDate) {
-      sql += ' AND DATE(ci.checkInTime) <= DATE(?)';
       params.push(endDate);
+      sql += ` AND DATE(ci."checkInTime") <= $${params.length}`;
     }
 
     if (method) {
-      sql += ' AND ci.checkInMethod = ?';
       params.push(method);
+      sql += ` AND ci."checkInMethod" = $${params.length}`;
     }
 
-    sql += ' ORDER BY ci.checkInTime DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit as string), parseInt(offset as string));
+    sql += ` ORDER BY ci."checkInTime" DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
 
-    const checkIns = await query(sql, params);
-    res.json(checkIns);
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching check-ins:', error);
     res.status(500).json({ error: 'Failed to fetch check-ins' });
@@ -76,26 +76,26 @@ router.get('/today', async (req: AuthRequest, res) => {
 
     let sql = `
       SELECT ci.*,
-        m.firstName, m.lastName, m.email, m.programType, m.ranking,
-        l.name as locationName,
-        e.name as eventName
+        m."firstName", m."lastName", m.email, m."programType", m.ranking,
+        l.name as "locationName",
+        e.name as "eventName"
       FROM check_ins ci
-      JOIN members m ON ci.memberId = m.id
-      LEFT JOIN locations l ON ci.locationId = l.id
-      LEFT JOIN events e ON ci.eventId = e.id
-      WHERE DATE(ci.checkInTime) = DATE('now', 'localtime')
+      JOIN members m ON ci."memberId" = m.id
+      LEFT JOIN locations l ON ci."locationId" = l.id
+      LEFT JOIN events e ON ci."eventId" = e.id
+      WHERE DATE(ci."checkInTime") = CURRENT_DATE
     `;
     const params: any[] = [];
 
     if (locationId && locationId !== 'all') {
-      sql += ' AND ci.locationId = ?';
       params.push(locationId);
+      sql += ` AND ci."locationId" = $${params.length}`;
     }
 
-    sql += ' ORDER BY ci.checkInTime DESC';
+    sql += ` ORDER BY ci."checkInTime" DESC`;
 
-    const checkIns = await query(sql, params);
-    res.json(checkIns);
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching today\'s check-ins:', error);
     res.status(500).json({ error: 'Failed to fetch check-ins' });
@@ -107,65 +107,41 @@ router.get('/stats', async (req: AuthRequest, res) => {
   try {
     const { locationId } = req.query;
     const filterByLocation = locationId && locationId !== 'all';
+    const locParam = filterByLocation ? [locationId] : [];
+    const locClause = filterByLocation ? `WHERE "locationId" = $1` : '';
+    const locAndClause = filterByLocation ? `AND "locationId" = $1` : '';
 
-    // Total check-ins
-    const totalResult = await get(
-      filterByLocation
-        ? `SELECT COUNT(*) as total FROM check_ins WHERE locationId = ?`
-        : `SELECT COUNT(*) as total FROM check_ins`,
-      filterByLocation ? [locationId] : []
-    );
-
-    // Unique members
-    const uniqueResult = await get(
-      filterByLocation
-        ? `SELECT COUNT(DISTINCT memberId) as uniqueMembers FROM check_ins WHERE locationId = ?`
-        : `SELECT COUNT(DISTINCT memberId) as uniqueMembers FROM check_ins`,
-      filterByLocation ? [locationId] : []
-    );
-
-    // Check-ins by method
-    const byMethod = await query(
-      filterByLocation
-        ? `SELECT checkInMethod, COUNT(*) as count FROM check_ins WHERE locationId = ? GROUP BY checkInMethod`
-        : `SELECT checkInMethod, COUNT(*) as count FROM check_ins GROUP BY checkInMethod`,
-      filterByLocation ? [locationId] : []
-    );
-
-    // Check-ins by program
-    const byProgram = await query(
-      filterByLocation
-        ? `SELECT m.programType, COUNT(*) as count FROM check_ins ci JOIN members m ON ci.memberId = m.id WHERE ci.locationId = ? GROUP BY m.programType`
-        : `SELECT m.programType, COUNT(*) as count FROM check_ins ci JOIN members m ON ci.memberId = m.id GROUP BY m.programType`,
-      filterByLocation ? [locationId] : []
-    );
-
-    // Today's check-ins
-    const todayResult = await get(
-      filterByLocation
-        ? `SELECT COUNT(*) as today FROM check_ins WHERE DATE(checkInTime) = DATE('now', 'localtime') AND locationId = ?`
-        : `SELECT COUNT(*) as today FROM check_ins WHERE DATE(checkInTime) = DATE('now', 'localtime')`,
-      filterByLocation ? [locationId] : []
-    );
-
-    // Average per day (last 30 days)
-    const avgResult = await get(
-      filterByLocation
-        ? `SELECT CAST(COUNT(*) AS REAL) / 30 as avgPerDay FROM check_ins WHERE DATE(checkInTime) >= DATE('now', '-30 days') AND locationId = ?`
-        : `SELECT CAST(COUNT(*) AS REAL) / 30 as avgPerDay FROM check_ins WHERE DATE(checkInTime) >= DATE('now', '-30 days')`,
-      filterByLocation ? [locationId] : []
-    );
+    const [totalResult, uniqueResult, byMethod, byProgram, todayResult, avgResult] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as total FROM check_ins ${locClause}`, locParam),
+      pool.query(`SELECT COUNT(DISTINCT "memberId") as "uniqueMembers" FROM check_ins ${locClause}`, locParam),
+      pool.query(
+        `SELECT "checkInMethod", COUNT(*) as count FROM check_ins ${locClause} GROUP BY "checkInMethod"`,
+        locParam
+      ),
+      pool.query(
+        `SELECT m."programType", COUNT(*) as count FROM check_ins ci JOIN members m ON ci."memberId" = m.id ${filterByLocation ? 'WHERE ci."locationId" = $1' : ''} GROUP BY m."programType"`,
+        locParam
+      ),
+      pool.query(
+        `SELECT COUNT(*) as today FROM check_ins WHERE DATE("checkInTime") = CURRENT_DATE ${locAndClause}`,
+        locParam
+      ),
+      pool.query(
+        `SELECT COUNT(*)::DECIMAL / 30 as "avgPerDay" FROM check_ins WHERE "checkInTime" >= NOW() - INTERVAL '30 days' ${locAndClause}`,
+        locParam
+      ),
+    ]);
 
     res.json({
-      totalCheckIns: totalResult?.total || 0,
-      uniqueMembers: uniqueResult?.uniqueMembers || 0,
-      todayCheckIns: todayResult?.today || 0,
-      averagePerDay: avgResult?.avgPerDay || 0,
-      checkInsByMethod: (byMethod || []).reduce((acc: any, row: any) => {
+      totalCheckIns: totalResult.rows[0]?.total || 0,
+      uniqueMembers: uniqueResult.rows[0]?.uniqueMembers || 0,
+      todayCheckIns: todayResult.rows[0]?.today || 0,
+      averagePerDay: avgResult.rows[0]?.avgPerDay || 0,
+      checkInsByMethod: byMethod.rows.reduce((acc: any, row: any) => {
         acc[row.checkInMethod] = row.count;
         return acc;
       }, {}),
-      checkInsByProgram: (byProgram || []).reduce((acc: any, row: any) => {
+      checkInsByProgram: byProgram.rows.reduce((acc: any, row: any) => {
         acc[row.programType] = row.count;
         return acc;
       }, {})
@@ -182,45 +158,45 @@ router.get('/member/:memberId', async (req: AuthRequest, res) => {
     const { memberId } = req.params;
     const { limit = 50 } = req.query;
 
-    const checkIns = await query(`
-      SELECT ci.*,
-        l.name as locationName,
-        e.name as eventName
-      FROM check_ins ci
-      LEFT JOIN locations l ON ci.locationId = l.id
-      LEFT JOIN events e ON ci.eventId = e.id
-      WHERE ci.memberId = ?
-      ORDER BY ci.checkInTime DESC
-      LIMIT ?
-    `, [memberId, parseInt(limit as string)]);
+    const [checkInsResult, summaryResult, monthlyResult] = await Promise.all([
+      pool.query(`
+        SELECT ci.*,
+          l.name as "locationName",
+          e.name as "eventName"
+        FROM check_ins ci
+        LEFT JOIN locations l ON ci."locationId" = l.id
+        LEFT JOIN events e ON ci."eventId" = e.id
+        WHERE ci."memberId" = $1
+        ORDER BY ci."checkInTime" DESC
+        LIMIT $2
+      `, [memberId, parseInt(limit as string)]),
 
-    // Get attendance summary
-    const summary = await get(`
-      SELECT
-        COUNT(*) as totalCheckIns,
-        COUNT(DISTINCT DATE(checkInTime)) as uniqueDays,
-        MIN(checkInTime) as firstCheckIn,
-        MAX(checkInTime) as lastCheckIn
-      FROM check_ins
-      WHERE memberId = ?
-    `, [memberId]);
+      pool.query(`
+        SELECT
+          COUNT(*) as "totalCheckIns",
+          COUNT(DISTINCT DATE("checkInTime")) as "uniqueDays",
+          MIN("checkInTime") as "firstCheckIn",
+          MAX("checkInTime") as "lastCheckIn"
+        FROM check_ins
+        WHERE "memberId" = $1
+      `, [memberId]),
 
-    // Get monthly breakdown (last 6 months)
-    const monthly = await query(`
-      SELECT
-        strftime('%Y-%m', checkInTime) as month,
-        COUNT(*) as count
-      FROM check_ins
-      WHERE memberId = ?
-        AND checkInTime >= DATE('now', '-6 months')
-      GROUP BY strftime('%Y-%m', checkInTime)
-      ORDER BY month DESC
-    `, [memberId]);
+      pool.query(`
+        SELECT
+          TO_CHAR("checkInTime", 'YYYY-MM') as month,
+          COUNT(*) as count
+        FROM check_ins
+        WHERE "memberId" = $1
+          AND "checkInTime" >= NOW() - INTERVAL '6 months'
+        GROUP BY TO_CHAR("checkInTime", 'YYYY-MM')
+        ORDER BY month DESC
+      `, [memberId]),
+    ]);
 
     res.json({
-      checkIns,
-      summary,
-      monthlyBreakdown: monthly
+      checkIns: checkInsResult.rows,
+      summary: summaryResult.rows[0],
+      monthlyBreakdown: monthlyResult.rows
     });
   } catch (error) {
     console.error('Error fetching member check-ins:', error);
@@ -237,38 +213,37 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Member ID and Location ID are required' });
     }
 
-    // Verify member exists
-    const member = await get('SELECT id FROM members WHERE id = ?', [memberId]);
-    if (!member) {
+    const memberCheck = await pool.query('SELECT id FROM members WHERE id = $1', [memberId]);
+    if (memberCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found' });
     }
 
-    // Create check-in record
-    const result = await run(`
-      INSERT INTO check_ins (memberId, locationId, checkInMethod, eventId, notes, checkInTime, createdAt)
-      VALUES (?, ?, 'manual', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    const insertResult = await pool.query(`
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", notes, "checkInTime", "createdAt")
+      VALUES ($1, $2, 'manual', $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING id
     `, [memberId, locationId, eventId || null, notes || null]);
 
-    // Update member's attendance stats
-    await run(`
+    await pool.query(`
       UPDATE members
-      SET totalClassesAttended = COALESCE(totalClassesAttended, 0) + 1,
-          lastCheckInAt = CURRENT_TIMESTAMP,
-          updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?
+      SET "totalClassesAttended" = COALESCE("totalClassesAttended", 0) + 1,
+          "lastCheckInAt" = CURRENT_TIMESTAMP,
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $1
     `, [memberId]);
 
-    // If event specified, update event_attendees
     if (eventId) {
-      await run(`
-        INSERT OR REPLACE INTO event_attendees (eventId, memberId, status, checkedInAt, checkInMethod)
-        VALUES (?, ?, 'attended', CURRENT_TIMESTAMP, 'manual')
+      await pool.query(`
+        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, 'manual')
+        ON CONFLICT ("eventId", "memberId") DO UPDATE
+          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
       `, [eventId, memberId]);
     }
 
     res.json({
       success: true,
-      checkInId: result.id,
+      checkInId: insertResult.rows[0].id,
       message: 'Check-in recorded successfully'
     });
   } catch (error) {
@@ -282,21 +257,19 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    // Get check-in to update member stats
-    const checkIn = await get('SELECT memberId FROM check_ins WHERE id = ?', [id]);
-    if (!checkIn) {
+    const checkIn = await pool.query('SELECT "memberId" FROM check_ins WHERE id = $1', [id]);
+    if (checkIn.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    await run('DELETE FROM check_ins WHERE id = ?', [id]);
+    await pool.query('DELETE FROM check_ins WHERE id = $1', [id]);
 
-    // Update member's attendance count
-    await run(`
+    await pool.query(`
       UPDATE members
-      SET totalClassesAttended = MAX(0, COALESCE(totalClassesAttended, 0) - 1),
-          updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [checkIn.memberId]);
+      SET "totalClassesAttended" = GREATEST(0, COALESCE("totalClassesAttended", 0) - 1),
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [checkIn.rows[0].memberId]);
 
     res.json({ success: true, message: 'Check-in deleted' });
   } catch (error) {

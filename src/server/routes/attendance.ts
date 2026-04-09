@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { query, get, run } from '../models/database';
+import { pool } from '../models/database';
 
 const router = express.Router();
 
@@ -12,66 +12,59 @@ router.get('/member/:memberId', async (req: AuthRequest, res) => {
   try {
     const { memberId } = req.params;
 
-    // Get overall attendance stats
-    const stats = await get(`
-      SELECT
-        COUNT(*) as totalCheckIns,
-        COUNT(DISTINCT DATE(checkInTime)) as uniqueDays,
-        MIN(checkInTime) as firstCheckIn,
-        MAX(checkInTime) as lastCheckIn
-      FROM check_ins
-      WHERE memberId = ?
-    `, [memberId]);
+    const [statsResult, byProgramResult, monthlyResult, streakResult, memberResult] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*) as "totalCheckIns",
+          COUNT(DISTINCT DATE("checkInTime")) as "uniqueDays",
+          MIN("checkInTime") as "firstCheckIn",
+          MAX("checkInTime") as "lastCheckIn"
+        FROM check_ins
+        WHERE "memberId" = $1
+      `, [memberId]),
 
-    // Get attendance by program type (from events)
-    const byProgram = await query(`
-      SELECT e.programType, COUNT(*) as count
-      FROM check_ins ci
-      JOIN events e ON ci.eventId = e.id
-      WHERE ci.memberId = ? AND e.programType IS NOT NULL
-      GROUP BY e.programType
-    `, [memberId]);
+      pool.query(`
+        SELECT e."programType", COUNT(*) as count
+        FROM check_ins ci
+        JOIN events e ON ci."eventId" = e.id
+        WHERE ci."memberId" = $1 AND e."programType" IS NOT NULL
+        GROUP BY e."programType"
+      `, [memberId]),
 
-    // Get monthly attendance (last 12 months)
-    const monthly = await query(`
-      SELECT
-        strftime('%Y-%m', checkInTime) as month,
-        COUNT(*) as count
-      FROM check_ins
-      WHERE memberId = ?
-        AND checkInTime >= DATE('now', '-12 months')
-      GROUP BY strftime('%Y-%m', checkInTime)
-      ORDER BY month DESC
-    `, [memberId]);
+      pool.query(`
+        SELECT
+          TO_CHAR("checkInTime", 'YYYY-MM') as month,
+          COUNT(*) as count
+        FROM check_ins
+        WHERE "memberId" = $1
+          AND "checkInTime" >= NOW() - INTERVAL '12 months'
+        GROUP BY TO_CHAR("checkInTime", 'YYYY-MM')
+        ORDER BY month DESC
+      `, [memberId]),
 
-    // Get current streak
-    const streakResult = await get(`
-      SELECT attendanceStreak FROM members WHERE id = ?
-    `, [memberId]);
-
-    // Get classes since last promotion
-    const member = await get(`
-      SELECT ranking, lastPromotionAt FROM members WHERE id = ?
-    `, [memberId]);
+      pool.query(`SELECT "attendanceStreak" FROM members WHERE id = $1`, [memberId]),
+      pool.query(`SELECT ranking, "lastPromotionAt" FROM members WHERE id = $1`, [memberId]),
+    ]);
 
     let classesSincePromotion = 0;
+    const member = memberResult.rows[0];
     if (member) {
-      const promotionResult = await get(`
+      const promotionResult = await pool.query(`
         SELECT COUNT(*) as count FROM check_ins
-        WHERE memberId = ?
-          AND (? IS NULL OR checkInTime > ?)
-      `, [memberId, member.lastPromotionAt, member.lastPromotionAt]);
-      classesSincePromotion = promotionResult?.count || 0;
+        WHERE "memberId" = $1
+          AND ($2::timestamptz IS NULL OR "checkInTime" > $2)
+      `, [memberId, member.lastPromotionAt || null]);
+      classesSincePromotion = parseInt(promotionResult.rows[0]?.count) || 0;
     }
 
     res.json({
-      stats,
-      byProgram: byProgram.reduce((acc: any, row: any) => {
+      stats: statsResult.rows[0],
+      byProgram: byProgramResult.rows.reduce((acc: any, row: any) => {
         acc[row.programType] = row.count;
         return acc;
       }, {}),
-      monthlyAttendance: monthly,
-      currentStreak: streakResult?.attendanceStreak || 0,
+      monthlyAttendance: monthlyResult.rows,
+      currentStreak: streakResult.rows[0]?.attendanceStreak || 0,
       classesSincePromotion
     });
   } catch (error) {
@@ -85,76 +78,73 @@ router.get('/belt-progress/:memberId', async (req: AuthRequest, res) => {
   try {
     const { memberId } = req.params;
 
-    // Get member's current ranking and program
-    const member = await get(`
-      SELECT id, firstName, lastName, programType, ranking, lastPromotionAt,
-             totalClassesAttended, lastCheckInAt
-      FROM members WHERE id = ?
+    const memberResult = await pool.query(`
+      SELECT id, "firstName", "lastName", "programType", ranking, "lastPromotionAt",
+             "totalClassesAttended", "lastCheckInAt"
+      FROM members WHERE id = $1
     `, [memberId]);
 
-    if (!member) {
+    if (memberResult.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found' });
     }
 
-    // Get belt requirements for next rank
-    const requirements = await get(`
+    const member = memberResult.rows[0];
+
+    const requirementsResult = await pool.query(`
       SELECT * FROM belt_requirements
-      WHERE programType = ? AND fromRanking = ?
+      WHERE "programType" = $1 AND "fromRanking" = $2
     `, [member.programType, member.ranking]);
 
-    // Calculate classes since last promotion
+    const requirements = requirementsResult.rows[0] || null;
+
     let classesSincePromotion = 0;
     if (member.lastPromotionAt) {
-      const result = await get(`
+      const result = await pool.query(`
         SELECT COUNT(*) as count FROM check_ins
-        WHERE memberId = ? AND checkInTime > ?
+        WHERE "memberId" = $1 AND "checkInTime" > $2
       `, [memberId, member.lastPromotionAt]);
-      classesSincePromotion = result?.count || 0;
+      classesSincePromotion = parseInt(result.rows[0]?.count) || 0;
     } else {
       classesSincePromotion = member.totalClassesAttended || 0;
     }
 
-    // Calculate time in current rank (days)
     let timeInRank = 0;
     if (member.lastPromotionAt) {
       const promotionDate = new Date(member.lastPromotionAt);
-      const now = new Date();
-      timeInRank = Math.floor((now.getTime() - promotionDate.getTime()) / (1000 * 60 * 60 * 24));
+      timeInRank = Math.floor((Date.now() - promotionDate.getTime()) / (1000 * 60 * 60 * 24));
     }
 
-    // Get required skills learned
     let skillsProgress = { learned: 0, required: 0, skills: [] as any[] };
     if (requirements?.requiredSkillCategories) {
       try {
         const requiredCategories = JSON.parse(requirements.requiredSkillCategories);
-
-        // Get skills learned in required categories
-        const learnedSkills = await query(`
-          SELECT cs.skillCategory, msl.proficiencyLevel, cs.skillName
+        const placeholders = requiredCategories.map((_: any, i: number) => `$${i + 2}`).join(',');
+        const learnedSkills = await pool.query(`
+          SELECT cs."skillCategory", msl."proficiencyLevel", cs."skillName"
           FROM member_skills_learned msl
-          JOIN class_skills cs ON msl.skillId = cs.id
-          WHERE msl.memberId = ?
-            AND cs.skillCategory IN (${requiredCategories.map(() => '?').join(',')})
-            AND msl.proficiencyLevel = 'proficient'
+          JOIN class_skills cs ON msl."skillId" = cs.id
+          WHERE msl."memberId" = $1
+            AND cs."skillCategory" IN (${placeholders})
+            AND msl."proficiencyLevel" = 'proficient'
         `, [memberId, ...requiredCategories]);
 
         skillsProgress = {
-          learned: learnedSkills.length,
-          required: requiredCategories.length * 5, // Assume 5 skills per category
-          skills: learnedSkills
+          learned: learnedSkills.rows.length,
+          required: requiredCategories.length * 5,
+          skills: learnedSkills.rows
         };
       } catch (e) {
         // JSON parse error, ignore
       }
     }
 
-    // Calculate progress percentages
-    const classProgress = requirements ?
-      Math.min(100, Math.round((classesSincePromotion / requirements.minClassAttendance) * 100)) : 0;
-    const timeProgress = requirements ?
-      Math.min(100, Math.round((timeInRank / requirements.minTimeInRankDays) * 100)) : 0;
+    const classProgress = requirements
+      ? Math.min(100, Math.round((classesSincePromotion / requirements.minClassAttendance) * 100))
+      : 0;
+    const timeProgress = requirements
+      ? Math.min(100, Math.round((timeInRank / requirements.minTimeInRankDays) * 100))
+      : 0;
 
-    // Check if ready for promotion
     const readyForPromotion = requirements &&
       classesSincePromotion >= requirements.minClassAttendance &&
       timeInRank >= requirements.minTimeInRankDays;
@@ -170,13 +160,7 @@ router.get('/belt-progress/:memberId', async (req: AuthRequest, res) => {
         totalClassesAttended: member.totalClassesAttended
       },
       requirements,
-      progress: {
-        classesSincePromotion,
-        classProgress,
-        timeInRank,
-        timeProgress,
-        skillsProgress
-      },
+      progress: { classesSincePromotion, classProgress, timeInRank, timeProgress, skillsProgress },
       readyForPromotion,
       nextRanking: requirements?.toRanking || null
     });
@@ -191,29 +175,24 @@ router.get('/skills/member/:memberId', async (req: AuthRequest, res) => {
   try {
     const { memberId } = req.params;
 
-    const skills = await query(`
-      SELECT msl.*, cs.skillName, cs.skillCategory, cs.programType, cs.beltLevel, cs.description,
-             e.name as eventName, e.startDateTime as learnedInClass
+    const result = await pool.query(`
+      SELECT msl.*, cs."skillName", cs."skillCategory", cs."programType", cs."beltLevel", cs.description,
+             e.name as "eventName", e."startDateTime" as "learnedInClass"
       FROM member_skills_learned msl
-      JOIN class_skills cs ON msl.skillId = cs.id
-      LEFT JOIN events e ON msl.eventId = e.id
-      ORDER BY msl.learnedAt DESC
+      JOIN class_skills cs ON msl."skillId" = cs.id
+      LEFT JOIN events e ON msl."eventId" = e.id
+      WHERE msl."memberId" = $1
+      ORDER BY msl."learnedAt" DESC
     `, [memberId]);
 
-    // Group by category
+    const skills = result.rows;
     const byCategory = skills.reduce((acc: any, skill: any) => {
-      if (!acc[skill.skillCategory]) {
-        acc[skill.skillCategory] = [];
-      }
+      if (!acc[skill.skillCategory]) acc[skill.skillCategory] = [];
       acc[skill.skillCategory].push(skill);
       return acc;
     }, {});
 
-    res.json({
-      skills,
-      byCategory,
-      totalSkills: skills.length
-    });
+    res.json({ skills, byCategory, totalSkills: skills.length });
   } catch (error) {
     console.error('Error fetching member skills:', error);
     res.status(500).json({ error: 'Failed to fetch skills' });
@@ -224,34 +203,34 @@ router.get('/skills/member/:memberId', async (req: AuthRequest, res) => {
 router.post('/event/:eventId/skills', async (req: AuthRequest, res) => {
   try {
     const { eventId } = req.params;
-    const { skills } = req.body; // Array of { skillName, skillCategory, description }
+    const { skills } = req.body;
 
     if (!skills || !Array.isArray(skills)) {
       return res.status(400).json({ error: 'Skills array is required' });
     }
 
-    // Get event details for program type
-    const event = await get('SELECT programType FROM events WHERE id = ?', [eventId]);
-    if (!event) {
+    const eventResult = await pool.query('SELECT "programType" FROM events WHERE id = $1', [eventId]);
+    if (eventResult.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
 
+    const programType = eventResult.rows[0].programType;
     const createdSkills = [];
 
     for (const skill of skills) {
-      // Check if skill already exists for this event
-      const existing = await get(
-        'SELECT id FROM class_skills WHERE eventId = ? AND skillName = ?',
+      const existing = await pool.query(
+        'SELECT id FROM class_skills WHERE "eventId" = $1 AND "skillName" = $2',
         [eventId, skill.skillName]
       );
 
-      if (!existing) {
-        const result = await run(`
-          INSERT INTO class_skills (eventId, skillName, skillCategory, programType, beltLevel, description, createdAt)
-          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        `, [eventId, skill.skillName, skill.skillCategory, event.programType, skill.beltLevel || null, skill.description || null]);
+      if (existing.rows.length === 0) {
+        const result = await pool.query(`
+          INSERT INTO class_skills ("eventId", "skillName", "skillCategory", "programType", "beltLevel", description, "createdAt")
+          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+          RETURNING id
+        `, [eventId, skill.skillName, skill.skillCategory, programType, skill.beltLevel || null, skill.description || null]);
 
-        createdSkills.push({ id: result.id, ...skill });
+        createdSkills.push({ id: result.rows[0].id, ...skill });
       }
     }
 
@@ -275,41 +254,30 @@ router.post('/skills/learn', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Member ID and Skill ID are required' });
     }
 
-    // Check if already learned (update proficiency if so)
-    const existing = await get(
-      'SELECT id, proficiencyLevel FROM member_skills_learned WHERE memberId = ? AND skillId = ?',
+    const existing = await pool.query(
+      'SELECT id, "proficiencyLevel" FROM member_skills_learned WHERE "memberId" = $1 AND "skillId" = $2',
       [memberId, skillId]
     );
 
-    if (existing) {
-      // Only update if new proficiency is higher
+    if (existing.rows.length > 0) {
       const levels = ['introduced', 'practiced', 'proficient'];
-      if (levels.indexOf(proficiencyLevel) > levels.indexOf(existing.proficiencyLevel)) {
-        await run(`
+      if (levels.indexOf(proficiencyLevel) > levels.indexOf(existing.rows[0].proficiencyLevel)) {
+        await pool.query(`
           UPDATE member_skills_learned
-          SET proficiencyLevel = ?, instructorNotes = COALESCE(?, instructorNotes), learnedAt = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `, [proficiencyLevel, instructorNotes, existing.id]);
+          SET "proficiencyLevel" = $1, "instructorNotes" = COALESCE($2, "instructorNotes"), "learnedAt" = CURRENT_TIMESTAMP
+          WHERE id = $3
+        `, [proficiencyLevel, instructorNotes, existing.rows[0].id]);
       }
-
-      return res.json({
-        success: true,
-        updated: true,
-        message: 'Skill proficiency updated'
-      });
+      return res.json({ success: true, updated: true, message: 'Skill proficiency updated' });
     }
 
-    // Insert new skill record
-    const result = await run(`
-      INSERT INTO member_skills_learned (memberId, skillId, eventId, proficiencyLevel, instructorNotes, learnedAt)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    const result = await pool.query(`
+      INSERT INTO member_skills_learned ("memberId", "skillId", "eventId", "proficiencyLevel", "instructorNotes", "learnedAt")
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      RETURNING id
     `, [memberId, skillId, eventId || null, proficiencyLevel, instructorNotes || null]);
 
-    res.json({
-      success: true,
-      id: result.id,
-      message: 'Skill recorded for member'
-    });
+    res.json({ success: true, id: result.rows[0].id, message: 'Skill recorded for member' });
   } catch (error) {
     console.error('Error recording skill:', error);
     res.status(500).json({ error: 'Failed to record skill' });
@@ -325,14 +293,14 @@ router.get('/belt-requirements', async (req: AuthRequest, res) => {
     const params: any[] = [];
 
     if (programType) {
-      sql += ' WHERE programType = ?';
       params.push(programType);
+      sql += ` WHERE "programType" = $1`;
     }
 
-    sql += ' ORDER BY programType, id';
+    sql += ' ORDER BY "programType", id';
 
-    const requirements = await query(sql, params);
-    res.json(requirements);
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching belt requirements:', error);
     res.status(500).json({ error: 'Failed to fetch requirements' });
@@ -349,25 +317,20 @@ router.post('/promote/:memberId', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'New ranking is required' });
     }
 
-    // Get current member info
-    const member = await get('SELECT ranking, programType FROM members WHERE id = ?', [memberId]);
-    if (!member) {
+    const memberResult = await pool.query('SELECT ranking, "programType" FROM members WHERE id = $1', [memberId]);
+    if (memberResult.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found' });
     }
 
-    // Update member's ranking
-    await run(`
+    await pool.query(`
       UPDATE members
-      SET ranking = ?, lastPromotionAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?
+      SET ranking = $1, "lastPromotionAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $2
     `, [newRanking, memberId]);
-
-    // Log the promotion (could create a promotions table for history)
-    console.log(`Member ${memberId} promoted from ${member.ranking} to ${newRanking}`);
 
     res.json({
       success: true,
-      previousRanking: member.ranking,
+      previousRanking: memberResult.rows[0].ranking,
       newRanking,
       message: `Member promoted to ${newRanking}`
     });
@@ -386,24 +349,21 @@ router.get('/calendar/:memberId', async (req: AuthRequest, res) => {
     const yearNum = parseInt(year as string) || new Date().getFullYear();
     const monthNum = parseInt(month as string) || new Date().getMonth() + 1;
 
-    // Get all check-ins for the specified month
-    const checkIns = await query(`
-      SELECT ci.*, e.name as eventName, e.programType, l.name as locationName
+    const result = await pool.query(`
+      SELECT ci.*, e.name as "eventName", e."programType", l.name as "locationName"
       FROM check_ins ci
-      LEFT JOIN events e ON ci.eventId = e.id
-      LEFT JOIN locations l ON ci.locationId = l.id
-      WHERE ci.memberId = ?
-        AND strftime('%Y', ci.checkInTime) = ?
-        AND strftime('%m', ci.checkInTime) = ?
-      ORDER BY ci.checkInTime
-    `, [memberId, yearNum.toString(), monthNum.toString().padStart(2, '0')]);
+      LEFT JOIN events e ON ci."eventId" = e.id
+      LEFT JOIN locations l ON ci."locationId" = l.id
+      WHERE ci."memberId" = $1
+        AND EXTRACT(YEAR FROM ci."checkInTime") = $2
+        AND EXTRACT(MONTH FROM ci."checkInTime") = $3
+      ORDER BY ci."checkInTime"
+    `, [memberId, yearNum, monthNum]);
 
-    // Group by date
+    const checkIns = result.rows;
     const byDate = checkIns.reduce((acc: any, checkIn: any) => {
-      const date = checkIn.checkInTime.split('T')[0];
-      if (!acc[date]) {
-        acc[date] = [];
-      }
+      const date = new Date(checkIn.checkInTime).toISOString().split('T')[0];
+      if (!acc[date]) acc[date] = [];
       acc[date].push(checkIn);
       return acc;
     }, {});
