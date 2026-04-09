@@ -11,11 +11,22 @@ router.use(authenticateToken);
 
 // Create email transporter (configure with your SMTP settings)
 const createTransporter = async (settings?: any) => {
+  // Resolve SMTP config: explicit settings > environment variables
+  const host = settings?.host || process.env.SMTP_HOST;
+  const port = settings?.port || Number(process.env.SMTP_PORT) || 587;
+  const secure = settings?.secure ?? (process.env.SMTP_SECURE === 'true');
+  const username = settings?.username || process.env.SMTP_USER;
+  const password = settings?.password || process.env.SMTP_PASS;
+  const fromEmail = settings?.fromEmail || process.env.SMTP_FROM_EMAIL;
+
+  if (!host || !username || !password) {
+    throw new Error('SMTP credentials are not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables.');
+  }
+
   // Get DKIM configuration if fromEmail is provided
   let dkimOptions = undefined;
-
-  if (settings?.fromEmail) {
-    const domain = extractDomain(settings.fromEmail);
+  if (fromEmail) {
+    const domain = extractDomain(fromEmail);
     if (domain) {
       const dkimConfig = await getDKIMConfig(domain);
       if (dkimConfig) {
@@ -28,29 +39,13 @@ const createTransporter = async (settings?: any) => {
     }
   }
 
-  // Default to ethereal (test) email if no settings provided
-  if (!settings || !settings.host) {
-    // For testing, we'll use a simple configuration
-    // In production, users would configure their SMTP settings
-    return nodemailer.createTransport({
-      host: 'smtp.ethereal.email',
-      port: 587,
-      secure: false,
-      auth: {
-        user: 'ethereal.user@ethereal.email',
-        pass: 'ethereal.password'
-      },
-      dkim: dkimOptions,
-    });
-  }
-
   return nodemailer.createTransport({
-    host: settings.host,
-    port: settings.port || 587,
-    secure: settings.secure || false,
+    host,
+    port,
+    secure,
     auth: {
-      user: settings.username,
-      pass: settings.password,
+      user: username,
+      pass: password,
     },
     dkim: dkimOptions,
   });
@@ -118,13 +113,12 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
 
     const transporter = await createTransporter(emailSettings);
 
-    // Build the "from" field with optional name
-    let fromField = '"DragonDesk CRM" <noreply@dragondesk.com>';
-    if (emailSettings?.fromEmail) {
-      fromField = emailSettings.fromName
-        ? `"${emailSettings.fromName}" <${emailSettings.fromEmail}>`
-        : emailSettings.fromEmail;
-    }
+    // Build the "from" field: explicit settings > env vars > default
+    const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
+    const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
+    const fromField = fromEmail
+      ? `"${fromName}" <${fromEmail}>`
+      : `"${fromName}" <noreply@dragondesk.com>`;
 
     const info = await transporter.sendMail({
       from: fromField,
@@ -212,13 +206,12 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
 
     const transporter = await createTransporter(emailSettings);
 
-    // Build the "from" field with optional name
-    let fromField = '"DragonDesk CRM" <noreply@dragondesk.com>';
-    if (emailSettings?.fromEmail) {
-      fromField = emailSettings.fromName
-        ? `"${emailSettings.fromName}" <${emailSettings.fromEmail}>`
-        : emailSettings.fromEmail;
-    }
+    // Build the "from" field: explicit settings > env vars > default
+    const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
+    const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
+    const fromField = fromEmail
+      ? `"${fromName}" <${fromEmail}>`
+      : `"${fromName}" <noreply@dragondesk.com>`;
 
     let sent = 0;
     let failed = 0;
