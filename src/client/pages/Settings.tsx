@@ -101,17 +101,8 @@ const Settings = () => {
     enableLogging: true,
   });
 
-  // Email/SMTP Settings
-  const [smtpConfig, setSmtpConfig] = useState({
-    enabled: false,
-    host: '',
-    port: 587,
-    secure: false,
-    username: '',
-    password: '',
-    fromEmail: '',
-    fromName: '',
-  });
+  // Email/SMTP Settings (server-side env vars only)
+  const [smtpStatus, setSmtpStatus] = useState<any>(null);
   const [smtpTestStatus, setSmtpTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [smtpTestMessage, setSmtpTestMessage] = useState('');
 
@@ -312,10 +303,8 @@ const Settings = () => {
       setDatabaseConfig(JSON.parse(savedDatabase));
     }
 
-    const savedSmtp = localStorage.getItem('smtpConfig');
-    if (savedSmtp) {
-      setSmtpConfig(JSON.parse(savedSmtp));
-    }
+    // Load server-side SMTP config status
+    api.get('/email/config-status').then(setSmtpStatus).catch(() => {});
   };
 
   const handleThemeChange = (newTheme: 'light' | 'dark') => {
@@ -402,39 +391,24 @@ const Settings = () => {
     showSaveMessage('Database settings saved');
   };
 
-  const handleSmtpSave = () => {
-    localStorage.setItem('smtpConfig', JSON.stringify(smtpConfig));
-    showSaveMessage('Email settings saved');
-  };
-
   const handleTestSmtpConnection = async () => {
     setSmtpTestStatus('testing');
     setSmtpTestMessage('Testing connection...');
 
     try {
-      const response = await api.post('/email/test-connection', {
-        host: smtpConfig.host,
-        port: smtpConfig.port,
-        secure: smtpConfig.secure,
-        username: smtpConfig.username,
-        password: smtpConfig.password,
-        fromEmail: smtpConfig.fromEmail,
-        fromName: smtpConfig.fromName,
-      });
-
+      const response = await api.post('/email/test-server-connection', {});
       if (response.success) {
         setSmtpTestStatus('success');
-        setSmtpTestMessage('✓ Connection successful! SMTP server is configured correctly.');
+        setSmtpTestMessage('Connection successful. SMTP is configured correctly.');
       } else {
         setSmtpTestStatus('error');
-        setSmtpTestMessage(`✗ Connection failed: ${response.message || 'Unknown error'}`);
+        setSmtpTestMessage(`Connection failed: ${response.message || 'Unknown error'}`);
       }
     } catch (error: any) {
       setSmtpTestStatus('error');
-      setSmtpTestMessage(`✗ Connection failed: ${error.message || 'Could not connect to SMTP server'}`);
+      setSmtpTestMessage(`Connection failed: ${error.message || 'Could not reach server'}`);
     }
 
-    // Clear message after 5 seconds
     setTimeout(() => {
       setSmtpTestStatus('idle');
       setSmtpTestMessage('');
@@ -1548,156 +1522,50 @@ const Settings = () => {
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>Email Settings (SMTP)</h2>
               <p className={styles.sectionDesc}>
-                Configure your SMTP server to send emails from DragonDesk: Engage.
+                SMTP credentials are managed via server environment variables. Set these in your Railway project variables to configure email sending.
               </p>
 
-              <div className={styles.formGroup}>
-                <label className={styles.toggleLabel}>
-                  <input
-                    type="checkbox"
-                    checked={smtpConfig.enabled}
-                    onChange={e =>
-                      setSmtpConfig({ ...smtpConfig, enabled: e.target.checked })
-                    }
-                    className={styles.checkbox}
-                  />
-                  <span>Enable Custom SMTP Server</span>
-                </label>
-                <small className={styles.helpText}>
-                  If disabled, test emails will use Ethereal (fake SMTP for testing only)
-                </small>
+              <div className={styles.envVarTable}>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_HOST</div>
+                  <div className={styles.envVarValue}>{smtpStatus?.host || <span className={styles.notSet}>not set</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_PORT</div>
+                  <div className={styles.envVarValue}>{smtpStatus?.port || <span className={styles.notSet}>not set</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_SECURE</div>
+                  <div className={styles.envVarValue}>{smtpStatus ? String(smtpStatus.secure) : <span className={styles.notSet}>not set</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_USER</div>
+                  <div className={styles.envVarValue}>
+                    {smtpStatus?.userConfigured
+                      ? <span className={styles.configured}>configured</span>
+                      : <span className={styles.notSet}>not set</span>}
+                  </div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_PASS</div>
+                  <div className={styles.envVarValue}>
+                    {smtpStatus?.passConfigured
+                      ? <span className={styles.configured}>configured</span>
+                      : <span className={styles.notSet}>not set</span>}
+                  </div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_FROM_EMAIL</div>
+                  <div className={styles.envVarValue}>{smtpStatus?.fromEmail || <span className={styles.notSet}>not set</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SMTP_FROM_NAME</div>
+                  <div className={styles.envVarValue}>{smtpStatus?.fromName || <span className={styles.notSet}>not set</span>}</div>
+                </div>
               </div>
 
-              {smtpConfig.enabled && (
-                <>
-                  <div className={styles.formGroup}>
-                    <label className={styles.label}>SMTP Host *</label>
-                    <input
-                      type="text"
-                      value={smtpConfig.host}
-                      onChange={e =>
-                        setSmtpConfig({ ...smtpConfig, host: e.target.value })
-                      }
-                      className={styles.input}
-                      placeholder="smtp.gmail.com"
-                    />
-                    <small className={styles.helpText}>
-                      Your email provider's SMTP server address
-                    </small>
-                  </div>
-
-                  <div className={styles.formRow}>
-                    <div className={styles.formGroup}>
-                      <label className={styles.label}>SMTP Port *</label>
-                      <input
-                        type="number"
-                        value={smtpConfig.port}
-                        onChange={e =>
-                          setSmtpConfig({ ...smtpConfig, port: parseInt(e.target.value) })
-                        }
-                        className={styles.input}
-                        min="1"
-                        max="65535"
-                      />
-                      <small className={styles.helpText}>
-                        Common: 587 (TLS), 465 (SSL), 25 (unsecured)
-                      </small>
-                    </div>
-
-                    <div className={styles.formGroup}>
-                      <label className={styles.toggleLabel}>
-                        <input
-                          type="checkbox"
-                          checked={smtpConfig.secure}
-                          onChange={e =>
-                            setSmtpConfig({ ...smtpConfig, secure: e.target.checked })
-                          }
-                          className={styles.checkbox}
-                        />
-                        <span>Use SSL/TLS</span>
-                      </label>
-                      <small className={styles.helpText}>
-                        Enable for port 465, disable for port 587
-                      </small>
-                    </div>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label className={styles.label}>SMTP Username *</label>
-                    <input
-                      type="text"
-                      value={smtpConfig.username}
-                      onChange={e =>
-                        setSmtpConfig({ ...smtpConfig, username: e.target.value })
-                      }
-                      className={styles.input}
-                      placeholder="your-email@gmail.com"
-                    />
-                    <small className={styles.helpText}>
-                      Usually your email address
-                    </small>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label className={styles.label}>SMTP Password *</label>
-                    <input
-                      type="password"
-                      value={smtpConfig.password}
-                      onChange={e =>
-                        setSmtpConfig({ ...smtpConfig, password: e.target.value })
-                      }
-                      className={styles.input}
-                      placeholder="Enter SMTP password or app password"
-                    />
-                    <small className={styles.helpText}>
-                      For Gmail, use an App Password (not your regular password)
-                    </small>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label className={styles.label}>From Email Address *</label>
-                    <input
-                      type="email"
-                      value={smtpConfig.fromEmail}
-                      onChange={e =>
-                        setSmtpConfig({ ...smtpConfig, fromEmail: e.target.value })
-                      }
-                      className={styles.input}
-                      placeholder="noreply@yourgym.com"
-                    />
-                    <small className={styles.helpText}>
-                      The email address that will appear as the sender
-                    </small>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label className={styles.label}>From Name</label>
-                    <input
-                      type="text"
-                      value={smtpConfig.fromName}
-                      onChange={e =>
-                        setSmtpConfig({ ...smtpConfig, fromName: e.target.value })
-                      }
-                      className={styles.input}
-                      placeholder="Your Gym Name"
-                    />
-                    <small className={styles.helpText}>
-                      The name that will appear as the sender (optional)
-                    </small>
-                  </div>
-                </>
-              )}
-
               {smtpTestMessage && (
-                <div
-                  className={
-                    smtpTestStatus === 'success'
-                      ? styles.successMessage
-                      : smtpTestStatus === 'error'
-                      ? styles.errorMessage
-                      : styles.infoMessage
-                  }
-                >
+                <div className={smtpTestStatus === 'success' ? styles.successMessage : smtpTestStatus === 'error' ? styles.errorMessage : styles.infoMessage}>
                   {smtpTestMessage}
                 </div>
               )}
@@ -1706,27 +1574,18 @@ const Settings = () => {
                 <button
                   onClick={handleTestSmtpConnection}
                   className={styles.testBtn}
-                  disabled={
-                    smtpTestStatus === 'testing' ||
-                    !smtpConfig.host ||
-                    !smtpConfig.username ||
-                    !smtpConfig.password
-                  }
+                  disabled={smtpTestStatus === 'testing' || !smtpStatus?.configured}
                 >
-                  {smtpTestStatus === 'testing' ? 'Testing Connection...' : 'Test Connection'}
-                </button>
-                <button onClick={handleSmtpSave} className={styles.saveBtn}>
-                  Save Email Settings
+                  {smtpTestStatus === 'testing' ? 'Testing...' : 'Test Connection'}
                 </button>
               </div>
 
-              <div className={styles.warning}>
-                <WarningIcon size={20} />
-                <span>
-                  SMTP credentials are stored locally in your browser. For production use,
-                  consider using environment variables on the server.
-                </span>
-              </div>
+              {!smtpStatus?.configured && (
+                <div className={styles.warning}>
+                  <WarningIcon size={20} />
+                  <span>SMTP is not fully configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables.</span>
+                </div>
+              )}
             </div>
           )}
 

@@ -51,6 +51,35 @@ const createTransporter = async (settings?: any) => {
   });
 };
 
+// Get server-side SMTP config status (no credentials exposed)
+router.get('/config-status', async (req: AuthRequest, res) => {
+  res.json({
+    host: process.env.SMTP_HOST || null,
+    port: process.env.SMTP_PORT || '587',
+    secure: process.env.SMTP_SECURE === 'true',
+    userConfigured: !!process.env.SMTP_USER,
+    passConfigured: !!process.env.SMTP_PASS,
+    fromEmail: process.env.SMTP_FROM_EMAIL || null,
+    fromName: process.env.SMTP_FROM_NAME || null,
+    configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+  });
+});
+
+// Test server-side SMTP connection (uses env vars only)
+router.post('/test-server-connection', async (req: AuthRequest, res) => {
+  try {
+    const transporter = await createTransporter();
+    await transporter.verify();
+    res.json({ success: true, message: 'SMTP connection successful.' });
+  } catch (error: any) {
+    let message = error.message;
+    if (error.code === 'EAUTH') message = 'Authentication failed. Check SMTP_USER and SMTP_PASS.';
+    else if (error.code === 'ECONNREFUSED') message = 'Connection refused. Check SMTP_HOST and SMTP_PORT.';
+    else if (error.code === 'ETIMEDOUT') message = 'Connection timed out. Check SMTP_HOST and SMTP_PORT.';
+    res.json({ success: false, message });
+  }
+});
+
 // Test SMTP connection
 router.post('/test-connection', async (req: AuthRequest, res) => {
   try {
