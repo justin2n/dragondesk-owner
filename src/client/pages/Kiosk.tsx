@@ -86,16 +86,24 @@ const Kiosk: React.FC = () => {
   const loadLocations = async () => {
     try {
       const response = await fetch('/api/kiosk/locations');
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
       const data = await response.json();
-      setLocations(data);
       if (data.length === 1) {
+        setLocations(data);
         setLocationId(data[0].id);
         setViewMode('scan');
-      } else {
+      } else if (data.length > 1) {
+        setLocations(data);
         setViewMode('select-location');
+      } else {
+        // No locations configured — show error
+        setError('No locations are configured. Please set up a location in the admin panel.');
+        setViewMode('error');
       }
-    } catch (error) {
-      console.error('Error loading locations:', error);
+    } catch (err: any) {
+      console.error('Error loading locations:', err);
+      setError('Unable to connect to the server. Please try again.');
+      setViewMode('error');
     }
   };
 
@@ -240,6 +248,28 @@ const Kiosk: React.FC = () => {
       <div className={styles.kioskContainer}>
         <div className={styles.loadingView}>
           <div className={styles.loadingSpinner} />
+        </div>
+      </div>
+    );
+  }
+
+  // Top-level error (e.g. failed to load locations before any location is set)
+  if (viewMode === 'error' && !locationId) {
+    return (
+      <div className={styles.kioskContainer}>
+        <div className={styles.loadingView}>
+          <div className={styles.errorView}>
+            <div className={styles.errorIcon}>
+              <svg viewBox="0 0 24 24" width="80" height="80" fill="#ef4444">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+              </svg>
+            </div>
+            <h2 className={styles.errorTitle}>Connection Error</h2>
+            <p className={styles.errorMessage}>{error}</p>
+            <button className={styles.retryBtn} onClick={() => { setViewMode('loading'); loadLocations(); }}>
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );

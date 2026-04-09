@@ -1,5 +1,6 @@
 import express from 'express';
 import { query, get, run } from '../models/database';
+import { pool } from '../models/database';
 import { lookupMemberByQRCode } from '../services/qr-generator';
 
 const router = express.Router();
@@ -10,9 +11,9 @@ const router = express.Router();
 // Log kiosk activity
 async function logKioskActivity(locationId: number, action: string, memberId?: number, metadata?: any) {
   try {
-    await run(
-      `INSERT INTO kiosk_activity_logs (locationId, action, memberId, metadata, createdAt)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    await pool.query(
+      `INSERT INTO kiosk_activity_logs ("locationId", action, "memberId", metadata, "createdAt")
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
       [locationId, action, memberId || null, metadata ? JSON.stringify(metadata) : null]
     );
   } catch (error) {
@@ -25,20 +26,19 @@ router.get('/classes/today/:locationId', async (req, res) => {
   try {
     const { locationId } = req.params;
 
-    // Get today's classes - don't filter by locationId since not all events have it
-    const classes = await query(`
-      SELECT e.*, u.firstName as instructorFirstName, u.lastName as instructorLastName
+    const result = await pool.query(`
+      SELECT e.*, u."firstName" as "instructorFirstName", u."lastName" as "instructorLastName"
       FROM events e
-      LEFT JOIN users u ON e.instructorId = u.id
-      WHERE DATE(e.startDateTime) = DATE('now', 'localtime')
+      LEFT JOIN users u ON e."instructorId" = u.id
+      WHERE DATE(e."startDateTime") = CURRENT_DATE
         AND e.status = 'scheduled'
-        AND e.eventType = 'class'
-      ORDER BY e.startDateTime ASC
+        AND e."eventType" = 'class'
+      ORDER BY e."startDateTime" ASC
     `);
 
     await logKioskActivity(parseInt(locationId), 'view_classes');
 
-    res.json(classes);
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching today\'s classes:', error);
     res.status(500).json({ error: 'Failed to fetch classes' });
@@ -63,12 +63,12 @@ router.post('/check-in/qr', async (req, res) => {
     }
 
     // Check for duplicate check-in today
-    const existingCheckIn = await get(`
+    const existingResult = await pool.query(`
       SELECT id FROM check_ins
-      WHERE memberId = ? AND locationId = ? AND DATE(checkInTime) = DATE('now', 'localtime')
+      WHERE "memberId" = $1 AND "locationId" = $2 AND DATE("checkInTime") = CURRENT_DATE
     `, [member.id, locationId]);
 
-    if (existingCheckIn) {
+    if (existingResult.rows.length > 0) {
       return res.json({
         success: true,
         alreadyCheckedIn: true,
@@ -84,25 +84,28 @@ router.post('/check-in/qr', async (req, res) => {
     }
 
     // Create check-in record
-    const result = await run(`
-      INSERT INTO check_ins (memberId, locationId, checkInMethod, eventId, checkInTime, createdAt)
-      VALUES (?, ?, 'qr_scan', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    const insertResult = await pool.query(`
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "checkInTime", "createdAt")
+      VALUES ($1, $2, 'qr_scan', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING id
     `, [member.id, locationId, eventId || null]);
 
     // Update member's attendance stats
-    await run(`
+    await pool.query(`
       UPDATE members
-      SET totalClassesAttended = COALESCE(totalClassesAttended, 0) + 1,
-          lastCheckInAt = CURRENT_TIMESTAMP,
-          updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?
+      SET "totalClassesAttended" = COALESCE("totalClassesAttended", 0) + 1,
+          "lastCheckInAt" = CURRENT_TIMESTAMP,
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $1
     `, [member.id]);
 
     // If event specified, update event_attendees
     if (eventId) {
-      await run(`
-        INSERT OR REPLACE INTO event_attendees (eventId, memberId, status, checkedInAt, checkInMethod)
-        VALUES (?, ?, 'attended', CURRENT_TIMESTAMP, 'qr_scan')
+      await pool.query(`
+        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, 'qr_scan')
+        ON CONFLICT ("eventId", "memberId") DO UPDATE
+          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
       `, [eventId, member.id]);
     }
 
@@ -110,7 +113,7 @@ router.post('/check-in/qr', async (req, res) => {
 
     res.json({
       success: true,
-      checkInId: result.id,
+      checkInId: insertResult.rows[0].id,
       member: {
         id: member.id,
         firstName: member.firstName,
@@ -137,19 +140,19 @@ router.get('/member/lookup', async (req, res) => {
 
     const searchTerm = `%${search}%`;
 
-    const members = await query(`
-      SELECT id, firstName, lastName, email, phone, programType, ranking
+    const result = await pool.query(`
+      SELECT id, "firstName", "lastName", email, phone, "programType", ranking
       FROM members
-      WHERE (firstName || ' ' || lastName LIKE ?
-             OR email LIKE ?
-             OR phone LIKE ?)
-      ORDER BY firstName, lastName
+      WHERE ("firstName" || ' ' || "lastName" ILIKE $1
+             OR email ILIKE $1
+             OR phone ILIKE $1)
+      ORDER BY "firstName", "lastName"
       LIMIT 10
-    `, [searchTerm, searchTerm, searchTerm]);
+    `, [searchTerm]);
 
     await logKioskActivity(parseInt(locationId as string), 'member_search', undefined, { search });
 
-    res.json(members);
+    res.json(result.rows);
   } catch (error) {
     console.error('Error looking up member:', error);
     res.status(500).json({ error: 'Failed to look up member' });
@@ -166,22 +169,24 @@ router.post('/check-in/search', async (req, res) => {
     }
 
     // Verify member exists
-    const member = await get(`
-      SELECT id, firstName, lastName, programType, ranking
-      FROM members WHERE id = ?
+    const memberResult = await pool.query(`
+      SELECT id, "firstName", "lastName", "programType", ranking
+      FROM members WHERE id = $1
     `, [memberId]);
 
-    if (!member) {
+    if (memberResult.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found' });
     }
 
+    const member = memberResult.rows[0];
+
     // Check for duplicate check-in today
-    const existingCheckIn = await get(`
+    const existingResult = await pool.query(`
       SELECT id FROM check_ins
-      WHERE memberId = ? AND locationId = ? AND DATE(checkInTime) = DATE('now', 'localtime')
+      WHERE "memberId" = $1 AND "locationId" = $2 AND DATE("checkInTime") = CURRENT_DATE
     `, [memberId, locationId]);
 
-    if (existingCheckIn) {
+    if (existingResult.rows.length > 0) {
       return res.json({
         success: true,
         alreadyCheckedIn: true,
@@ -197,25 +202,28 @@ router.post('/check-in/search', async (req, res) => {
     }
 
     // Create check-in record
-    const result = await run(`
-      INSERT INTO check_ins (memberId, locationId, checkInMethod, eventId, checkInTime, createdAt)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    const insertResult = await pool.query(`
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "checkInTime", "createdAt")
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING id
     `, [memberId, locationId, method, eventId || null]);
 
     // Update member's attendance stats
-    await run(`
+    await pool.query(`
       UPDATE members
-      SET totalClassesAttended = COALESCE(totalClassesAttended, 0) + 1,
-          lastCheckInAt = CURRENT_TIMESTAMP,
-          updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?
+      SET "totalClassesAttended" = COALESCE("totalClassesAttended", 0) + 1,
+          "lastCheckInAt" = CURRENT_TIMESTAMP,
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $1
     `, [memberId]);
 
     // If event specified, update event_attendees
     if (eventId) {
-      await run(`
-        INSERT OR REPLACE INTO event_attendees (eventId, memberId, status, checkedInAt, checkInMethod)
-        VALUES (?, ?, 'attended', CURRENT_TIMESTAMP, ?)
+      await pool.query(`
+        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, $3)
+        ON CONFLICT ("eventId", "memberId") DO UPDATE
+          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
       `, [eventId, memberId, method]);
     }
 
@@ -223,7 +231,7 @@ router.post('/check-in/search', async (req, res) => {
 
     res.json({
       success: true,
-      checkInId: result.id,
+      checkInId: insertResult.rows[0].id,
       member: {
         id: member.id,
         firstName: member.firstName,
@@ -244,16 +252,16 @@ router.get('/location/:locationId', async (req, res) => {
   try {
     const { locationId } = req.params;
 
-    const location = await get(`
+    const result = await pool.query(`
       SELECT id, name, address, city, state, phone
-      FROM locations WHERE id = ? AND isActive = 1
+      FROM locations WHERE id = $1 AND "isActive" = true
     `, [locationId]);
 
-    if (!location) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Location not found' });
     }
 
-    res.json(location);
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching location:', error);
     res.status(500).json({ error: 'Failed to fetch location' });
@@ -263,13 +271,13 @@ router.get('/location/:locationId', async (req, res) => {
 // Get all active locations (for kiosk setup)
 router.get('/locations', async (_req, res) => {
   try {
-    const locations = await query(`
+    const result = await pool.query(`
       SELECT id, name, address, city, state
-      FROM locations WHERE isActive = 1
+      FROM locations WHERE "isActive" = true
       ORDER BY name
     `);
 
-    res.json(locations);
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching locations:', error);
     res.status(500).json({ error: 'Failed to fetch locations' });
@@ -281,15 +289,15 @@ router.get('/stats/:locationId', async (req, res) => {
   try {
     const { locationId } = req.params;
 
-    const stats = await get(`
+    const result = await pool.query(`
       SELECT
-        COUNT(*) as todayCheckIns,
-        COUNT(DISTINCT memberId) as uniqueMembers
+        COUNT(*) as "todayCheckIns",
+        COUNT(DISTINCT "memberId") as "uniqueMembers"
       FROM check_ins
-      WHERE locationId = ? AND DATE(checkInTime) = DATE('now', 'localtime')
+      WHERE "locationId" = $1 AND DATE("checkInTime") = CURRENT_DATE
     `, [locationId]);
 
-    res.json(stats);
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching kiosk stats:', error);
     res.status(500).json({ error: 'Failed to fetch stats' });
