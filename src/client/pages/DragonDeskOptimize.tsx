@@ -193,7 +193,7 @@ const DragonDeskOptimize = () => {
           if (!showEmbedCode && !trackingToken) loadTrackingData();
           setShowEmbedCode(v => !v);
         }}>
-          <span>📦 Site Embed Code</span>
+          <span>Site Embed Code</span>
           <span className={styles.embedToggle}>{showEmbedCode ? '▲ Hide' : '▼ Show'}</span>
         </div>
         {showEmbedCode && (
@@ -308,7 +308,6 @@ const DragonDeskOptimize = () => {
       <form onSubmit={handleSubmitTest} className={styles.editorForm}>
         <div className={styles.editorSidebar}>
           <div className={styles.infoBox}>
-            <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>💡</div>
             <strong style={{ display: 'block', marginBottom: '0.5rem' }}>Visual Editor Tips:</strong>
             <p style={{ fontSize: '0.85rem', margin: 0, lineHeight: 1.5 }}>
               The visual editor works best with pages on your own domain. External websites often block
