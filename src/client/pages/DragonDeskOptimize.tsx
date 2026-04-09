@@ -27,6 +27,7 @@ const DragonDeskOptimize = () => {
   const [audienceName, setAudienceName] = useState('');
   const [audienceOperator, setAudienceOperator] = useState<'any' | 'all'>('any');
   const [eventsFilter, setEventsFilter] = useState('');
+  const [showEmbedCode, setShowEmbedCode] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -184,6 +185,35 @@ const DragonDeskOptimize = () => {
           Create personalized website experiences for different audiences.
           Test variations of headlines, CTAs, and content to optimize conversion rates.
         </p>
+      </div>
+
+      {/* Embed code section */}
+      <div className={styles.embedSection}>
+        <div className={styles.embedHeader} onClick={() => {
+          if (!showEmbedCode && !trackingToken) loadTrackingData();
+          setShowEmbedCode(v => !v);
+        }}>
+          <span>📦 Site Embed Code</span>
+          <span className={styles.embedToggle}>{showEmbedCode ? '▲ Hide' : '▼ Show'}</span>
+        </div>
+        {showEmbedCode && (
+          <div className={styles.embedBody}>
+            <p className={styles.embedDesc}>
+              Add this script to the <code>&lt;head&gt;</code> of your website (or via Google Tag Manager) to enable personalization and Experience Signals tracking.
+            </p>
+            {trackingToken ? (
+              <div className={styles.codeBlock}>
+                <pre>{`<script async src="${window.location.origin}/api/tracking/script.js?token=${trackingToken}"></script>`}</pre>
+                <button className={styles.copyBtn} onClick={() => {
+                  navigator.clipboard.writeText(`<script async src="${window.location.origin}/api/tracking/script.js?token=${trackingToken}"></script>`);
+                  alert('Copied!');
+                }}>Copy</button>
+              </div>
+            ) : (
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>Loading token…</p>
+            )}
+          </div>
+        )}
       </div>
 
       {isLoading ? (
