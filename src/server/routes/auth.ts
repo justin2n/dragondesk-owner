@@ -73,7 +73,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
     res.json({
@@ -90,6 +90,35 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/refresh', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Token required' });
+  }
+
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+
+    // Re-fetch user to pick up any role changes
+    const user = await get('SELECT * FROM users WHERE id = ?', [decoded.id]);
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    const newToken = jwt.sign(
+      { id: user.id, username: user.username, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ token: newToken });
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
 });
 
