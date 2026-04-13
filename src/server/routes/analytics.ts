@@ -390,74 +390,136 @@ router.get('/value', authenticateToken, async (req: AuthRequest, res) => {
 
     const memberWhere = memberFilters.join(' AND ');
 
-    // ACV — average annualised contract value from active subscriptions (cents → dollars)
+    // ACV — annualized value per member using:
+    //   1. Their assigned pricing plan (pricingPlanId), or
+    //   2. Actual paid invoices annualized over their membership tenure
     const acvResult = await pool.query(`
-      SELECT AVG(
-        CASE pp."billingInterval"
-          WHEN 'month' THEN pp.amount * 12.0 * pp."intervalCount"
-          WHEN 'week'  THEN pp.amount * 52.0
-          WHEN 'year'  THEN pp.amount * 1.0  * pp."intervalCount"
-          ELSE              pp.amount * 12.0
-        END
-      ) / 100.0 AS acv
-      FROM subscriptions s
-      JOIN pricing_plans pp ON s."pricingPlanId" = pp.id
-      JOIN members m ON s."memberId" = m.id
-      WHERE s.status IN ('active', 'trialing')
-        AND ${memberWhere}
+      SELECT AVG(annual_value) AS acv
+      FROM (
+        SELECT
+          m.id,
+          CASE
+            -- Has a pricing plan assigned: annualize it
+            WHEN pp.id IS NOT NULL THEN (
+              CASE pp."billingInterval"
+                WHEN 'month' THEN pp.amount * 12.0 / GREATEST(pp."intervalCount", 1)
+                WHEN 'week'  THEN pp.amount * 52.0
+                WHEN 'year'  THEN pp.amount * 1.0  / GREATEST(pp."intervalCount", 1)
+                ELSE              pp.amount * 12.0
+              END
+            ) / 100.0
+            -- No plan: use actual paid invoices annualized over tenure
+            WHEN inv.total_paid > 0 AND m."memberStartDate" IS NOT NULL THEN
+              inv.total_paid / 100.0
+              / GREATEST(EXTRACT(EPOCH FROM (NOW() - m."memberStartDate")) / (86400.0 * 365.25), 0.0833)
+            ELSE NULL
+          END AS annual_value
+        FROM members m
+        LEFT JOIN pricing_plans pp ON m."pricingPlanId" = pp.id
+        LEFT JOIN (
+          SELECT "memberId", SUM("amountPaid") AS total_paid
+          FROM invoices
+          WHERE status = 'paid'
+          GROUP BY "memberId"
+        ) inv ON inv."memberId" = m.id
+        WHERE ${memberWhere}
+      ) vals
+      WHERE annual_value IS NOT NULL
     `, params);
 
-    // ALE — average lifetime engagement in months, using memberStartDate → canceledAt (or now)
+    // ALE — average lifetime in months using earliest paid invoice → latest paid invoice (or now)
+    // Falls back to memberStartDate when no invoices exist
     const aleResult = await pool.query(`
-      SELECT AVG(
-        EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44)
-      ) AS ale_months
-      FROM members m
-      LEFT JOIN LATERAL (
-        SELECT "canceledAt" FROM subscriptions
-        WHERE "memberId" = m.id
-        ORDER BY "createdAt" DESC LIMIT 1
-      ) sub ON true
-      WHERE ${memberWhere}
-        AND m."memberStartDate" IS NOT NULL
+      SELECT AVG(lifetime_months) AS ale_months
+      FROM (
+        SELECT
+          m.id,
+          CASE
+            WHEN inv.first_paid IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (COALESCE(inv.last_paid, NOW()) - inv.first_paid)) / (86400.0 * 30.44)
+            WHEN m."memberStartDate" IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44)
+            ELSE NULL
+          END AS lifetime_months
+        FROM members m
+        LEFT JOIN (
+          SELECT "memberId",
+                 MIN("paidAt") AS first_paid,
+                 MAX("paidAt") AS last_paid
+          FROM invoices
+          WHERE status = 'paid' AND "paidAt" IS NOT NULL
+          GROUP BY "memberId"
+        ) inv ON inv."memberId" = m.id
+        LEFT JOIN LATERAL (
+          SELECT "canceledAt" FROM subscriptions
+          WHERE "memberId" = m.id
+          ORDER BY "createdAt" DESC LIMIT 1
+        ) sub ON true
+        WHERE ${memberWhere}
+      ) lifetimes
+      WHERE lifetime_months IS NOT NULL AND lifetime_months > 0
     `, params);
 
-    // Modal lifetime engagement — most common whole-month duration bucket
+    // Modal lifetime engagement
     const modalResult = await pool.query(`
       SELECT
-        FLOOR(EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44))::int AS months,
+        FLOOR(lifetime_months)::int AS months,
         COUNT(*) AS count
-      FROM members m
-      LEFT JOIN LATERAL (
-        SELECT "canceledAt" FROM subscriptions
-        WHERE "memberId" = m.id
-        ORDER BY "createdAt" DESC LIMIT 1
-      ) sub ON true
-      WHERE ${memberWhere}
-        AND m."memberStartDate" IS NOT NULL
+      FROM (
+        SELECT
+          CASE
+            WHEN inv.first_paid IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (COALESCE(inv.last_paid, NOW()) - inv.first_paid)) / (86400.0 * 30.44)
+            WHEN m."memberStartDate" IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44)
+            ELSE NULL
+          END AS lifetime_months
+        FROM members m
+        LEFT JOIN (
+          SELECT "memberId", MIN("paidAt") AS first_paid, MAX("paidAt") AS last_paid
+          FROM invoices WHERE status = 'paid' AND "paidAt" IS NOT NULL GROUP BY "memberId"
+        ) inv ON inv."memberId" = m.id
+        LEFT JOIN LATERAL (
+          SELECT "canceledAt" FROM subscriptions WHERE "memberId" = m.id ORDER BY "createdAt" DESC LIMIT 1
+        ) sub ON true
+        WHERE ${memberWhere}
+      ) t
+      WHERE lifetime_months IS NOT NULL AND lifetime_months > 0
       GROUP BY 1
       ORDER BY count DESC, months ASC
       LIMIT 1
     `, params);
 
-    // Engagement distribution — for histogram (bucketed into 3-month bands)
+    // Engagement distribution histogram (3-month bands)
     const distributionResult = await pool.query(`
       SELECT
-        (FLOOR(EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44) / 3) * 3)::int AS bucket_start,
+        (FLOOR(lifetime_months / 3) * 3)::int AS bucket_start,
         COUNT(*) AS count
-      FROM members m
-      LEFT JOIN LATERAL (
-        SELECT "canceledAt" FROM subscriptions
-        WHERE "memberId" = m.id
-        ORDER BY "createdAt" DESC LIMIT 1
-      ) sub ON true
-      WHERE ${memberWhere}
-        AND m."memberStartDate" IS NOT NULL
+      FROM (
+        SELECT
+          CASE
+            WHEN inv.first_paid IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (COALESCE(inv.last_paid, NOW()) - inv.first_paid)) / (86400.0 * 30.44)
+            WHEN m."memberStartDate" IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44)
+            ELSE NULL
+          END AS lifetime_months
+        FROM members m
+        LEFT JOIN (
+          SELECT "memberId", MIN("paidAt") AS first_paid, MAX("paidAt") AS last_paid
+          FROM invoices WHERE status = 'paid' AND "paidAt" IS NOT NULL GROUP BY "memberId"
+        ) inv ON inv."memberId" = m.id
+        LEFT JOIN LATERAL (
+          SELECT "canceledAt" FROM subscriptions WHERE "memberId" = m.id ORDER BY "createdAt" DESC LIMIT 1
+        ) sub ON true
+        WHERE ${memberWhere}
+      ) t
+      WHERE lifetime_months IS NOT NULL AND lifetime_months > 0
       GROUP BY 1
       ORDER BY 1
     `, params);
 
-    // Transaction counts per member
+    // Transaction counts per member (Stripe invoices)
     const transactionsResult = await pool.query(`
       SELECT
         m.id,
@@ -465,13 +527,17 @@ router.get('/value', authenticateToken, async (req: AuthRequest, res) => {
         m."lastName",
         m."programType",
         m."membershipAge",
-        COUNT(i.id)::int                            AS transaction_count,
-        COALESCE(SUM(i."amountPaid"), 0) / 100.0   AS total_paid
+        pp.name                                       AS "planName",
+        pp.amount / 100.0                             AS "planAmount",
+        pp."billingInterval",
+        COUNT(i.id)::int                              AS transaction_count,
+        COALESCE(SUM(i."amountPaid"), 0) / 100.0      AS total_paid
       FROM members m
+      LEFT JOIN pricing_plans pp ON m."pricingPlanId" = pp.id
       LEFT JOIN invoices i ON i."memberId" = m.id AND i.status = 'paid'
       WHERE ${memberWhere}
-      GROUP BY m.id, m."firstName", m."lastName", m."programType", m."membershipAge"
-      ORDER BY transaction_count DESC, total_paid DESC
+      GROUP BY m.id, m."firstName", m."lastName", m."programType", m."membershipAge", pp.name, pp.amount, pp."billingInterval"
+      ORDER BY total_paid DESC, transaction_count DESC
       LIMIT 200
     `, params);
 
