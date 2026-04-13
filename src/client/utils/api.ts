@@ -39,6 +39,7 @@ const tryRefresh = (): Promise<boolean> => {
 };
 
 const redirectToLogin = () => {
+  if (window.location.pathname === '/login') return;
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   window.location.href = '/login';
