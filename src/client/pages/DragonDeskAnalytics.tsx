@@ -31,7 +31,24 @@ import {
 import styles from './DragonDeskAnalytics.module.css';
 
 type ChartType = 'line' | 'bar' | 'area' | 'pie';
-type ActiveSection = 'trials' | 'leads' | 'members';
+type ActiveSection = 'trials' | 'leads' | 'members' | 'value';
+
+interface ValueData {
+  acv: number;
+  aleMonths: number;
+  altv: number;
+  modalEngagementMonths: number | null;
+  engagementDistribution: { bucket_start: number; count: number }[];
+  transactions: {
+    id: number;
+    firstName: string;
+    lastName: string;
+    programType: string;
+    membershipAge: string;
+    transaction_count: number;
+    total_paid: number;
+  }[];
+}
 
 interface ProgramSummary {
   name: string;
@@ -74,7 +91,10 @@ const DragonDeskAnalytics = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<ActiveSection>('trials');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
+  const [selectedMembershipAge, setSelectedMembershipAge] = useState<string>('all');
   const [monthsBack, setMonthsBack] = useState<number>(12);
+  const [valueData, setValueData] = useState<ValueData | null>(null);
+  const [valueLoading, setValueLoading] = useState(false);
 
   // Chart type preferences for each section
   const [chartTypes, setChartTypes] = useState<Record<ActiveSection, ChartType>>({
@@ -83,21 +103,13 @@ const DragonDeskAnalytics = () => {
     members: 'line',
   });
 
-  useEffect(() => {
-    console.log('[DragonDeskAnalytics] useEffect triggered:', {
-      selectedLocation: selectedLocation?.name || 'none',
-      selectedLocationId: selectedLocation?.id,
-      isAllLocations,
-      monthsBack
-    });
+  const locationId = isAllLocations ? 'all' : String(selectedLocation?.id || '');
 
+  useEffect(() => {
     const fetchAnalytics = async () => {
       try {
         setIsLoading(true);
-        const locationId = isAllLocations ? 'all' : String(selectedLocation?.id || '');
-        console.log('[DragonDeskAnalytics] Fetching with locationId:', locationId);
         const response = await api.get(`/analytics/programs?months=${monthsBack}&locationId=${locationId}`);
-        console.log('[DragonDeskAnalytics] Response totals:', response.summary?.totals);
         setData(response);
       } catch (error) {
         console.error('Failed to load analytics:', error);
@@ -105,9 +117,29 @@ const DragonDeskAnalytics = () => {
         setIsLoading(false);
       }
     };
-
     fetchAnalytics();
   }, [selectedLocation, isAllLocations, monthsBack]);
+
+  useEffect(() => {
+    if (activeSection !== 'value') return;
+    const fetchValue = async () => {
+      try {
+        setValueLoading(true);
+        const qs = new URLSearchParams({
+          locationId,
+          ...(selectedProgram !== 'all' && { program: selectedProgram }),
+          ...(selectedMembershipAge !== 'all' && { membershipAge: selectedMembershipAge }),
+        });
+        const response = await api.get(`/analytics/value?${qs}`);
+        setValueData(response);
+      } catch (error) {
+        console.error('Failed to load value analytics:', error);
+      } finally {
+        setValueLoading(false);
+      }
+    };
+    fetchValue();
+  }, [activeSection, selectedLocation, isAllLocations, selectedProgram, selectedMembershipAge]);
 
   const getChartTypeIcon = (type: ChartType) => {
     switch (type) {
@@ -409,6 +441,111 @@ const DragonDeskAnalytics = () => {
     );
   };
 
+  const fmt = (n: number, decimals = 2) =>
+    n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+
+  const renderValueSection = () => {
+    if (valueLoading) return <div className={styles.loading}>Loading value metrics...</div>;
+    if (!valueData) return null;
+
+    const { acv, aleMonths, altv, modalEngagementMonths, engagementDistribution, transactions } = valueData;
+
+    return (
+      <div className={styles.sectionContent}>
+        {/* Key metric cards */}
+        <div className={styles.valueCards}>
+          <div className={styles.valueCard}>
+            <div className={styles.valueCardLabel}>ACV</div>
+            <div className={styles.valueCardTitle}>Avg Contract Value</div>
+            <div className={styles.valueCardAmount}>${fmt(acv)}</div>
+            <div className={styles.valueCardSub}>per year, per member</div>
+          </div>
+          <div className={styles.valueCard}>
+            <div className={styles.valueCardLabel}>ALE</div>
+            <div className={styles.valueCardTitle}>Avg Lifetime Engagement</div>
+            <div className={styles.valueCardAmount}>{fmt(aleMonths, 1)} mo</div>
+            <div className={styles.valueCardSub}>{fmt(aleMonths / 12, 1)} years average tenure</div>
+          </div>
+          <div className={`${styles.valueCard} ${styles.valueCardHighlight}`}>
+            <div className={styles.valueCardLabel}>ALTV</div>
+            <div className={styles.valueCardTitle}>Avg Lifetime Value</div>
+            <div className={styles.valueCardAmount}>${fmt(altv)}</div>
+            <div className={styles.valueCardSub}>ACV × ALE</div>
+          </div>
+        </div>
+
+        {/* Modal engagement */}
+        <div className={styles.modalEngagement}>
+          <div className={styles.modalEngagementLabel}>Modal Lifetime Engagement</div>
+          <div className={styles.modalEngagementValue}>
+            {modalEngagementMonths !== null ? `${modalEngagementMonths} months` : 'Insufficient data'}
+          </div>
+          <div className={styles.modalEngagementSub}>
+            Most common membership duration — the single most frequent tenure length across your filtered members
+          </div>
+        </div>
+
+        {/* Engagement distribution histogram */}
+        {engagementDistribution.length > 0 && (
+          <div className={styles.chartContainer}>
+            <div className={styles.chartHeader}>
+              <h3>Engagement Duration Distribution</h3>
+              <p>Number of members by tenure length (3-month bands)</p>
+            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={engagementDistribution.map(d => ({
+                label: `${d.bucket_start}–${d.bucket_start + 3}mo`,
+                count: parseInt(String(d.count)),
+              }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="label" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+                <Bar dataKey="count" name="Members" fill="#dc2626" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Transaction counts table */}
+        <div className={styles.chartContainer}>
+          <div className={styles.chartHeader}>
+            <h3>Transaction Counts by Member</h3>
+            <p>Paid invoices and total revenue per member</p>
+          </div>
+          <div className={styles.tableWrapper}>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Program</th>
+                  <th>Age Group</th>
+                  <th>Transactions</th>
+                  <th>Total Paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.length === 0 ? (
+                  <tr><td colSpan={5} className={styles.emptyRow}>No transaction data found for the selected filters.</td></tr>
+                ) : (
+                  transactions.map(t => (
+                    <tr key={t.id}>
+                      <td>{t.firstName} {t.lastName}</td>
+                      <td>{t.programType}</td>
+                      <td>{t.membershipAge}</td>
+                      <td className={styles.txCount}>{t.transaction_count}</td>
+                      <td className={styles.txAmount}>${fmt(t.total_paid)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -459,6 +596,19 @@ const DragonDeskAnalytics = () => {
               </div>
 
               <div className={styles.filterGroup}>
+                <label>Age Group:</label>
+                <select
+                  value={selectedMembershipAge}
+                  onChange={(e) => setSelectedMembershipAge(e.target.value)}
+                  className={styles.select}
+                >
+                  <option value="all">All Ages</option>
+                  <option value="Adult">Adult</option>
+                  <option value="Kids">Kids</option>
+                </select>
+              </div>
+
+              <div className={styles.filterGroup}>
                 <label>Chart Type:</label>
                 <div className={styles.chartTypeButtons}>
                   {(['line', 'bar', 'area', 'pie'] as ChartType[]).map((type) => (
@@ -494,12 +644,19 @@ const DragonDeskAnalytics = () => {
               >
                 Members
               </button>
+              <button
+                className={`${styles.tab} ${activeSection === 'value' ? styles.activeTab : ''}`}
+                onClick={() => setActiveSection('value')}
+              >
+                Value
+              </button>
             </div>
 
             <div className={styles.tabContent}>
               {activeSection === 'trials' && renderTrialsSection()}
               {activeSection === 'leads' && renderLeadsSection()}
               {activeSection === 'members' && renderMembersSection()}
+              {activeSection === 'value' && renderValueSection()}
             </div>
           </>
         )}

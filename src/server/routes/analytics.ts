@@ -1,5 +1,5 @@
 import express from 'express';
-import { query } from '../models/database';
+import { query, pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
@@ -340,6 +340,133 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching program analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Value metrics: ACV, ALE, ALTV, modal engagement, transaction counts
+router.get('/value', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { locationId, program, membershipAge } = req.query;
+
+    const memberFilters: string[] = [`m."accountStatus" = 'member'`];
+    const params: any[] = [];
+
+    if (locationId && locationId !== 'all') {
+      params.push(locationId);
+      memberFilters.push(`m."locationId" = $${params.length}`);
+    }
+    if (program && program !== 'all') {
+      params.push(program);
+      memberFilters.push(`m."programType" = $${params.length}`);
+    }
+    if (membershipAge && membershipAge !== 'all') {
+      params.push(membershipAge);
+      memberFilters.push(`m."membershipAge" = $${params.length}`);
+    }
+
+    const memberWhere = memberFilters.join(' AND ');
+
+    // ACV — average annualised contract value from active subscriptions (cents → dollars)
+    const acvResult = await pool.query(`
+      SELECT AVG(
+        CASE pp."billingInterval"
+          WHEN 'month' THEN pp.amount * 12.0 * pp."intervalCount"
+          WHEN 'week'  THEN pp.amount * 52.0
+          WHEN 'year'  THEN pp.amount * 1.0  * pp."intervalCount"
+          ELSE              pp.amount * 12.0
+        END
+      ) / 100.0 AS acv
+      FROM subscriptions s
+      JOIN pricing_plans pp ON s."pricingPlanId" = pp.id
+      JOIN members m ON s."memberId" = m.id
+      WHERE s.status IN ('active', 'trialing')
+        AND ${memberWhere}
+    `, params);
+
+    // ALE — average lifetime engagement in months, using memberStartDate → canceledAt (or now)
+    const aleResult = await pool.query(`
+      SELECT AVG(
+        EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44)
+      ) AS ale_months
+      FROM members m
+      LEFT JOIN LATERAL (
+        SELECT "canceledAt" FROM subscriptions
+        WHERE "memberId" = m.id
+        ORDER BY "createdAt" DESC LIMIT 1
+      ) sub ON true
+      WHERE ${memberWhere}
+        AND m."memberStartDate" IS NOT NULL
+    `, params);
+
+    // Modal lifetime engagement — most common whole-month duration bucket
+    const modalResult = await pool.query(`
+      SELECT
+        FLOOR(EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44))::int AS months,
+        COUNT(*) AS count
+      FROM members m
+      LEFT JOIN LATERAL (
+        SELECT "canceledAt" FROM subscriptions
+        WHERE "memberId" = m.id
+        ORDER BY "createdAt" DESC LIMIT 1
+      ) sub ON true
+      WHERE ${memberWhere}
+        AND m."memberStartDate" IS NOT NULL
+      GROUP BY 1
+      ORDER BY count DESC, months ASC
+      LIMIT 1
+    `, params);
+
+    // Engagement distribution — for histogram (bucketed into 3-month bands)
+    const distributionResult = await pool.query(`
+      SELECT
+        (FLOOR(EXTRACT(EPOCH FROM (COALESCE(sub."canceledAt", NOW()) - m."memberStartDate")) / (86400.0 * 30.44) / 3) * 3)::int AS bucket_start,
+        COUNT(*) AS count
+      FROM members m
+      LEFT JOIN LATERAL (
+        SELECT "canceledAt" FROM subscriptions
+        WHERE "memberId" = m.id
+        ORDER BY "createdAt" DESC LIMIT 1
+      ) sub ON true
+      WHERE ${memberWhere}
+        AND m."memberStartDate" IS NOT NULL
+      GROUP BY 1
+      ORDER BY 1
+    `, params);
+
+    // Transaction counts per member
+    const transactionsResult = await pool.query(`
+      SELECT
+        m.id,
+        m."firstName",
+        m."lastName",
+        m."programType",
+        m."membershipAge",
+        COUNT(i.id)::int                            AS transaction_count,
+        COALESCE(SUM(i."amountPaid"), 0) / 100.0   AS total_paid
+      FROM members m
+      LEFT JOIN invoices i ON i."memberId" = m.id AND i.status = 'paid'
+      WHERE ${memberWhere}
+      GROUP BY m.id, m."firstName", m."lastName", m."programType", m."membershipAge"
+      ORDER BY transaction_count DESC, total_paid DESC
+      LIMIT 200
+    `, params);
+
+    const acv = parseFloat(acvResult.rows[0]?.acv) || 0;
+    const aleMonths = parseFloat(aleResult.rows[0]?.ale_months) || 0;
+    const aleYears = aleMonths / 12;
+    const altv = acv * aleYears;
+
+    res.json({
+      acv: Math.round(acv * 100) / 100,
+      aleMonths: Math.round(aleMonths * 10) / 10,
+      altv: Math.round(altv * 100) / 100,
+      modalEngagementMonths: modalResult.rows[0]?.months ?? null,
+      engagementDistribution: distributionResult.rows,
+      transactions: transactionsResult.rows,
+    });
+  } catch (error: any) {
+    console.error('Error fetching value analytics:', error);
     res.status(500).json({ error: error.message });
   }
 });
