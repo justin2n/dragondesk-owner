@@ -1,5 +1,5 @@
 import express from 'express';
-import { query, pool } from '../models/database';
+import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
@@ -29,25 +29,25 @@ router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { timeframe = 'week', program, locationId } = req.query;
 
+    const params: any[] = [];
     let sql = `SELECT
         id,
-        accountStatus,
-        programType,
-        locationId,
-        createdAt,
-        updatedAt
+        "accountStatus",
+        "programType",
+        "locationId",
+        "createdAt",
+        "updatedAt"
       FROM members
       WHERE 1=1`;
-    const params: any[] = [];
 
     if (locationId && locationId !== 'all') {
-      sql += ' AND locationId = ?';
       params.push(locationId);
+      sql += ` AND "locationId" = $${params.length}`;
     }
 
-    sql += ' ORDER BY createdAt ASC';
+    sql += ' ORDER BY "createdAt" ASC';
 
-    let members: any[] = await query(sql, params);
+    let members: any[] = (await pool.query(sql, params)).rows;
 
     if (program && program !== 'all') {
       members = members.filter(m => m.programType === program);
@@ -149,25 +149,25 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     const monthsBack = parseInt(months as string) || 12;
 
     // Build base query
+    const params: any[] = [];
     let sql = `SELECT
         id,
-        accountStatus,
-        programType,
-        locationId,
-        trialStartDate,
-        memberStartDate,
-        createdAt,
-        updatedAt
+        "accountStatus",
+        "programType",
+        "locationId",
+        "trialStartDate",
+        "memberStartDate",
+        "createdAt",
+        "updatedAt"
       FROM members
       WHERE 1=1`;
-    const params: any[] = [];
 
     if (locationId && locationId !== 'all') {
-      sql += ' AND locationId = ?';
       params.push(locationId);
+      sql += ` AND "locationId" = $${params.length}`;
     }
 
-    const allMembers: any[] = await query(sql, params);
+    const allMembers: any[] = (await pool.query(sql, params)).rows;
     const membersByStatus = {
       member: allMembers.filter(m => m.accountStatus === 'member').length,
       trialer: allMembers.filter(m => m.accountStatus === 'trialer').length,
@@ -176,21 +176,20 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     console.log(`[Analytics] locationId=${locationId}, total=${allMembers.length}, breakdown:`, membersByStatus);
 
     // Get cancellations from churn_metrics table
-    // Join with members table to filter by location since churn_metrics doesn't have locationId
+    const churnParams: any[] = [];
     let churnSql = `
-      SELECT cm.*, m.locationId
+      SELECT cm.*, m."locationId"
       FROM churn_metrics cm
-      LEFT JOIN members m ON cm.memberId = m.id
+      LEFT JOIN members m ON cm."memberId" = m.id
       WHERE 1=1
     `;
-    const churnParams: any[] = [];
 
     if (locationId && locationId !== 'all') {
-      churnSql += ' AND m.locationId = ?';
       churnParams.push(locationId);
+      churnSql += ` AND m."locationId" = $${churnParams.length}`;
     }
 
-    const churnData: any[] = await query(churnSql, churnParams);
+    const churnData: any[] = (await pool.query(churnSql, churnParams)).rows;
 
     // Get available programs
     const programs = [...new Set(allMembers.map(m => m.programType))].filter(Boolean);
