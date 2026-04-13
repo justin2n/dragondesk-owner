@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import { pool } from './models/database';
 import authRoutes from './routes/auth';
 import membersRoutes from './routes/members';
 import audiencesRoutes from './routes/audiences';
@@ -97,7 +98,6 @@ app.get('/api/health', (req, res) => {
 
 // Temporary: assign pricing plans to members that don't have one
 app.post('/api/admin/assign-plans', async (req, res) => {
-  const { pool } = await import('./models/database');
   try {
     const plans = await pool.query(`SELECT id, "programType", "membershipAge", name FROM pricing_plans WHERE "isActive" = true ORDER BY id ASC`);
     if (plans.rows.length === 0) {
