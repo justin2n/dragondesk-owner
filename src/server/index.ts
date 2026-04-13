@@ -95,6 +95,40 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
 });
 
+// Temporary: assign pricing plans to members that don't have one
+app.post('/api/admin/assign-plans', async (req, res) => {
+  const { pool } = await import('./models/database');
+  try {
+    const plans = await pool.query(`SELECT id, "programType", "membershipAge", name FROM pricing_plans WHERE "isActive" = true ORDER BY id ASC`);
+    if (plans.rows.length === 0) {
+      return res.status(400).json({ error: 'No active pricing plans found. Create plans in Settings first.' });
+    }
+
+    const members = await pool.query(`SELECT id, "programType", "membershipAge" FROM members WHERE "pricingPlanId" IS NULL`);
+    if (members.rows.length === 0) {
+      return res.json({ message: 'All members already have a plan assigned.', updated: 0 });
+    }
+
+    let updated = 0;
+    for (const member of members.rows) {
+      // Try to find a matching plan by programType + membershipAge, then programType only, then any plan
+      let plan = plans.rows.find(p =>
+        (p.programType === member.programType || p.programType === 'All') &&
+        (p.membershipAge === member.membershipAge || p.membershipAge === 'All')
+      ) || plans.rows.find(p =>
+        p.programType === member.programType || p.programType === 'All'
+      ) || plans.rows[updated % plans.rows.length];
+
+      await pool.query(`UPDATE members SET "pricingPlanId" = $1 WHERE id = $2`, [plan.id, member.id]);
+      updated++;
+    }
+
+    res.json({ message: `Assigned plans to ${updated} members.`, updated });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   const clientPath = path.join(__dirname, '../client');
