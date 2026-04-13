@@ -837,6 +837,24 @@ async function initializeDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_visitor ON tracking_events("visitorId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_type ON tracking_events("eventType")`);
 
+    // Churn metrics table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS churn_metrics (
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        "firstName" TEXT NOT NULL,
+        "lastName" TEXT NOT NULL,
+        email TEXT NOT NULL,
+        "accountType" TEXT,
+        "programType" TEXT,
+        "membershipAge" TEXT,
+        "cancelledBy" INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        "cancellationReason" TEXT,
+        "cancelledAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Migrations
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
 
