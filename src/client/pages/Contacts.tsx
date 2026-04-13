@@ -410,7 +410,8 @@ const Contacts = () => {
         <div className={styles.loading}>Loading members...</div>
       ) : members.length === 0 ? (
         <div className={styles.empty}>
-          <p>No members found. Add your first member to get started!</p>
+          <p>No members found.</p>
+          <p className={styles.emptyHint}>If you have members, check the location dropdown at the top — members are filtered by the selected location.</p>
         </div>
       ) : viewMode === 'card' ? (
         <div className={styles.grid}>
