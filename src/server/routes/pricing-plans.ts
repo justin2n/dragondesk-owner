@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { query, run, get } from '../models/database';
+import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
 import { createStripePrice } from '../services/stripe';
 
@@ -12,33 +12,33 @@ router.get('/', async (req: AuthRequest, res) => {
   try {
     const { locationId, isActive, accountType, programType } = req.query;
 
-    let sql = 'SELECT * FROM pricing_plans WHERE 1=1';
     const params: any[] = [];
+    let sql = 'SELECT * FROM pricing_plans WHERE 1=1';
 
     if (locationId && locationId !== 'all') {
-      sql += ' AND (locationId = ? OR locationId IS NULL)';
       params.push(locationId);
+      sql += ` AND ("locationId" = $${params.length} OR "locationId" IS NULL)`;
     }
 
     if (isActive !== undefined) {
-      sql += ' AND isActive = ?';
-      params.push(isActive === 'true' ? 1 : 0);
+      params.push(isActive === 'true');
+      sql += ` AND "isActive" = $${params.length}`;
     }
 
     if (accountType) {
-      sql += ' AND accountType = ?';
       params.push(accountType);
+      sql += ` AND "accountType" = $${params.length}`;
     }
 
     if (programType) {
-      sql += ' AND (programType = ? OR programType = \'All\')';
       params.push(programType);
+      sql += ` AND ("programType" = $${params.length} OR "programType" = 'All')`;
     }
 
     sql += ' ORDER BY amount ASC';
 
-    const plans = await query(sql, params);
-    res.json(plans);
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
   } catch (error) {
     console.error('Get pricing plans error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -48,13 +48,13 @@ router.get('/', async (req: AuthRequest, res) => {
 // Get single pricing plan
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
-    const plan = await get('SELECT * FROM pricing_plans WHERE id = ?', [req.params.id]);
+    const result = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [req.params.id]);
 
-    if (!plan) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Pricing plan not found' });
     }
 
-    res.json(plan);
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Get pricing plan error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -83,11 +83,12 @@ router.post('/', authorizeAdmin, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Name, accountType, amount, and billingInterval are required' });
     }
 
-    const result = await run(
+    const insertResult = await pool.query(
       `INSERT INTO pricing_plans (
-        name, description, accountType, programType, membershipAge,
-        amount, currency, billingInterval, intervalCount, trialDays, locationId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        name, description, "accountType", "programType", "membershipAge",
+        amount, currency, "billingInterval", "intervalCount", "trialDays", "locationId"
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      RETURNING *`,
       [
         name,
         description || null,
@@ -99,17 +100,17 @@ router.post('/', authorizeAdmin, async (req: AuthRequest, res) => {
         billingInterval,
         intervalCount || 1,
         trialDays || 0,
-        locationId || null
+        locationId || null,
       ]
     );
 
-    let newPlan = await get('SELECT * FROM pricing_plans WHERE id = ?', [result.id]);
+    let newPlan = insertResult.rows[0];
 
-    // Sync to Stripe if requested
     if (syncToStripe) {
       const stripeResult = await createStripePrice(newPlan);
       if (stripeResult.success) {
-        newPlan = await get('SELECT * FROM pricing_plans WHERE id = ?', [result.id]);
+        const updated = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [newPlan.id]);
+        newPlan = updated.rows[0];
       }
     }
 
@@ -139,28 +140,28 @@ router.put('/:id', authorizeAdmin, async (req: AuthRequest, res) => {
       isActive
     } = req.body;
 
-    const existing = await get('SELECT * FROM pricing_plans WHERE id = ?', [id]);
-
-    if (!existing) {
+    const existing = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Pricing plan not found' });
     }
 
-    await run(
+    const updateResult = await pool.query(
       `UPDATE pricing_plans SET
-        name = COALESCE(?, name),
-        description = COALESCE(?, description),
-        accountType = COALESCE(?, accountType),
-        programType = COALESCE(?, programType),
-        membershipAge = COALESCE(?, membershipAge),
-        amount = COALESCE(?, amount),
-        currency = COALESCE(?, currency),
-        billingInterval = COALESCE(?, billingInterval),
-        intervalCount = COALESCE(?, intervalCount),
-        trialDays = COALESCE(?, trialDays),
-        locationId = ?,
-        isActive = COALESCE(?, isActive),
-        updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+        name = COALESCE($1, name),
+        description = COALESCE($2, description),
+        "accountType" = COALESCE($3, "accountType"),
+        "programType" = COALESCE($4, "programType"),
+        "membershipAge" = COALESCE($5, "membershipAge"),
+        amount = COALESCE($6, amount),
+        currency = COALESCE($7, currency),
+        "billingInterval" = COALESCE($8, "billingInterval"),
+        "intervalCount" = COALESCE($9, "intervalCount"),
+        "trialDays" = COALESCE($10, "trialDays"),
+        "locationId" = $11,
+        "isActive" = COALESCE($12, "isActive"),
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $13
+      RETURNING *`,
       [
         name,
         description,
@@ -172,14 +173,13 @@ router.put('/:id', authorizeAdmin, async (req: AuthRequest, res) => {
         billingInterval,
         intervalCount,
         trialDays,
-        locationId !== undefined ? locationId : existing.locationId,
-        isActive !== undefined ? (isActive ? 1 : 0) : null,
-        id
+        locationId !== undefined ? locationId : existing.rows[0].locationId,
+        isActive !== undefined ? isActive : null,
+        id,
       ]
     );
 
-    const updated = await get('SELECT * FROM pricing_plans WHERE id = ?', [id]);
-    res.json(updated);
+    res.json(updateResult.rows[0]);
   } catch (error) {
     console.error('Update pricing plan error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -191,19 +191,19 @@ router.post('/:id/sync', authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    const plan = await get('SELECT * FROM pricing_plans WHERE id = ?', [id]);
-
-    if (!plan) {
+    const result = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Pricing plan not found' });
     }
 
-    const result = await createStripePrice(plan);
+    const plan = result.rows[0];
+    const stripeResult = await createStripePrice(plan);
 
-    if (result.success) {
-      const updated = await get('SELECT * FROM pricing_plans WHERE id = ?', [id]);
-      res.json({ success: true, plan: updated });
+    if (stripeResult.success) {
+      const updated = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [id]);
+      res.json({ success: true, plan: updated.rows[0] });
     } else {
-      res.status(400).json({ success: false, error: result.error });
+      res.status(400).json({ success: false, error: stripeResult.error });
     }
   } catch (error) {
     console.error('Sync pricing plan error:', error);
@@ -216,29 +216,25 @@ router.delete('/:id', authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await get('SELECT * FROM pricing_plans WHERE id = ?', [id]);
-
-    if (!existing) {
+    const existing = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Pricing plan not found' });
     }
 
-    // Check if plan has active subscriptions
-    const activeSubscriptions = await get(
-      'SELECT COUNT(*) as count FROM subscriptions WHERE pricingPlanId = ? AND status IN (\'active\', \'trialing\')',
+    const activeSubs = await pool.query(
+      `SELECT COUNT(*) AS count FROM subscriptions WHERE "pricingPlanId" = $1 AND status IN ('active', 'trialing')`,
       [id]
     );
 
-    if (activeSubscriptions && activeSubscriptions.count > 0) {
-      // Deactivate instead of delete
-      await run(
-        'UPDATE pricing_plans SET isActive = 0, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+    if (parseInt(activeSubs.rows[0].count) > 0) {
+      await pool.query(
+        `UPDATE pricing_plans SET "isActive" = false, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
         [id]
       );
       return res.json({ message: 'Pricing plan deactivated (has active subscriptions)' });
     }
 
-    // Delete if no active subscriptions
-    await run('DELETE FROM pricing_plans WHERE id = ?', [id]);
+    await pool.query('DELETE FROM pricing_plans WHERE id = $1', [id]);
     res.json({ message: 'Pricing plan deleted successfully' });
   } catch (error) {
     console.error('Delete pricing plan error:', error);

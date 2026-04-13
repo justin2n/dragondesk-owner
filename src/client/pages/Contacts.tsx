@@ -33,6 +33,7 @@ const Contacts = () => {
   const [memberPaymentMethods, setMemberPaymentMethods] = useState<PaymentMethod[]>([]);
   const [memberInvoices, setMemberInvoices] = useState<Invoice[]>([]);
   const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
+  const [allPricingPlans, setAllPricingPlans] = useState<PricingPlan[]>([]);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
@@ -62,11 +63,16 @@ const Contacts = () => {
     locationId: '',
     trialStartDate: '',
     memberStartDate: '',
+    pricingPlanId: '' as string,
   });
 
   useEffect(() => {
     loadMembers();
   }, [filters, selectedLocation, isAllLocations]);
+
+  useEffect(() => {
+    api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
+  }, []);
 
   const loadMembers = async () => {
     try {
@@ -109,6 +115,7 @@ const Contacts = () => {
         locationId: member.locationId?.toString() || '',
         trialStartDate: member.trialStartDate || '',
         memberStartDate: member.memberStartDate || '',
+        pricingPlanId: member.pricingPlanId?.toString() || '',
       });
     } else {
       setEditingMember(null);
@@ -131,6 +138,7 @@ const Contacts = () => {
         locationId: '',
         trialStartDate: '',
         memberStartDate: '',
+        pricingPlanId: '',
       });
     }
     setIsModalOpen(true);
@@ -155,6 +163,7 @@ const Contacts = () => {
       const dataToSubmit = {
         ...formData,
         locationId: formData.locationId ? parseInt(formData.locationId) : null,
+        pricingPlanId: formData.pricingPlanId ? parseInt(formData.pricingPlanId) : null,
       };
 
       if (editingMember) {
@@ -451,8 +460,8 @@ const Contacts = () => {
                   <span>{member.ranking}</span>
                 </div>
                 <div className={styles.info}>
-                  <span className={styles.label}>Account:</span>
-                  <span>{member.accountType}</span>
+                  <span className={styles.label}>Plan:</span>
+                  <span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span>
                 </div>
                 <div className={styles.info}>
                   <span className={styles.label}>Age Group:</span>
@@ -501,7 +510,7 @@ const Contacts = () => {
                   </td>
                   <td>{member.programType}</td>
                   <td>{member.ranking}</td>
-                  <td>{member.accountType}</td>
+                  <td>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</td>
                   <td>{member.membershipAge}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div className={styles.tableActions}>
@@ -591,17 +600,18 @@ const Contacts = () => {
                   </select>
                 </div>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Account Type *</label>
+                  <label className={styles.formLabel}>Subscription Type</label>
                   <select
-                    value={formData.accountType}
-                    onChange={(e) => setFormData({ ...formData, accountType: e.target.value as AccountType })}
+                    value={formData.pricingPlanId}
+                    onChange={(e) => setFormData({ ...formData, pricingPlanId: e.target.value })}
                     className={styles.input}
-                    required
                   >
-                    <option value="basic">Basic</option>
-                    <option value="premium">Premium</option>
-                    <option value="elite">Elite</option>
-                    <option value="family">Family</option>
+                    <option value="">No plan selected</option>
+                    {allPricingPlans.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.name} — ${(plan.amount / 100).toFixed(0)}/{plan.billingInterval}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -909,8 +919,8 @@ const Contacts = () => {
                   </div>
 
                   <div className={styles.viewField}>
-                    <label className={styles.viewLabel}>Account Type</label>
-                    <div className={styles.viewValue}>{viewingMember.accountType}</div>
+                    <label className={styles.viewLabel}>Subscription Type</label>
+                    <div className={styles.viewValue}>{allPricingPlans.find(p => p.id === viewingMember.pricingPlanId)?.name || '—'}</div>
                   </div>
 
                   <div className={styles.viewField}>

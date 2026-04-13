@@ -837,6 +837,9 @@ async function initializeDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_visitor ON tracking_events("visitorId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_type ON tracking_events("eventType")`);
 
+    // Migrations
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
+
     // Seed admin user if none exists
     await seedAdminUser(client);
 

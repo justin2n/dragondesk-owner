@@ -61,6 +61,7 @@ export interface Member {
   locationId?: number;
   trialStartDate?: string;
   memberStartDate?: string;
+  pricingPlanId?: number;
   createdAt: string;
   updatedAt: string;
 }

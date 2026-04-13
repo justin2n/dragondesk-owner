@@ -151,20 +151,26 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     // Build base query
     const params: any[] = [];
     let sql = `SELECT
-        id,
-        "accountStatus",
-        "programType",
-        "locationId",
-        "trialStartDate",
-        "memberStartDate",
-        "createdAt",
-        "updatedAt"
-      FROM members
+        m.id,
+        m."accountStatus",
+        m."programType",
+        m."locationId",
+        m."trialStartDate",
+        m."memberStartDate",
+        m."createdAt",
+        m."updatedAt",
+        m."pricingPlanId",
+        pp.amount AS "planAmount",
+        pp."billingInterval",
+        pp."intervalCount",
+        pp.name AS "planName"
+      FROM members m
+      LEFT JOIN pricing_plans pp ON m."pricingPlanId" = pp.id
       WHERE 1=1`;
 
     if (locationId && locationId !== 'all') {
       params.push(locationId);
-      sql += ` AND "locationId" = $${params.length}`;
+      sql += ` AND m."locationId" = $${params.length}`;
     }
 
     const allMembers: any[] = (await pool.query(sql, params)).rows;
@@ -295,23 +301,39 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
+    // Helper: annualised monthly revenue for a member given their plan
+    const annualizedMonthly = (m: any): number => {
+      if (!m.planAmount) return 0;
+      const amount = m.planAmount / 100; // cents → dollars
+      const count = m.intervalCount || 1;
+      switch (m.billingInterval) {
+        case 'week':  return (amount * 52) / 12;
+        case 'month': return amount / count;
+        case 'year':  return (amount / count) / 12;
+        default:      return amount;
+      }
+    };
+
     // Summary statistics
     const summary = {
       programs: programs.map(program => {
         const programMembers = allMembers.filter(m => m.programType === program);
-        const activeMembers = programMembers.filter(m => m.accountStatus === 'member').length;
+        const activeMembers = programMembers.filter(m => m.accountStatus === 'member');
         const currentTrials = programMembers.filter(m => m.accountStatus === 'trialer').length;
         const currentLeads = programMembers.filter(m => m.accountStatus === 'lead').length;
         const programCancellations = churnData.filter(c => c.programType === program).length;
+        const mrr = activeMembers.reduce((sum, m) => sum + annualizedMonthly(m), 0);
 
         return {
           name: program,
-          activeMembers,
+          activeMembers: activeMembers.length,
           currentTrials,
           currentLeads,
           totalCancellations: programCancellations,
-          overallChurnRate: activeMembers > 0
-            ? parseFloat(((programCancellations / (activeMembers + programCancellations)) * 100).toFixed(1))
+          mrr: Math.round(mrr * 100) / 100,
+          arr: Math.round(mrr * 12 * 100) / 100,
+          overallChurnRate: activeMembers.length > 0
+            ? parseFloat(((programCancellations / (activeMembers.length + programCancellations)) * 100).toFixed(1))
             : 0,
         };
       }),
@@ -320,6 +342,8 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         currentTrials: allMembers.filter(m => m.accountStatus === 'trialer').length,
         currentLeads: allMembers.filter(m => m.accountStatus === 'lead').length,
         totalCancellations: churnData.length,
+        mrr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 100) / 100,
+        arr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 12 * 100) / 100,
       },
     };
 
