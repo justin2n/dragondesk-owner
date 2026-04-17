@@ -2559,6 +2559,26 @@ const Settings = () => {
                 Configure Stripe to accept payments and manage subscriptions for your members. Each location can have its own Stripe account.
               </p>
 
+              <div className={styles.infoBox}>
+                <h4>How to configure per-location Stripe accounts</h4>
+                <p>
+                  Each location can have its own separate Stripe account (useful when locations are separate LLCs).
+                  Use the <strong style={{ color: '#60a5fa' }}>Location dropdown below</strong> to switch between locations —
+                  the keys you enter and save will apply only to that location.
+                  Select <strong style={{ color: '#60a5fa' }}>Global</strong> to set a shared fallback account used by any location
+                  that doesn't have its own keys configured. Get your API keys from the{' '}
+                  <a
+                    href="https://dashboard.stripe.com/apikeys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--color-red)' }}
+                  >
+                    Stripe Dashboard
+                  </a>
+                  .
+                </p>
+              </div>
+
               <div className={styles.formGroup}>
                 <label className={styles.label}>Location</label>
                 <select
@@ -2575,25 +2595,6 @@ const Settings = () => {
                     <option key={loc.id} value={loc.id}>{loc.name}</option>
                   ))}
                 </select>
-                <small className={styles.helpText}>
-                  Select a location to configure its Stripe account, or leave as Global for a shared account.
-                </small>
-              </div>
-
-              <div className={styles.infoBox}>
-                <h4>Getting Started with Stripe</h4>
-                <p>
-                  Get your API keys from the{' '}
-                  <a
-                    href="https://dashboard.stripe.com/apikeys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--color-red)' }}
-                  >
-                    Stripe Dashboard
-                  </a>
-                  . Use test keys for development and live keys for production.
-                </p>
               </div>
 
               <div className={styles.formGroup}>
