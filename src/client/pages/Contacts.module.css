@@ -120,6 +120,58 @@
   opacity: 0.7;
 }
 
+.importHint {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.importError {
+  padding: 0.875rem 1rem;
+  background-color: rgba(220, 38, 38, 0.1);
+  border: 1px solid var(--color-red);
+  border-radius: 4px;
+  color: var(--color-red);
+  font-size: 0.875rem;
+}
+
+.importResults {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.importResultRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.importResultRow:last-child {
+  border-bottom: none;
+}
+
+.importResultLabel {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.importResultValue {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.importSuccess {
+  color: #10b981;
+}
+
+.importFailed {
+  color: var(--color-red);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));

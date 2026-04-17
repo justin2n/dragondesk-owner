@@ -885,85 +885,84 @@ const Contacts = () => {
           <div className={styles.modalContent} style={{ maxWidth: '520px' }}>
             <div className={styles.modalHeader}>
               <h2>Import from MyStudio CSV</h2>
-              <button onClick={() => setShowImportModal(false)} className={styles.closeBtn}>x</button>
+              <button onClick={() => setShowImportModal(false)} className={styles.closeBtn}>&times;</button>
             </div>
-            <div className={styles.modalBody}>
-              {!importResult ? (
-                <>
-                  <p style={{ marginBottom: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
-                    Supports Lead, Trial, and Member exports from MyStudio. Duplicate emails are skipped automatically.
-                  </p>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>CSV File</label>
-                    <input
-                      type="file"
-                      accept=".csv"
-                      className={styles.input}
-                      onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                    />
+            {!importResult ? (
+              <div className={styles.form}>
+                <p className={styles.importHint}>
+                  Supports Lead, Trial, and Member exports from MyStudio. Duplicate emails are skipped automatically.
+                </p>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>CSV File</label>
+                  <input type="file" accept=".csv" className={styles.input} onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
+                </div>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Program Override</label>
+                  <select value={importProgram} onChange={(e) => setImportProgram(e.target.value)} className={styles.input}>
+                    <option value="">Auto-detect from file</option>
+                    <option value="Children's Martial Arts">Children's Martial Arts</option>
+                    <option value="Adult BJJ">Adult BJJ</option>
+                    <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                    <option value="DG Barbell">DG Barbell</option>
+                    <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                    <option value="The Ashtanga Club">The Ashtanga Club</option>
+                    <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                    <option value="Kids BJJ">Kids BJJ</option>
+                    <option value="Kids Muay Thai">Kids Muay Thai</option>
+                    <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                    <option value="DG Workspace">DG Workspace</option>
+                    <option value="Dragon Launch">Dragon Launch</option>
+                    <option value="Personal Training">Personal Training</option>
+                    <option value="DGMT Private Training">DGMT Private Training</option>
+                  </select>
+                </div>
+                <div className={styles.modalFooter}>
+                  <button onClick={() => setShowImportModal(false)} className={styles.cancelBtn} type="button">Cancel</button>
+                  <button onClick={handleImport} className={styles.saveBtn} disabled={!importFile || importLoading} type="button">
+                    {importLoading ? 'Importing...' : 'Import'}
+                  </button>
+                </div>
+              </div>
+            ) : importResult.error ? (
+              <div className={styles.form}>
+                <div className={styles.importError}>{importResult.error}</div>
+                <div className={styles.modalFooter}>
+                  <button onClick={() => setImportResult(null)} className={styles.cancelBtn} type="button">Try Again</button>
+                  <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Close</button>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.form}>
+                <div className={styles.importResults}>
+                  <div className={styles.importResultRow}>
+                    <span className={styles.importResultLabel}>Type detected</span>
+                    <span className={styles.importResultValue}>{importResult.type}</span>
                   </div>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Program (for Member CSVs split by program)</label>
-                    <select
-                      value={importProgram}
-                      onChange={(e) => setImportProgram(e.target.value)}
-                      className={styles.input}
-                    >
-                      <option value="">Auto-detect from file</option>
-                      <option value="Children's Martial Arts">Children's Martial Arts</option>
-                      <option value="Adult BJJ">Adult BJJ</option>
-                      <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                      <option value="DG Barbell">DG Barbell</option>
-                      <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                      <option value="The Ashtanga Club">The Ashtanga Club</option>
-                      <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                      <option value="Kids BJJ">Kids BJJ</option>
-                      <option value="Kids Muay Thai">Kids Muay Thai</option>
-                      <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                      <option value="DG Workspace">DG Workspace</option>
-                      <option value="Dragon Launch">Dragon Launch</option>
-                      <option value="Personal Training">Personal Training</option>
-                      <option value="DGMT Private Training">DGMT Private Training</option>
-                    </select>
+                  <div className={styles.importResultRow}>
+                    <span className={styles.importResultLabel}>Total rows</span>
+                    <span className={styles.importResultValue}>{importResult.total}</span>
                   </div>
-                  <div className={styles.formActions}>
-                    <button onClick={() => setShowImportModal(false)} className={styles.cancelBtn} type="button">Cancel</button>
-                    <button
-                      onClick={handleImport}
-                      className={styles.submitBtn}
-                      disabled={!importFile || importLoading}
-                      type="button"
-                    >
-                      {importLoading ? 'Importing...' : 'Import'}
-                    </button>
+                  <div className={styles.importResultRow}>
+                    <span className={styles.importResultLabel}>Imported</span>
+                    <span className={`${styles.importResultValue} ${styles.importSuccess}`}>{importResult.imported}</span>
                   </div>
-                </>
-              ) : importResult.error ? (
-                <>
-                  <div className={styles.error}>{importResult.error}</div>
-                  <div className={styles.formActions}>
-                    <button onClick={() => setImportResult(null)} className={styles.cancelBtn} type="button">Try Again</button>
-                    <button onClick={() => setShowImportModal(false)} className={styles.submitBtn} type="button">Close</button>
+                  <div className={styles.importResultRow}>
+                    <span className={styles.importResultLabel}>Skipped</span>
+                    <span className={styles.importResultValue}>{importResult.skipped}</span>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <p><strong>Type detected:</strong> {importResult.type}</p>
-                    <p><strong>Total rows:</strong> {importResult.total}</p>
-                    <p style={{ color: 'green' }}><strong>Imported:</strong> {importResult.imported}</p>
-                    <p style={{ color: 'var(--color-text-secondary)' }}><strong>Skipped (duplicates/incomplete):</strong> {importResult.skipped}</p>
-                    {importResult.errors > 0 && (
-                      <p style={{ color: 'var(--color-red)' }}><strong>Errors:</strong> {importResult.errors}</p>
-                    )}
-                  </div>
-                  <div className={styles.formActions}>
-                    <button onClick={() => { setImportResult(null); setImportFile(null); }} className={styles.cancelBtn} type="button">Import Another</button>
-                    <button onClick={() => setShowImportModal(false)} className={styles.submitBtn} type="button">Done</button>
-                  </div>
-                </>
-              )}
-            </div>
+                  {importResult.errors > 0 && (
+                    <div className={styles.importResultRow}>
+                      <span className={styles.importResultLabel}>Errors</span>
+                      <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.errors}</span>
+                    </div>
+                  )}
+                </div>
+                <div className={styles.modalFooter}>
+                  <button onClick={() => { setImportResult(null); setImportFile(null); }} className={styles.cancelBtn} type="button">Import Another</button>
+                  <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
