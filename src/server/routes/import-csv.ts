@@ -1,0 +1,237 @@
+import { Router } from 'express';
+import multer from 'multer';
+import { pool } from '../models/database';
+import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
+
+const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.use(authenticateToken);
+
+// --- CSV helpers ---
+
+function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+  if (lines.length === 0) return { headers: [], rows: [] };
+
+  const parseRow = (line: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  };
+
+  const headers = parseRow(lines[0]);
+  const rows = lines.slice(1).map(line => {
+    const values = parseRow(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h.trim()] = (values[i] || '').trim(); });
+    return row;
+  }).filter(row => Object.values(row).some(v => v !== ''));
+
+  return { headers, rows };
+}
+
+function detectType(headers: string[]): 'lead' | 'trial' | 'member' | 'unknown' {
+  const h = headers.map(x => x.toLowerCase());
+  if (h.includes('buyer first name') || h.includes('opt in date')) return 'lead';
+  if (h.includes('trial status') || h.includes('trial program')) return 'trial';
+  if (h.includes('membership') || h.includes('next payment date') || h.includes('rank')) return 'member';
+  return 'unknown';
+}
+
+function normalizeProgram(raw: string): string {
+  if (!raw) return 'BJJ';
+  const v = raw.toLowerCase();
+  if (v.includes('jiu') || v.includes('bjj') || v.includes('jitsu')) return 'BJJ';
+  if (v.includes('muay') || v.includes('thai') || v.includes('kickbox') || v.includes('boxing')) return 'Muay Thai';
+  if (v.includes('taekwondo') || v.includes('tae kwon') || v.includes('tkd') || v.includes('karate')) return 'Taekwondo';
+  return 'BJJ';
+}
+
+function normalizeAge(ageStr: string, dob: string): 'Adult' | 'Kids' {
+  const age = parseInt(ageStr);
+  if (!isNaN(age)) return age < 18 ? 'Kids' : 'Adult';
+  if (dob) {
+    const birthYear = new Date(dob).getFullYear();
+    if (!isNaN(birthYear)) {
+      const currentAge = new Date().getFullYear() - birthYear;
+      return currentAge < 18 ? 'Kids' : 'Adult';
+    }
+  }
+  return 'Adult';
+}
+
+function normalizeRanking(rank: string, program: string): string {
+  if (!rank || rank === 'N/A' || rank === '') return 'White';
+  // Return as-is if it looks like a real rank
+  return rank;
+}
+
+function normalizeLeadSource(raw: string): string | null {
+  if (!raw) return null;
+  const v = raw.toLowerCase();
+  if (v.includes('facebook') || v.includes('fb') || v.includes('instagram') || v.includes('social')) return 'social-media';
+  if (v.includes('google') || v.includes('search') || v.includes('seo')) return 'google';
+  if (v.includes('referral') || v.includes('friend') || v.includes('word')) return 'referral';
+  if (v.includes('walk') || v.includes('walkin')) return 'walk-in';
+  if (v.includes('website') || v.includes('web') || v.includes('online')) return 'website';
+  if (v.includes('event') || v.includes('seminar')) return 'event';
+  return null;
+}
+
+function parseDate(raw: string): string | null {
+  if (!raw || raw === 'N/A' || raw === '') return null;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+// --- Import endpoint ---
+
+router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const locationId = req.body.locationId ? parseInt(req.body.locationId) : null;
+  const programOverride = req.body.program || null; // for member CSVs split by program
+
+  const text = req.file.buffer.toString('utf-8');
+  const { headers, rows } = parseCSV(text);
+
+  if (headers.length === 0) return res.status(400).json({ error: 'Empty or invalid CSV' });
+
+  const type = detectType(headers);
+  if (type === 'unknown') {
+    return res.status(400).json({ error: 'Could not detect CSV type. Expected Lead, Trial, or Member format from MyStudio.' });
+  }
+
+  const results = { imported: 0, skipped: 0, errors: 0, errorDetails: [] as string[] };
+
+  for (const row of rows) {
+    try {
+      // Resolve name — prefer Participant, fall back to Buyer/Customer
+      const firstName = (row['Participant First Name'] || row['Buyer First Name'] || row['Customer First Name'] || '').trim();
+      const lastName = (row['Participant Last Name'] || row['Buyer Last Name'] || row['Customer Last Name'] || '').trim();
+      const email = (row['Email'] || '').trim().toLowerCase();
+
+      if (!firstName || !lastName || !email) {
+        results.skipped++;
+        continue;
+      }
+
+      // Skip duplicates
+      const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
+      if (existing.rows.length > 0) {
+        results.skipped++;
+        continue;
+      }
+
+      const phone = (row['Mobile Phone'] || '').trim() || null;
+      const dob = parseDate(row['Birthday'] || '');
+      const address = (row['Address'] || '').trim() || null;
+
+      let accountStatus: string;
+      let programType: string;
+      let membershipAge: 'Adult' | 'Kids';
+      let ranking: string;
+      let leadSource: string | null;
+      let trialStartDate: string | null = null;
+      let memberStartDate: string | null = null;
+      let notes: string | null = null;
+
+      if (type === 'lead') {
+        accountStatus = 'lead';
+        programType = normalizeProgram(row['Program Interest'] || programOverride || '');
+        membershipAge = normalizeAge(row['Age'] || '', dob || '');
+        ranking = 'White';
+        leadSource = normalizeLeadSource(row['Source'] || '');
+        const optIn = parseDate(row['Opt In date'] || '');
+        memberStartDate = null;
+        trialStartDate = null;
+
+      } else if (type === 'trial') {
+        accountStatus = 'trialer';
+        programType = normalizeProgram(row['Trial Program'] || programOverride || '');
+        membershipAge = normalizeAge(row['Age'] || '', dob || '');
+        ranking = 'White';
+        leadSource = normalizeLeadSource(row['Source'] || '');
+        trialStartDate = parseDate(row['Start Date'] || row['Registered Date'] || '');
+
+        const attendanceCount = parseInt(row['Attendance Count'] || '0') || 0;
+        const last14 = parseInt(row['Attendance Last 14 Days'] || '0') || 0;
+        if (row['Custom Field 1'] && row['Custom Value 1']) {
+          notes = `${row['Custom Field 1']}: ${row['Custom Value 1']}`;
+        }
+
+      } else {
+        // member
+        accountStatus = 'member';
+        programType = normalizeProgram(row['Program'] || programOverride || '');
+        membershipAge = normalizeAge(row['Age'] || '', dob || '');
+        ranking = normalizeRanking(row['Rank'] || '', programType);
+        leadSource = normalizeLeadSource(row['Source'] || '');
+        memberStartDate = parseDate(row['Registration Date'] || '');
+        if (row['Custom Field 1'] && row['Custom Value 1']) {
+          notes = `${row['Custom Field 1']}: ${row['Custom Value 1']}`;
+        }
+      }
+
+      // Try to match a pricing plan for members
+      let pricingPlanId: number | null = null;
+      if (type === 'member' && row['Membership']) {
+        const planName = row['Membership'].trim();
+        const planMatch = await pool.query(
+          `SELECT id FROM pricing_plans WHERE LOWER(name) LIKE LOWER($1) AND "isActive" = true LIMIT 1`,
+          [`%${planName}%`]
+        );
+        if (planMatch.rows.length > 0) pricingPlanId = planMatch.rows[0].id;
+      }
+
+      const totalAttendance = parseInt(row['Total Attendance Count'] || row['Attendance Count'] || '0') || 0;
+      const lastAttendance = parseDate(row['Last Attendance'] || '');
+
+      await pool.query(
+        `INSERT INTO members (
+          "firstName", "lastName", email, phone, "accountStatus", "accountType",
+          "programType", "membershipAge", ranking, "leadSource", "dateOfBirth",
+          notes, "locationId", "trialStartDate", "memberStartDate",
+          "pricingPlanId", "totalClassesAttended", "lastCheckInAt",
+          "syncedFromMyStudio"
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        [
+          firstName, lastName, email, phone, accountStatus, 'basic',
+          programType, membershipAge, ranking, leadSource, dob,
+          notes, locationId, trialStartDate, memberStartDate,
+          pricingPlanId, totalAttendance || null, lastAttendance,
+          true,
+        ]
+      );
+
+      results.imported++;
+    } catch (err: any) {
+      results.errors++;
+      results.errorDetails.push(err.message);
+    }
+  }
+
+  res.json({
+    type,
+    total: rows.length,
+    ...results,
+  });
+});
+
+export default router;

@@ -39,6 +39,7 @@ import walletPassesRoutes from './routes/wallet-passes';
 import proxyRoutes from './routes/proxy';
 import assistantRoutes from './routes/assistant';
 import trackingRoutes from './routes/tracking';
+import importCsvRoutes from './routes/import-csv';
 
 dotenv.config();
 
@@ -91,6 +92,7 @@ app.use('/api/assistant', assistantRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/wallet-passes', walletPassesRoutes);
+app.use('/api/import-csv', importCsvRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });

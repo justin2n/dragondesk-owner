@@ -34,6 +34,11 @@ const Contacts = () => {
   const [memberInvoices, setMemberInvoices] = useState<Invoice[]>([]);
   const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
   const [allPricingPlans, setAllPricingPlans] = useState<PricingPlan[]>([]);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importProgram, setImportProgram] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
@@ -209,6 +214,34 @@ const Contacts = () => {
     }
   };
 
+  const handleImport = async () => {
+    if (!importFile) return;
+    setImportLoading(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      if (importProgram) formData.append('program', importProgram);
+      const locationId = isAllLocations ? '' : String(selectedLocation?.id || '');
+      if (locationId) formData.append('locationId', locationId);
+
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/import-csv', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Import failed');
+      setImportResult(result);
+      loadMembers();
+    } catch (err: any) {
+      setImportResult({ error: err.message });
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const handleDelete = async (id: number) => {
     if (!confirm('Are you sure you want to delete this member?')) return;
 
@@ -374,6 +407,9 @@ const Contacts = () => {
               <TableViewIcon size={20} />
             </button>
           </div>
+          <button onClick={() => { setShowImportModal(true); setImportResult(null); setImportFile(null); }} className={styles.importBtn}>
+            Import CSV
+          </button>
           <button onClick={() => handleOpenModal()} className={styles.addBtn}>
             + Add Contact
           </button>
@@ -806,6 +842,84 @@ const Contacts = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Import Modal */}
+      {showImportModal && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent} style={{ maxWidth: '520px' }}>
+            <div className={styles.modalHeader}>
+              <h2>Import from MyStudio CSV</h2>
+              <button onClick={() => setShowImportModal(false)} className={styles.closeBtn}>x</button>
+            </div>
+            <div className={styles.modalBody}>
+              {!importResult ? (
+                <>
+                  <p style={{ marginBottom: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+                    Supports Lead, Trial, and Member exports from MyStudio. Duplicate emails are skipped automatically.
+                  </p>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>CSV File</label>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      className={styles.input}
+                      onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Program (for Member CSVs split by program)</label>
+                    <select
+                      value={importProgram}
+                      onChange={(e) => setImportProgram(e.target.value)}
+                      className={styles.input}
+                    >
+                      <option value="">Auto-detect from file</option>
+                      <option value="BJJ">BJJ</option>
+                      <option value="Muay Thai">Muay Thai</option>
+                      <option value="Taekwondo">Taekwondo</option>
+                    </select>
+                  </div>
+                  <div className={styles.formActions}>
+                    <button onClick={() => setShowImportModal(false)} className={styles.cancelBtn} type="button">Cancel</button>
+                    <button
+                      onClick={handleImport}
+                      className={styles.submitBtn}
+                      disabled={!importFile || importLoading}
+                      type="button"
+                    >
+                      {importLoading ? 'Importing...' : 'Import'}
+                    </button>
+                  </div>
+                </>
+              ) : importResult.error ? (
+                <>
+                  <div className={styles.error}>{importResult.error}</div>
+                  <div className={styles.formActions}>
+                    <button onClick={() => setImportResult(null)} className={styles.cancelBtn} type="button">Try Again</button>
+                    <button onClick={() => setShowImportModal(false)} className={styles.submitBtn} type="button">Close</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <p><strong>Type detected:</strong> {importResult.type}</p>
+                    <p><strong>Total rows:</strong> {importResult.total}</p>
+                    <p style={{ color: 'green' }}><strong>Imported:</strong> {importResult.imported}</p>
+                    <p style={{ color: 'var(--color-text-secondary)' }}><strong>Skipped (duplicates/incomplete):</strong> {importResult.skipped}</p>
+                    {importResult.errors > 0 && (
+                      <p style={{ color: 'var(--color-red)' }}><strong>Errors:</strong> {importResult.errors}</p>
+                    )}
+                  </div>
+                  <div className={styles.formActions}>
+                    <button onClick={() => { setImportResult(null); setImportFile(null); }} className={styles.cancelBtn} type="button">Import Another</button>
+                    <button onClick={() => setShowImportModal(false)} className={styles.submitBtn} type="button">Done</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

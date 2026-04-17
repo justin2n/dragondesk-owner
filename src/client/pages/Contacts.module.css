@@ -74,6 +74,22 @@
   background-color: var(--color-red-hover);
 }
 
+.importBtn {
+  padding: 0.75rem 1.5rem;
+  background-color: transparent;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.importBtn:hover {
+  background-color: var(--color-surface);
+  border-color: var(--color-red);
+}
+
 .filters {
   display: flex;
   gap: 1rem;
