@@ -64,9 +64,20 @@ const LeadForm = () => {
       setConfig({
         locations: [],
         programs: [
-          { id: 1, name: 'BJJ', description: 'Brazilian Jiu Jitsu' },
-          { id: 2, name: 'Muay Thai', description: 'Muay Thai' },
-          { id: 3, name: 'Taekwondo', description: 'Taekwondo' }
+          { id: 1, name: "Children's Martial Arts", description: "Children's Martial Arts" },
+          { id: 2, name: 'Adult BJJ', description: 'Adult BJJ' },
+          { id: 3, name: 'Adult TKD & HKD', description: 'Adult TKD & HKD' },
+          { id: 4, name: 'DG Barbell', description: 'DG Barbell' },
+          { id: 5, name: 'Adult Muay Thai & Kickboxing', description: 'Adult Muay Thai & Kickboxing' },
+          { id: 6, name: 'The Ashtanga Club', description: 'The Ashtanga Club' },
+          { id: 7, name: 'Dragon Gym Learning Center', description: 'Dragon Gym Learning Center' },
+          { id: 8, name: 'Kids BJJ', description: 'Kids BJJ' },
+          { id: 9, name: 'Kids Muay Thai', description: 'Kids Muay Thai' },
+          { id: 10, name: 'Young Ladies Yoga', description: 'Young Ladies Yoga' },
+          { id: 11, name: 'DG Workspace', description: 'DG Workspace' },
+          { id: 12, name: 'Dragon Launch', description: 'Dragon Launch' },
+          { id: 13, name: 'Personal Training', description: 'Personal Training' },
+          { id: 14, name: 'DGMT Private Training', description: 'DGMT Private Training' }
         ]
       });
     }

@@ -410,7 +410,7 @@ const Events = () => {
   };
 
   const eventTypes = ['class', 'seminar', 'workshop', 'tournament', 'testing', 'social', 'other'];
-  const programTypes = ['All', 'BJJ', 'Muay Thai', 'Taekwondo'];
+  const programTypes = ['All', "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'];
 
   return (
     <div className={styles.container}>

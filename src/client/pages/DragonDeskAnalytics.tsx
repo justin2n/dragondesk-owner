@@ -77,9 +77,20 @@ interface AnalyticsData {
 }
 
 const PROGRAM_COLORS: Record<string, string> = {
-  BJJ: '#dc2626',
-  'Muay Thai': '#f59e0b',
-  Taekwondo: '#3b82f6',
+  "Children's Martial Arts": '#f97316',
+  'Adult BJJ': '#dc2626',
+  'Adult TKD & HKD': '#3b82f6',
+  'DG Barbell': '#78716c',
+  'Adult Muay Thai & Kickboxing': '#f59e0b',
+  'The Ashtanga Club': '#a3e635',
+  'Dragon Gym Learning Center': '#06b6d4',
+  'Kids BJJ': '#ef4444',
+  'Kids Muay Thai': '#fbbf24',
+  'Young Ladies Yoga': '#ec4899',
+  'DG Workspace': '#8b5cf6',
+  'Dragon Launch': '#14b8a6',
+  'Personal Training': '#64748b',
+  'DGMT Private Training': '#6366f1',
   total: '#10b981',
 };
 

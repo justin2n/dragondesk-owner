@@ -22,7 +22,21 @@ export type AccountStatus = 'lead' | 'trialer' | 'member' | 'cancelled';
 
 export type AccountType = 'basic' | 'premium' | 'elite' | 'family';
 
-export type ProgramType = 'BJJ' | 'Muay Thai' | 'Taekwondo';
+export type ProgramType =
+  | "Children's Martial Arts"
+  | 'Adult BJJ'
+  | 'Adult TKD & HKD'
+  | 'DG Barbell'
+  | 'Adult Muay Thai & Kickboxing'
+  | 'The Ashtanga Club'
+  | 'Dragon Gym Learning Center'
+  | 'Kids BJJ'
+  | 'Kids Muay Thai'
+  | 'Young Ladies Yoga'
+  | 'DG Workspace'
+  | 'Dragon Launch'
+  | 'Personal Training'
+  | 'DGMT Private Training';
 
 export type MembershipAge = 'Adult' | 'Kids';
 

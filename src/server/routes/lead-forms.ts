@@ -87,7 +87,7 @@ router.post('/submit', async (req, res) => {
         lastName,
         email,
         phone || null,
-        programType || 'BJJ',
+        programType || 'Adult BJJ',
         membershipAge || 'Adult',
         notes || null,
         locationId || null,

@@ -54,17 +54,34 @@ function detectType(headers: string[]): 'lead' | 'trial' | 'member' | 'unknown' 
 }
 
 function normalizeProgram(raw: string): string {
-  if (!raw) return 'BJJ';
-  const v = raw.toLowerCase();
-  if (v.includes('jiu') || v.includes('bjj') || v.includes('jitsu')) return 'BJJ';
-  if (v.includes('muay') || v.includes('thai') || v.includes('kickbox') || v.includes('boxing')) return 'Muay Thai';
-  if (v.includes('taekwondo') || v.includes('tae kwon') || v.includes('tkd') || v.includes('karate')) return 'Taekwondo';
-  return 'BJJ';
+  if (!raw) return 'Adult BJJ';
+  const v = raw.trim();
+  // Exact or near-exact MyStudio full names
+  if (v === "Children's Martial Arts Programs" || v.toLowerCase().includes("children's martial arts")) return "Children's Martial Arts";
+  if (v === 'Adult BJJ Classes and Memberships' || (v.toLowerCase().includes('bjj') && !v.toLowerCase().includes('kids'))) return 'Adult BJJ';
+  if (v === 'Adult TKD and HKD Classes and Memberships' || v.toLowerCase().includes('tkd') || v.toLowerCase().includes('hkd') || v.toLowerCase().includes('taekwondo') || v.toLowerCase().includes('tae kwon')) return 'Adult TKD & HKD';
+  if (v === 'DG BARBELL Classes and Memberships' || v.toLowerCase().includes('barbell')) return 'DG Barbell';
+  if (v === 'Adult Muay Thai and Kickboxing Classes and Memberships' || (v.toLowerCase().includes('muay') && !v.toLowerCase().includes('kids')) || (v.toLowerCase().includes('kickbox') && !v.toLowerCase().includes('kids'))) return 'Adult Muay Thai & Kickboxing';
+  if (v === 'The Ashtanga Club' || v.toLowerCase().includes('ashtanga')) return 'The Ashtanga Club';
+  if (v === 'Dragon Gym Learning Center' || v.toLowerCase().includes('learning center')) return 'Dragon Gym Learning Center';
+  if (v === 'Kids BJJ Classes and Memberships' || v.toLowerCase().includes('kids bjj')) return 'Kids BJJ';
+  if (v === 'Kids DGMT - Youth Muay Thai Classes and Memberships' || v.toLowerCase().includes('kids dgmt') || v.toLowerCase().includes('youth muay thai')) return 'Kids Muay Thai';
+  if (v === 'Young Ladies Yoga Sessions (Ages 8 - 12)' || v.toLowerCase().includes('young ladies yoga') || v.toLowerCase().includes('ladies yoga')) return 'Young Ladies Yoga';
+  if (v === 'DG Workspace' || v.toLowerCase().includes('workspace')) return 'DG Workspace';
+  if (v === 'Dragon Launch - Cross Training, Nutrition, Recovery' || v.toLowerCase().includes('dragon launch')) return 'Dragon Launch';
+  if (v === 'PERSONAL TRAINING' || v.toLowerCase() === 'personal training') return 'Personal Training';
+  if (v === 'DGMT Private and Semi-Private Training' || v.toLowerCase().includes('dgmt private') || v.toLowerCase().includes('semi-private')) return 'DGMT Private Training';
+  return 'Adult BJJ';
 }
 
-function normalizeAge(ageStr: string, dob: string): 'Adult' | 'Kids' {
-  const age = parseInt(ageStr);
-  if (!isNaN(age)) return age < 18 ? 'Kids' : 'Adult';
+function normalizeAge(programType: string, ageStr: string, dob: string): 'Adult' | 'Kids' {
+  // Determine age group from program name first
+  const p = programType.toLowerCase();
+  if (p.includes('kids') || p.includes("children's") || p.includes('youth') || p.includes('young ladies')) return 'Kids';
+  if (ageStr) {
+    const age = parseInt(ageStr);
+    if (!isNaN(age)) return age < 18 ? 'Kids' : 'Adult';
+  }
   if (dob) {
     const birthYear = new Date(dob).getFullYear();
     if (!isNaN(birthYear)) {
@@ -155,7 +172,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       if (type === 'lead') {
         accountStatus = 'lead';
         programType = normalizeProgram(row['Program Interest'] || programOverride || '');
-        membershipAge = normalizeAge(row['Age'] || '', dob || '');
+        membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = 'White';
         leadSource = normalizeLeadSource(row['Source'] || '');
         const optIn = parseDate(row['Opt In date'] || '');
@@ -165,7 +182,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       } else if (type === 'trial') {
         accountStatus = 'trialer';
         programType = normalizeProgram(row['Trial Program'] || programOverride || '');
-        membershipAge = normalizeAge(row['Age'] || '', dob || '');
+        membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = 'White';
         leadSource = normalizeLeadSource(row['Source'] || '');
         trialStartDate = parseDate(row['Start Date'] || row['Registered Date'] || '');
@@ -180,7 +197,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         // member
         accountStatus = 'member';
         programType = normalizeProgram(row['Program'] || programOverride || '');
-        membershipAge = normalizeAge(row['Age'] || '', dob || '');
+        membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = normalizeRanking(row['Rank'] || '', programType);
         leadSource = normalizeLeadSource(row['Source'] || '');
         memberStartDate = parseDate(row['Registration Date'] || '');

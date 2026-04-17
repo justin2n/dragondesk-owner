@@ -77,7 +77,7 @@ async function initializeDatabase() {
         phone TEXT,
         "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member')),
         "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
-        "programType" TEXT NOT NULL CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo')),
+        "programType" TEXT NOT NULL CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training')),
         "membershipAge" TEXT NOT NULL CHECK("membershipAge" IN ('Adult', 'Kids')),
         ranking TEXT NOT NULL,
         "leadSource" TEXT,
@@ -163,7 +163,7 @@ async function initializeDatabase() {
         name TEXT NOT NULL,
         description TEXT,
         "eventType" TEXT NOT NULL CHECK("eventType" IN ('class', 'seminar', 'workshop', 'tournament', 'testing', 'social', 'other')),
-        "programType" TEXT CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo', 'All')),
+        "programType" TEXT CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All')),
         "startDateTime" TIMESTAMP NOT NULL,
         "endDateTime" TIMESTAMP NOT NULL,
         location TEXT,
@@ -508,7 +508,7 @@ async function initializeDatabase() {
         "stripePriceId" TEXT,
         "stripeProductId" TEXT,
         "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
-        "programType" TEXT CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo', 'All')),
+        "programType" TEXT CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All')),
         "membershipAge" TEXT CHECK("membershipAge" IN ('Adult', 'Kids', 'All')),
         amount INTEGER NOT NULL,
         currency TEXT DEFAULT 'usd',
@@ -654,7 +654,7 @@ async function initializeDatabase() {
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         category TEXT,
-        "programType" TEXT NOT NULL CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo')),
+        "programType" TEXT NOT NULL CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training')),
         "beltLevel" TEXT,
         description TEXT,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -680,7 +680,7 @@ async function initializeDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS belt_requirements (
         id SERIAL PRIMARY KEY,
-        "programType" TEXT NOT NULL CHECK("programType" IN ('BJJ', 'Muay Thai', 'Taekwondo')),
+        "programType" TEXT NOT NULL CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training')),
         "fromRanking" TEXT NOT NULL,
         "toRanking" TEXT NOT NULL,
         "minClassAttendance" INTEGER DEFAULT 0,
@@ -758,9 +758,20 @@ async function initializeDatabase() {
     if (parseInt(programsResult.rows[0].count) === 0) {
       await client.query(`
         INSERT INTO programs (name, description) VALUES
-        ('BJJ', 'Brazilian Jiu Jitsu'),
-        ('Muay Thai', 'Muay Thai'),
-        ('Taekwondo', 'Taekwondo')
+        ('Children''s Martial Arts', 'Children''s Martial Arts'),
+        ('Adult BJJ', 'Adult BJJ'),
+        ('Adult TKD & HKD', 'Adult TKD & HKD'),
+        ('DG Barbell', 'DG Barbell'),
+        ('Adult Muay Thai & Kickboxing', 'Adult Muay Thai & Kickboxing'),
+        ('The Ashtanga Club', 'The Ashtanga Club'),
+        ('Dragon Gym Learning Center', 'Dragon Gym Learning Center'),
+        ('Kids BJJ', 'Kids BJJ'),
+        ('Kids Muay Thai', 'Kids Muay Thai'),
+        ('Young Ladies Yoga', 'Young Ladies Yoga'),
+        ('DG Workspace', 'DG Workspace'),
+        ('Dragon Launch', 'Dragon Launch'),
+        ('Personal Training', 'Personal Training'),
+        ('DGMT Private Training', 'DGMT Private Training')
       `);
       console.log('Inserted default programs');
     }
@@ -857,6 +868,28 @@ async function initializeDatabase() {
 
     // Migrations
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
+
+    // Expand programType CHECK constraints to support all 14 Dragon Gym programs
+    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);
+    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programType_check`);
+    await client.query(`ALTER TABLE members ADD CONSTRAINT members_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
+
+    await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programtype_check`);
+    await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programType_check`);
+    await client.query(`ALTER TABLE events ADD CONSTRAINT events_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'))`);
+
+    await client.query(`ALTER TABLE class_skills DROP CONSTRAINT IF EXISTS class_skills_programtype_check`);
+    await client.query(`ALTER TABLE class_skills DROP CONSTRAINT IF EXISTS class_skills_programType_check`);
+    await client.query(`ALTER TABLE class_skills ADD CONSTRAINT class_skills_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
+
+    await client.query(`ALTER TABLE belt_requirements DROP CONSTRAINT IF EXISTS belt_requirements_programtype_check`);
+    await client.query(`ALTER TABLE belt_requirements DROP CONSTRAINT IF EXISTS belt_requirements_programType_check`);
+    await client.query(`ALTER TABLE belt_requirements ADD CONSTRAINT belt_requirements_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
+
+    await client.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programtype_check`);
+    await client.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programType_check`);
+    await client.query(`ALTER TABLE pricing_plans ADD CONSTRAINT pricing_plans_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'))`);
+
 
     // Seed admin user if none exists
     await seedAdminUser(client);

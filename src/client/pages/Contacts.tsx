@@ -8,10 +8,21 @@ import BeltProgressionCard from '../components/BeltProgressionCard';
 import QRCodeDisplay from '../components/QRCodeDisplay';
 import styles from './Contacts.module.css';
 
-const RANKINGS = {
-  BJJ: ['White', 'Blue', 'Brown', 'Black'],
-  'Muay Thai': ['White', 'Green', 'Purple', 'Blue', 'Red'],
-  Taekwondo: ['White', 'Yellow', 'Orange', 'Green', 'Purple', 'Blue', 'Red', 'Brown', 'Il Dan Bo', 'Black'],
+const RANKINGS: Record<string, string[]> = {
+  "Children's Martial Arts": ['Beginner', 'Intermediate', 'Advanced'],
+  'Adult BJJ': ['White', 'Blue', 'Purple', 'Brown', 'Black'],
+  'Adult TKD & HKD': ['White', 'Yellow', 'Orange', 'Green', 'Purple', 'Blue', 'Red', 'Brown', 'Il Dan Bo', 'Black'],
+  'DG Barbell': ['Beginner', 'Intermediate', 'Advanced'],
+  'Adult Muay Thai & Kickboxing': ['White', 'Green', 'Purple', 'Blue', 'Red'],
+  'The Ashtanga Club': ['Beginner', 'Intermediate', 'Advanced'],
+  'Dragon Gym Learning Center': ['Beginner', 'Intermediate', 'Advanced'],
+  'Kids BJJ': ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Brown', 'Black'],
+  'Kids Muay Thai': ['White', 'Green', 'Purple', 'Blue', 'Red'],
+  'Young Ladies Yoga': ['Beginner', 'Intermediate', 'Advanced'],
+  'DG Workspace': ['Beginner', 'Intermediate', 'Advanced'],
+  'Dragon Launch': ['Beginner', 'Intermediate', 'Advanced'],
+  'Personal Training': ['Beginner', 'Intermediate', 'Advanced'],
+  'DGMT Private Training': ['Beginner', 'Intermediate', 'Advanced'],
 };
 
 const Contacts = () => {
@@ -56,7 +67,7 @@ const Contacts = () => {
     phone: '',
     accountStatus: 'lead' as AccountStatus,
     accountType: 'basic' as AccountType,
-    programType: 'BJJ' as ProgramType,
+    programType: 'Adult BJJ' as ProgramType,
     membershipAge: 'Adult' as MembershipAge,
     ranking: 'White',
     leadSource: '' as LeadSource | '',
@@ -131,7 +142,7 @@ const Contacts = () => {
         phone: '',
         accountStatus: 'lead',
         accountType: 'basic',
-        programType: 'BJJ',
+        programType: 'Adult BJJ',
         membershipAge: 'Adult',
         ranking: 'White',
         leadSource: '',
@@ -435,9 +446,20 @@ const Contacts = () => {
           className={styles.select}
         >
           <option value="">All Programs</option>
-          <option value="BJJ">Brazilian Jiu Jitsu</option>
-          <option value="Muay Thai">Muay Thai</option>
-          <option value="Taekwondo">Taekwondo</option>
+          <option value="Children's Martial Arts">Children's Martial Arts</option>
+          <option value="Adult BJJ">Adult BJJ</option>
+          <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+          <option value="DG Barbell">DG Barbell</option>
+          <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+          <option value="The Ashtanga Club">The Ashtanga Club</option>
+          <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+          <option value="Kids BJJ">Kids BJJ</option>
+          <option value="Kids Muay Thai">Kids Muay Thai</option>
+          <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+          <option value="DG Workspace">DG Workspace</option>
+          <option value="Dragon Launch">Dragon Launch</option>
+          <option value="Personal Training">Personal Training</option>
+          <option value="DGMT Private Training">DGMT Private Training</option>
         </select>
 
         <select
@@ -680,15 +702,26 @@ const Contacts = () => {
                       setFormData({
                         ...formData,
                         programType: newProgram,
-                        ranking: RANKINGS[newProgram][0],
+                        ranking: RANKINGS[newProgram]?.[0] || 'Beginner',
                       });
                     }}
                     className={styles.input}
                     required
                   >
-                    <option value="BJJ">Brazilian Jiu Jitsu</option>
-                    <option value="Muay Thai">Muay Thai</option>
-                    <option value="Taekwondo">Taekwondo</option>
+                    <option value="Children's Martial Arts">Children's Martial Arts</option>
+                    <option value="Adult BJJ">Adult BJJ</option>
+                    <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                    <option value="DG Barbell">DG Barbell</option>
+                    <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                    <option value="The Ashtanga Club">The Ashtanga Club</option>
+                    <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                    <option value="Kids BJJ">Kids BJJ</option>
+                    <option value="Kids Muay Thai">Kids Muay Thai</option>
+                    <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                    <option value="DG Workspace">DG Workspace</option>
+                    <option value="Dragon Launch">Dragon Launch</option>
+                    <option value="Personal Training">Personal Training</option>
+                    <option value="DGMT Private Training">DGMT Private Training</option>
                   </select>
                 </div>
                 <div className={styles.formGroup}>
@@ -877,9 +910,20 @@ const Contacts = () => {
                       className={styles.input}
                     >
                       <option value="">Auto-detect from file</option>
-                      <option value="BJJ">BJJ</option>
-                      <option value="Muay Thai">Muay Thai</option>
-                      <option value="Taekwondo">Taekwondo</option>
+                      <option value="Children's Martial Arts">Children's Martial Arts</option>
+                      <option value="Adult BJJ">Adult BJJ</option>
+                      <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                      <option value="DG Barbell">DG Barbell</option>
+                      <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                      <option value="The Ashtanga Club">The Ashtanga Club</option>
+                      <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                      <option value="Kids BJJ">Kids BJJ</option>
+                      <option value="Kids Muay Thai">Kids Muay Thai</option>
+                      <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                      <option value="DG Workspace">DG Workspace</option>
+                      <option value="Dragon Launch">Dragon Launch</option>
+                      <option value="Personal Training">Personal Training</option>
+                      <option value="DGMT Private Training">DGMT Private Training</option>
                     </select>
                   </div>
                   <div className={styles.formActions}>

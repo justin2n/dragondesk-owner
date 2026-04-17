@@ -8,9 +8,6 @@ import {
   AudiencesIcon,
   AddPersonIcon,
   StarIcon,
-  BJJIcon,
-  MuayThaiIcon,
-  TaekwondoIcon,
   EngageIcon,
   OptimizeIcon,
   SocialIcon,
@@ -28,6 +25,7 @@ const Dashboard = () => {
     bjj: 0,
     muayThai: 0,
     taekwondo: 0,
+    programCounts: {} as Record<string, number>,
   });
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week');
@@ -49,14 +47,25 @@ const Dashboard = () => {
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
       const members: Member[] = await api.get(`/members?locationId=${locationId}`);
 
+      const ALL_PROGRAMS = [
+        "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
+        'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
+        'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
+        'Dragon Launch', 'Personal Training', 'DGMT Private Training',
+      ];
+      const programCounts: Record<string, number> = {};
+      ALL_PROGRAMS.forEach(p => {
+        programCounts[p] = members.filter((m) => m.programType === p).length;
+      });
       const stats = {
         totalMembers: members.length,
         leads: members.filter((m) => m.accountStatus === 'lead').length,
         trialers: members.filter((m) => m.accountStatus === 'trialer').length,
         members: members.filter((m) => m.accountStatus === 'member').length,
-        bjj: members.filter((m) => m.programType === 'BJJ').length,
-        muayThai: members.filter((m) => m.programType === 'Muay Thai').length,
-        taekwondo: members.filter((m) => m.programType === 'Taekwondo').length,
+        bjj: programCounts['Adult BJJ'] || 0,
+        muayThai: programCounts['Adult Muay Thai & Kickboxing'] || 0,
+        taekwondo: programCounts['Adult TKD & HKD'] || 0,
+        programCounts,
       };
 
       setStats(stats);
@@ -167,35 +176,14 @@ const Dashboard = () => {
       <div className={styles.section}>
         <h2 className={styles.sectionTitle}>Programs</h2>
         <div className={styles.programsGrid}>
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}>
-              <span className={styles.programIcon}>
-                <BJJIcon size={28} />
-              </span>
-              <h3>Brazilian Jiu Jitsu</h3>
+          {Object.entries(stats.programCounts).map(([program, count]) => (
+            <div key={program} className={styles.programCard}>
+              <div className={styles.programHeader}>
+                <h3>{program}</h3>
+              </div>
+              <div className={styles.programValue}>{count} Members</div>
             </div>
-            <div className={styles.programValue}>{stats.bjj} Members</div>
-          </div>
-
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}>
-              <span className={styles.programIcon}>
-                <MuayThaiIcon size={28} />
-              </span>
-              <h3>Muay Thai</h3>
-            </div>
-            <div className={styles.programValue}>{stats.muayThai} Members</div>
-          </div>
-
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}>
-              <span className={styles.programIcon}>
-                <TaekwondoIcon size={28} />
-              </span>
-              <h3>Taekwondo</h3>
-            </div>
-            <div className={styles.programValue}>{stats.taekwondo} Members</div>
-          </div>
+          ))}
         </div>
       </div>
 
@@ -210,9 +198,20 @@ const Dashboard = () => {
                 className={styles.programFilter}
               >
                 <option value="all">All Programs</option>
-                <option value="BJJ">Brazilian Jiu Jitsu</option>
-                <option value="Muay Thai">Muay Thai</option>
-                <option value="Taekwondo">Taekwondo</option>
+                <option value="Children's Martial Arts">Children's Martial Arts</option>
+                <option value="Adult BJJ">Adult BJJ</option>
+                <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                <option value="DG Barbell">DG Barbell</option>
+                <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                <option value="The Ashtanga Club">The Ashtanga Club</option>
+                <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                <option value="Kids BJJ">Kids BJJ</option>
+                <option value="Kids Muay Thai">Kids Muay Thai</option>
+                <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                <option value="DG Workspace">DG Workspace</option>
+                <option value="Dragon Launch">Dragon Launch</option>
+                <option value="Personal Training">Personal Training</option>
+                <option value="DGMT Private Training">DGMT Private Training</option>
               </select>
               <div className={styles.timeframeToggle}>
                 <button

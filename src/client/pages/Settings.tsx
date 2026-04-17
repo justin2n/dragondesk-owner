@@ -157,7 +157,7 @@ const Settings = () => {
     name: '',
     description: '',
     accountType: 'basic' as 'basic' | 'premium' | 'elite' | 'family',
-    programType: 'All' as 'BJJ' | 'Muay Thai' | 'Taekwondo' | 'All',
+    programType: 'All' as "Children's Martial Arts" | 'Adult BJJ' | 'Adult TKD & HKD' | 'DG Barbell' | 'Adult Muay Thai & Kickboxing' | 'The Ashtanga Club' | 'Dragon Gym Learning Center' | 'Kids BJJ' | 'Kids Muay Thai' | 'Young Ladies Yoga' | 'DG Workspace' | 'Dragon Launch' | 'Personal Training' | 'DGMT Private Training' | 'All',
     membershipAge: 'All' as 'Adult' | 'Kids' | 'All',
     amount: 0,
     currency: 'usd',
@@ -2915,9 +2915,20 @@ const Settings = () => {
                         className={styles.select}
                       >
                         <option value="All">All Programs</option>
-                        <option value="BJJ">BJJ</option>
-                        <option value="Muay Thai">Muay Thai</option>
-                        <option value="Taekwondo">Taekwondo</option>
+                        <option value="Children's Martial Arts">Children's Martial Arts</option>
+                        <option value="Adult BJJ">Adult BJJ</option>
+                        <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                        <option value="DG Barbell">DG Barbell</option>
+                        <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                        <option value="The Ashtanga Club">The Ashtanga Club</option>
+                        <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                        <option value="Kids BJJ">Kids BJJ</option>
+                        <option value="Kids Muay Thai">Kids Muay Thai</option>
+                        <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                        <option value="DG Workspace">DG Workspace</option>
+                        <option value="Dragon Launch">Dragon Launch</option>
+                        <option value="Personal Training">Personal Training</option>
+                        <option value="DGMT Private Training">DGMT Private Training</option>
                       </select>
                     </div>
                   </div>

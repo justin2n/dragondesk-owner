@@ -4,10 +4,21 @@ import { Audience, AudienceFilter, Member, AccountStatus, AccountType, ProgramTy
 import { DeleteIcon } from '../components/Icons';
 import styles from './Audiences.module.css';
 
-const RANKINGS = {
-  BJJ: ['White', 'Blue', 'Purple', 'Brown', 'Black'],
-  'Muay Thai': ['White', 'Green', 'Purple', 'Blue', 'Red'],
-  Taekwondo: ['White', 'Yellow', 'Orange', 'Green', 'Purple', 'Blue', 'Red', 'Brown', 'Il Dan Bo', 'Black'],
+const RANKINGS: Record<string, string[]> = {
+  "Children's Martial Arts": ['Beginner', 'Intermediate', 'Advanced'],
+  'Adult BJJ': ['White', 'Blue', 'Purple', 'Brown', 'Black'],
+  'Adult TKD & HKD': ['White', 'Yellow', 'Orange', 'Green', 'Purple', 'Blue', 'Red', 'Brown', 'Il Dan Bo', 'Black'],
+  'DG Barbell': ['Beginner', 'Intermediate', 'Advanced'],
+  'Adult Muay Thai & Kickboxing': ['White', 'Green', 'Purple', 'Blue', 'Red'],
+  'The Ashtanga Club': ['Beginner', 'Intermediate', 'Advanced'],
+  'Dragon Gym Learning Center': ['Beginner', 'Intermediate', 'Advanced'],
+  'Kids BJJ': ['White', 'Yellow', 'Orange', 'Green', 'Blue', 'Purple', 'Brown', 'Black'],
+  'Kids Muay Thai': ['White', 'Green', 'Purple', 'Blue', 'Red'],
+  'Young Ladies Yoga': ['Beginner', 'Intermediate', 'Advanced'],
+  'DG Workspace': ['Beginner', 'Intermediate', 'Advanced'],
+  'Dragon Launch': ['Beginner', 'Intermediate', 'Advanced'],
+  'Personal Training': ['Beginner', 'Intermediate', 'Advanced'],
+  'DGMT Private Training': ['Beginner', 'Intermediate', 'Advanced'],
 };
 
 const Audiences = () => {
@@ -282,9 +293,20 @@ const Audiences = () => {
                       className={styles.multiSelect}
                       size={1}
                     >
-                      <option value="BJJ">Brazilian Jiu Jitsu</option>
-                      <option value="Muay Thai">Muay Thai</option>
-                      <option value="Taekwondo">Taekwondo</option>
+                      <option value="Children's Martial Arts">Children's Martial Arts</option>
+                      <option value="Adult BJJ">Adult BJJ</option>
+                      <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                      <option value="DG Barbell">DG Barbell</option>
+                      <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                      <option value="The Ashtanga Club">The Ashtanga Club</option>
+                      <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                      <option value="Kids BJJ">Kids BJJ</option>
+                      <option value="Kids Muay Thai">Kids Muay Thai</option>
+                      <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                      <option value="DG Workspace">DG Workspace</option>
+                      <option value="Dragon Launch">Dragon Launch</option>
+                      <option value="Personal Training">Personal Training</option>
+                      <option value="DGMT Private Training">DGMT Private Training</option>
                     </select>
                     <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple</small>
                   </div>
@@ -339,71 +361,29 @@ const Audiences = () => {
                 <div className={styles.rankingSection}>
                   <label className={styles.formLabel}>Ranking (by Program)</label>
                   <div className={styles.rankingGrid}>
-                    <div className={styles.rankingProgram}>
-                      <h5 className={styles.rankingProgramTitle}>BJJ</h5>
-                      <select
-                        multiple
-                        value={formData.filters.ranking?.filter(r => RANKINGS.BJJ.includes(r)) || []}
-                        onChange={(e) => {
-                          const selected = Array.from(e.target.selectedOptions, option => option.value);
-                          const otherRankings = formData.filters.ranking?.filter(r => !RANKINGS.BJJ.includes(r)) || [];
-                          setFormData({
-                            ...formData,
-                            filters: { ...formData.filters, ranking: [...otherRankings, ...selected] }
-                          });
-                        }}
-                        className={styles.rankingSelect}
-                        size={1}
-                      >
-                        {RANKINGS.BJJ.map(rank => (
-                          <option key={rank} value={rank}>{rank}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className={styles.rankingProgram}>
-                      <h5 className={styles.rankingProgramTitle}>Muay Thai</h5>
-                      <select
-                        multiple
-                        value={formData.filters.ranking?.filter(r => RANKINGS['Muay Thai'].includes(r)) || []}
-                        onChange={(e) => {
-                          const selected = Array.from(e.target.selectedOptions, option => option.value);
-                          const otherRankings = formData.filters.ranking?.filter(r => !RANKINGS['Muay Thai'].includes(r)) || [];
-                          setFormData({
-                            ...formData,
-                            filters: { ...formData.filters, ranking: [...otherRankings, ...selected] }
-                          });
-                        }}
-                        className={styles.rankingSelect}
-                        size={1}
-                      >
-                        {RANKINGS['Muay Thai'].map(rank => (
-                          <option key={rank} value={rank}>{rank}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className={styles.rankingProgram}>
-                      <h5 className={styles.rankingProgramTitle}>Taekwondo</h5>
-                      <select
-                        multiple
-                        value={formData.filters.ranking?.filter(r => RANKINGS.Taekwondo.includes(r)) || []}
-                        onChange={(e) => {
-                          const selected = Array.from(e.target.selectedOptions, option => option.value);
-                          const otherRankings = formData.filters.ranking?.filter(r => !RANKINGS.Taekwondo.includes(r)) || [];
-                          setFormData({
-                            ...formData,
-                            filters: { ...formData.filters, ranking: [...otherRankings, ...selected] }
-                          });
-                        }}
-                        className={styles.rankingSelect}
-                        size={1}
-                      >
-                        {RANKINGS.Taekwondo.map(rank => (
-                          <option key={rank} value={rank}>{rank}</option>
-                        ))}
-                      </select>
-                    </div>
+                    {Object.entries(RANKINGS).map(([program, ranks]) => (
+                      <div key={program} className={styles.rankingProgram}>
+                        <h5 className={styles.rankingProgramTitle}>{program}</h5>
+                        <select
+                          multiple
+                          value={formData.filters.ranking?.filter(r => ranks.includes(r)) || []}
+                          onChange={(e) => {
+                            const selected = Array.from(e.target.selectedOptions, option => option.value);
+                            const otherRankings = formData.filters.ranking?.filter(r => !ranks.includes(r)) || [];
+                            setFormData({
+                              ...formData,
+                              filters: { ...formData.filters, ranking: [...otherRankings, ...selected] }
+                            });
+                          }}
+                          className={styles.rankingSelect}
+                          size={1}
+                        >
+                          {ranks.map(rank => (
+                            <option key={rank} value={rank}>{rank}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
                   </div>
                   <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple ranks from any program</small>
                 </div>
