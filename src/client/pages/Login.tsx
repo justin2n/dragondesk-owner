@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranding } from '../contexts/BrandingContext';
+import defaultLogo from '../assets/dragondesk-logo.png';
 import styles from './Login.module.css';
 
 const Login = () => {
@@ -29,11 +30,11 @@ const Login = () => {
     <div className={styles.loginPage}>
       <div className={styles.loginCard}>
         <div className={styles.header}>
-          {branding.logo ? (
-            <img src={branding.logo} alt={branding.gymName} className={styles.logoImage} />
-          ) : (
-            <h1 className={styles.logo}>🥋 {branding.gymName}</h1>
-          )}
+          <img
+            src={branding.logo || defaultLogo}
+            alt={branding.gymName}
+            className={styles.logoImage}
+          />
           <p className={styles.brandName}>DragonDesk &#8482;</p>
           <p className={styles.subtitle}>Operations Platform for Martial Arts Studios</p>
         </div>
