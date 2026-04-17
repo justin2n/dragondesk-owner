@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { query, run, get } from '../models/database';
+import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
-import { testStripeConnection, getPublishableKey } from '../services/stripe';
+import { testStripeConnection, getPublishableKey, invalidateStripeCache } from '../services/stripe';
 
 const router = Router();
 
@@ -12,20 +12,22 @@ router.get('/', async (req: AuthRequest, res) => {
   try {
     const { locationId } = req.query;
 
-    let settings;
+    let result;
     if (locationId && locationId !== 'all') {
-      settings = await get(
-        'SELECT * FROM billing_settings WHERE locationId = ?',
+      result = await pool.query(
+        'SELECT * FROM billing_settings WHERE "locationId" = $1',
         [locationId]
       );
     }
 
     // Fall back to global settings
-    if (!settings) {
-      settings = await get(
-        'SELECT * FROM billing_settings WHERE locationId IS NULL'
+    if (!result || result.rows.length === 0) {
+      result = await pool.query(
+        'SELECT * FROM billing_settings WHERE "locationId" IS NULL'
       );
     }
+
+    const settings = result.rows[0] || null;
 
     // Don't expose secret key to client
     if (settings) {
@@ -75,88 +77,99 @@ router.put('/', authorizeAdmin, async (req: AuthRequest, res) => {
       isActive
     } = req.body;
 
-    // Check if settings exist
-    let existing;
+    let existingResult;
     if (locationId) {
-      existing = await get(
-        'SELECT * FROM billing_settings WHERE locationId = ?',
+      existingResult = await pool.query(
+        'SELECT * FROM billing_settings WHERE "locationId" = $1',
         [locationId]
       );
     } else {
-      existing = await get(
-        'SELECT * FROM billing_settings WHERE locationId IS NULL'
+      existingResult = await pool.query(
+        'SELECT * FROM billing_settings WHERE "locationId" IS NULL'
       );
     }
 
+    const existing = existingResult.rows[0] || null;
+
     if (existing) {
-      // Update existing settings
-      // Only update secret key if a new value is provided (not masked)
+      // Only update secret keys if a new (non-masked) value is provided
       const updateSecretKey = stripeSecretKey && !stripeSecretKey.includes('••••') ? stripeSecretKey : existing.stripeSecretKey;
       const updateWebhookSecret = stripeWebhookSecret && !stripeWebhookSecret.includes('••••') ? stripeWebhookSecret : existing.stripeWebhookSecret;
 
-      await run(
+      await pool.query(
         `UPDATE billing_settings SET
-          stripePublishableKey = COALESCE(?, stripePublishableKey),
-          stripeSecretKey = ?,
-          stripeWebhookSecret = ?,
-          currency = COALESCE(?, currency),
-          defaultTaxRate = COALESCE(?, defaultTaxRate),
-          trialDays = COALESCE(?, trialDays),
-          gracePeriodDays = COALESCE(?, gracePeriodDays),
-          autoRetryFailedPayments = COALESCE(?, autoRetryFailedPayments),
-          sendPaymentReceipts = COALESCE(?, sendPaymentReceipts),
-          sendFailedPaymentAlerts = COALESCE(?, sendFailedPaymentAlerts),
-          isActive = COALESCE(?, isActive),
-          updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
+          "stripePublishableKey" = COALESCE($1, "stripePublishableKey"),
+          "stripeSecretKey" = $2,
+          "stripeWebhookSecret" = $3,
+          currency = COALESCE($4, currency),
+          "defaultTaxRate" = COALESCE($5, "defaultTaxRate"),
+          "trialDays" = COALESCE($6, "trialDays"),
+          "gracePeriodDays" = COALESCE($7, "gracePeriodDays"),
+          "autoRetryFailedPayments" = COALESCE($8, "autoRetryFailedPayments"),
+          "sendPaymentReceipts" = COALESCE($9, "sendPaymentReceipts"),
+          "sendFailedPaymentAlerts" = COALESCE($10, "sendFailedPaymentAlerts"),
+          "isActive" = COALESCE($11, "isActive"),
+          "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $12`,
         [
-          stripePublishableKey,
+          stripePublishableKey || null,
           updateSecretKey,
           updateWebhookSecret,
-          currency,
-          defaultTaxRate,
-          trialDays,
-          gracePeriodDays,
-          autoRetryFailedPayments ? 1 : 0,
-          sendPaymentReceipts ? 1 : 0,
-          sendFailedPaymentAlerts ? 1 : 0,
-          isActive ? 1 : 0,
+          currency || null,
+          defaultTaxRate != null ? defaultTaxRate : null,
+          trialDays != null ? trialDays : null,
+          gracePeriodDays != null ? gracePeriodDays : null,
+          autoRetryFailedPayments != null ? autoRetryFailedPayments : null,
+          sendPaymentReceipts != null ? sendPaymentReceipts : null,
+          sendFailedPaymentAlerts != null ? sendFailedPaymentAlerts : null,
+          isActive != null ? isActive : null,
           existing.id
         ]
       );
 
-      const updated = await get('SELECT * FROM billing_settings WHERE id = ?', [existing.id]);
-      updated.stripeSecretKey = updated.stripeSecretKey ? '••••••••' : null;
-      updated.stripeWebhookSecret = updated.stripeWebhookSecret ? '••••••••' : null;
-      res.json(updated);
+      // Invalidate the Stripe client cache for this location
+      invalidateStripeCache(locationId ? Number(locationId) : undefined);
+
+      const updated = await pool.query('SELECT * FROM billing_settings WHERE id = $1', [existing.id]);
+      const row = updated.rows[0];
+      row.stripeSecretKey = row.stripeSecretKey ? '••••••••' : null;
+      row.stripeWebhookSecret = row.stripeWebhookSecret ? '••••••••' : null;
+      res.json(row);
     } else {
       // Create new settings
-      const result = await run(
+      const insertResult = await pool.query(
         `INSERT INTO billing_settings (
-          locationId, stripePublishableKey, stripeSecretKey, stripeWebhookSecret,
-          currency, defaultTaxRate, trialDays, gracePeriodDays,
-          autoRetryFailedPayments, sendPaymentReceipts, sendFailedPaymentAlerts, isActive
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          "locationId", "stripePublishableKey", "stripeSecretKey", "stripeWebhookSecret",
+          currency, "defaultTaxRate", "trialDays", "gracePeriodDays",
+          "autoRetryFailedPayments", "sendPaymentReceipts", "sendFailedPaymentAlerts", "isActive"
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id`,
         [
           locationId || null,
           stripePublishableKey || null,
           stripeSecretKey || null,
           stripeWebhookSecret || null,
           currency || 'usd',
-          defaultTaxRate || 0,
-          trialDays || 7,
-          gracePeriodDays || 3,
-          autoRetryFailedPayments ? 1 : 1,
-          sendPaymentReceipts ? 1 : 1,
-          sendFailedPaymentAlerts ? 1 : 1,
-          isActive ? 1 : 1
+          defaultTaxRate ?? 0,
+          trialDays ?? 7,
+          gracePeriodDays ?? 3,
+          autoRetryFailedPayments ?? true,
+          sendPaymentReceipts ?? true,
+          sendFailedPaymentAlerts ?? true,
+          isActive ?? true
         ]
       );
 
-      const created = await get('SELECT * FROM billing_settings WHERE id = ?', [result.id]);
-      created.stripeSecretKey = created.stripeSecretKey ? '••••••••' : null;
-      created.stripeWebhookSecret = created.stripeWebhookSecret ? '••••••••' : null;
-      res.status(201).json(created);
+      const newId = insertResult.rows[0].id;
+
+      // Invalidate the Stripe client cache for this location
+      invalidateStripeCache(locationId ? Number(locationId) : undefined);
+
+      const created = await pool.query('SELECT * FROM billing_settings WHERE id = $1', [newId]);
+      const row = created.rows[0];
+      row.stripeSecretKey = row.stripeSecretKey ? '••••••••' : null;
+      row.stripeWebhookSecret = row.stripeWebhookSecret ? '••••••••' : null;
+      res.status(201).json(row);
     }
   } catch (error) {
     console.error('Update billing settings error:', error);
@@ -173,18 +186,19 @@ router.post('/test', authorizeAdmin, async (req: AuthRequest, res) => {
 
     // If masked key provided, get real key from database
     if (!secretKey || secretKey.includes('••••')) {
-      let settings;
+      let settingsResult;
       if (locationId) {
-        settings = await get(
-          'SELECT stripeSecretKey FROM billing_settings WHERE locationId = ?',
+        settingsResult = await pool.query(
+          'SELECT "stripeSecretKey" FROM billing_settings WHERE "locationId" = $1',
           [locationId]
         );
       } else {
-        settings = await get(
-          'SELECT stripeSecretKey FROM billing_settings WHERE locationId IS NULL'
+        settingsResult = await pool.query(
+          'SELECT "stripeSecretKey" FROM billing_settings WHERE "locationId" IS NULL'
         );
       }
 
+      const settings = settingsResult.rows[0] || null;
       if (!settings?.stripeSecretKey) {
         return res.status(400).json({ error: 'No Stripe secret key configured' });
       }

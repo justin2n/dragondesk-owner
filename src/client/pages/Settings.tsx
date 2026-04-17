@@ -132,6 +132,7 @@ const Settings = () => {
   const [dkimVerifyResult, setDkimVerifyResult] = useState<any>(null);
 
   // Billing/Stripe Settings
+  const [billingLocationId, setBillingLocationId] = useState<number | null>(null);
   const [billingSettings, setBillingSettings] = useState({
     stripePublishableKey: '',
     stripeSecretKey: '',
@@ -416,9 +417,10 @@ const Settings = () => {
   };
 
   // Billing/Stripe Settings Functions
-  const loadBillingSettings = async () => {
+  const loadBillingSettings = async (locId?: number | null) => {
     try {
-      const response = await api.get('/billing');
+      const query = locId != null ? `/billing?locationId=${locId}` : '/billing';
+      const response = await api.get(query);
       if (response && Object.keys(response).length > 0) {
         setBillingSettings({
           stripePublishableKey: response.stripePublishableKey || '',
@@ -432,6 +434,21 @@ const Settings = () => {
           sendPaymentReceipts: response.sendPaymentReceipts ?? true,
           sendFailedPaymentAlerts: response.sendFailedPaymentAlerts ?? true,
           isActive: response.isActive ?? false,
+        });
+      } else {
+        // No settings for this location yet — reset to defaults
+        setBillingSettings({
+          stripePublishableKey: '',
+          stripeSecretKey: '',
+          stripeWebhookSecret: '',
+          currency: 'usd',
+          defaultTaxRate: 0,
+          trialDays: 7,
+          gracePeriodDays: 3,
+          autoRetryFailedPayments: true,
+          sendPaymentReceipts: true,
+          sendFailedPaymentAlerts: true,
+          isActive: false,
         });
       }
     } catch (error) {
@@ -450,9 +467,9 @@ const Settings = () => {
 
   const handleSaveBillingSettings = async () => {
     try {
-      await api.put('/billing', billingSettings);
+      await api.put('/billing', { ...billingSettings, locationId: billingLocationId });
       showSaveMessage('Billing settings saved successfully!');
-      loadBillingSettings();
+      loadBillingSettings(billingLocationId);
     } catch (error: any) {
       alert(error.message || 'Failed to save billing settings');
     }
@@ -465,6 +482,7 @@ const Settings = () => {
     try {
       const response = await api.post('/billing/test', {
         stripeSecretKey: billingSettings.stripeSecretKey,
+        locationId: billingLocationId,
       });
 
       if (response.success) {
@@ -2538,8 +2556,29 @@ const Settings = () => {
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>Stripe Payments</h2>
               <p className={styles.sectionDesc}>
-                Configure Stripe to accept payments and manage subscriptions for your members.
+                Configure Stripe to accept payments and manage subscriptions for your members. Each location can have its own Stripe account.
               </p>
+
+              <div className={styles.formGroup}>
+                <label className={styles.label}>Location</label>
+                <select
+                  value={billingLocationId ?? ''}
+                  onChange={e => {
+                    const val = e.target.value === '' ? null : Number(e.target.value);
+                    setBillingLocationId(val);
+                    loadBillingSettings(val);
+                  }}
+                  className={styles.select}
+                >
+                  <option value="">Global (All Locations)</option>
+                  {locations.map(loc => (
+                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                  ))}
+                </select>
+                <small className={styles.helpText}>
+                  Select a location to configure its Stripe account, or leave as Global for a shared account.
+                </small>
+              </div>
 
               <div className={styles.infoBox}>
                 <h4>Getting Started with Stripe</h4>
