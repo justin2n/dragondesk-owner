@@ -30,6 +30,7 @@ const Dashboard = () => {
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
+  const [ageFilter, setAgeFilter] = useState<'Adult' | 'Kids'>('Adult');
   const [isLoading, setIsLoading] = useState(true);
   const [zoom, setZoom] = useState<number>(100);
 
@@ -47,28 +48,34 @@ const Dashboard = () => {
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
       const members: Member[] = await api.get(`/members?locationId=${locationId}`);
 
-      const ALL_PROGRAMS = [
-        "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
-        'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
-        'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
-        'Dragon Launch', 'Personal Training', 'DGMT Private Training',
-      ];
-      const programCounts: Record<string, number> = {};
-      ALL_PROGRAMS.forEach(p => {
-        programCounts[p] = members.filter((m) => m.programType === p).length;
-      });
-      const stats = {
-        totalMembers: members.length,
-        leads: members.filter((m) => m.accountStatus === 'lead').length,
-        trialers: members.filter((m) => m.accountStatus === 'trialer').length,
-        members: members.filter((m) => m.accountStatus === 'member').length,
-        bjj: programCounts['Adult BJJ'] || 0,
-        muayThai: programCounts['Adult Muay Thai & Kickboxing'] || 0,
-        taekwondo: programCounts['Adult TKD & HKD'] || 0,
-        programCounts,
+      // Count paying members per program+age combination
+      const count = (programs: string[], age?: 'Adult' | 'Kids') =>
+        members.filter(m =>
+          m.accountStatus === 'member' &&
+          programs.some(p => m.programType === p) &&
+          (age ? m.membershipAge === age : true)
+        ).length;
+
+      const programCounts: Record<string, number> = {
+        'Adult BJJ': count(['Adult BJJ']),
+        'Kids BJJ': count(['Kids BJJ']),
+        'Adult TKD & HKD': count(['Adult TKD & HKD']),
+        'Kids TKD': count(["Children's Martial Arts"]),
+        'Adult Muay Thai & Kickboxing': count(['Adult Muay Thai & Kickboxing']),
+        'Kids Muay Thai': count(['Kids Muay Thai']),
+        'DG Barbell': count(['DG Barbell']),
       };
 
-      setStats(stats);
+      setStats({
+        totalMembers: members.length,
+        leads: members.filter(m => m.accountStatus === 'lead').length,
+        trialers: members.filter(m => m.accountStatus === 'trialer').length,
+        members: members.filter(m => m.accountStatus === 'member').length,
+        bjj: 0,
+        muayThai: 0,
+        taekwondo: 0,
+        programCounts,
+      });
     } catch (error) {
       console.error('Failed to load stats:', error);
     } finally {
@@ -174,16 +181,53 @@ const Dashboard = () => {
       </div>
 
       <div className={styles.section}>
-        <h2 className={styles.sectionTitle}>Programs</h2>
+        <div className={styles.programsSectionHeader}>
+          <h2 className={styles.sectionTitle}>Programs</h2>
+          <div className={styles.ageToggle}>
+            <button
+              className={`${styles.ageBtn} ${ageFilter === 'Adult' ? styles.active : ''}`}
+              onClick={() => setAgeFilter('Adult')}
+            >
+              Adults
+            </button>
+            <button
+              className={`${styles.ageBtn} ${ageFilter === 'Kids' ? styles.active : ''}`}
+              onClick={() => setAgeFilter('Kids')}
+            >
+              Kids
+            </button>
+          </div>
+        </div>
         <div className={styles.programsGrid}>
-          {Object.entries(stats.programCounts).map(([program, count]) => (
-            <div key={program} className={styles.programCard}>
-              <div className={styles.programHeader}>
-                <h3>{program}</h3>
-              </div>
-              <div className={styles.programValue}>{count} Members</div>
+          <div className={styles.programCard}>
+            <div className={styles.programHeader}><h3>Taekwondo</h3></div>
+            <div className={styles.programValue}>
+              {ageFilter === 'Adult' ? stats.programCounts['Adult TKD & HKD'] : stats.programCounts['Kids TKD']}
             </div>
-          ))}
+            <div className={styles.programLabel}>Active Members</div>
+          </div>
+          <div className={styles.programCard}>
+            <div className={styles.programHeader}><h3>Muay Thai</h3></div>
+            <div className={styles.programValue}>
+              {ageFilter === 'Adult' ? stats.programCounts['Adult Muay Thai & Kickboxing'] : stats.programCounts['Kids Muay Thai']}
+            </div>
+            <div className={styles.programLabel}>Active Members</div>
+          </div>
+          <div className={styles.programCard}>
+            <div className={styles.programHeader}><h3>BJJ</h3></div>
+            <div className={styles.programValue}>
+              {ageFilter === 'Adult' ? stats.programCounts['Adult BJJ'] : stats.programCounts['Kids BJJ']}
+            </div>
+            <div className={styles.programLabel}>Active Members</div>
+          </div>
+          <div className={styles.programCard}>
+            <div className={styles.programHeader}>
+              <h3>Barbell Club</h3>
+              {ageFilter === 'Kids' && <span className={styles.adultOnly}>Adults only</span>}
+            </div>
+            <div className={styles.programValue}>{stats.programCounts['DG Barbell']}</div>
+            <div className={styles.programLabel}>Active Members</div>
+          </div>
         </div>
       </div>
 
