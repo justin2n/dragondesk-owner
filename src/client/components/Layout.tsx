@@ -24,6 +24,7 @@ import {
 } from './Icons';
 import styles from './Layout.module.css';
 import AIAssistant from './AIAssistant';
+import defaultLogo from '../assets/dragondesk-logo.png';
 
 const Layout = () => {
   const { user, logout } = useAuth();
@@ -69,22 +70,12 @@ const Layout = () => {
         <div className={styles.sidebarHeader}>
           {isSidebarOpen && (
             <h1 className={styles.logo}>
-              {branding.logo ? (
-                <img src={branding.logo} alt={branding.gymName} className={styles.logoImage} />
-              ) : (
-                <>
-                  <DojoIcon size={24} /> {branding.gymName}
-                </>
-              )}
+              <img src={branding.logo || defaultLogo} alt={branding.gymName} className={styles.logoImage} />
             </h1>
           )}
           {!isSidebarOpen && (
             <div className={styles.logoIcon}>
-              {branding.logo ? (
-                <img src={branding.logo} alt={branding.gymName} className={styles.logoImageSmall} />
-              ) : (
-                <DojoIcon size={28} />
-              )}
+              <img src={branding.logo || defaultLogo} alt={branding.gymName} className={styles.logoImageSmall} />
             </div>
           )}
           <button
