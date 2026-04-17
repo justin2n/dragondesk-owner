@@ -71,6 +71,12 @@ const Layout = () => {
           {isSidebarOpen && (
             <h1 className={styles.logo}>
               <img src={branding.logo || defaultLogo} alt={branding.gymName} className={styles.logoImage} />
+              {!branding.logo && (
+                <span className={styles.logoText}>
+                  Dragon<span className={styles.logoTextAccent}>Desk</span>
+                  <sup className={styles.logoTm}>™</sup>
+                </span>
+              )}
             </h1>
           )}
           {!isSidebarOpen && (

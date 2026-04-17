@@ -53,6 +53,26 @@
   object-fit: contain;
 }
 
+.logoText {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--color-text-primary);
+  position: relative;
+}
+
+.logoTextAccent {
+  color: var(--color-red);
+}
+
+.logoTm {
+  font-size: 0.5rem;
+  font-weight: 400;
+  vertical-align: super;
+  color: var(--color-text-secondary);
+  margin-left: 1px;
+}
+
 .logoImageSmall {
   max-height: 40px;
   max-width: 40px;
