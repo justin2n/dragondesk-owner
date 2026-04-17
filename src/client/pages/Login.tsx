@@ -71,11 +71,6 @@ const Login = () => {
             {isLoading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-        <div className={styles.footer}>
-          <p className={styles.hint}>
-            Default credentials: <strong>admin / admin123</strong>
-          </p>
-        </div>
       </div>
     </div>
   );
