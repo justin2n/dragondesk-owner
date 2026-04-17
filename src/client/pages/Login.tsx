@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useBranding } from '../contexts/BrandingContext';
 import styles from './Login.module.css';
 
 const Login = () => {
@@ -8,6 +9,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
+  const { branding } = useBranding();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +29,11 @@ const Login = () => {
     <div className={styles.loginPage}>
       <div className={styles.loginCard}>
         <div className={styles.header}>
-          <h1 className={styles.logo}>🥋 DragonDesk: CRM</h1>
+          {branding.logo ? (
+            <img src={branding.logo} alt={branding.gymName} className={styles.logoImage} />
+          ) : (
+            <h1 className={styles.logo}>🥋 {branding.gymName}</h1>
+          )}
           <p className={styles.subtitle}>Operations Platform for Martial Arts Studios</p>
         </div>
         <form onSubmit={handleSubmit} className={styles.form}>
