@@ -35,6 +35,14 @@
   margin-bottom: 0.75rem;
 }
 
+.brandName {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: center;
+  margin-bottom: 0.25rem;
+}
+
 .subtitle {
   color: var(--color-text-secondary);
   font-size: 0.875rem;

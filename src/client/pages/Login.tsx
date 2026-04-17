@@ -34,6 +34,7 @@ const Login = () => {
           ) : (
             <h1 className={styles.logo}>🥋 {branding.gymName}</h1>
           )}
+          <p className={styles.brandName}>DragonDesk &#8482;</p>
           <p className={styles.subtitle}>Operations Platform for Martial Arts Studios</p>
         </div>
         <form onSubmit={handleSubmit} className={styles.form}>
