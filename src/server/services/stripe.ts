@@ -1,7 +1,8 @@
 import Stripe from 'stripe';
-import { query, run, get } from '../models/database';
+import { pool } from '../models/database';
 
-let stripeClient: Stripe | null = null;
+// Per-location client cache — key is locationId (or 'global' for null)
+const stripeClients = new Map<string, Stripe>();
 
 interface StripeConfig {
   secretKey: string;
@@ -9,34 +10,30 @@ interface StripeConfig {
   webhookSecret: string;
 }
 
-/**
- * Get Stripe configuration from database
- */
 export async function getStripeConfig(locationId?: number): Promise<StripeConfig | null> {
   try {
-    let settings;
+    let result;
     if (locationId) {
-      settings = await get(
-        'SELECT * FROM billing_settings WHERE locationId = ? AND isActive = 1',
+      result = await pool.query(
+        `SELECT * FROM billing_settings WHERE "locationId" = $1 AND "isActive" = true LIMIT 1`,
         [locationId]
       );
     }
 
-    // Fall back to global settings (locationId = null)
-    if (!settings) {
-      settings = await get(
-        'SELECT * FROM billing_settings WHERE locationId IS NULL AND isActive = 1'
+    // Fall back to global settings
+    if (!result || result.rows.length === 0) {
+      result = await pool.query(
+        `SELECT * FROM billing_settings WHERE "locationId" IS NULL AND "isActive" = true LIMIT 1`
       );
     }
 
-    if (!settings || !settings.stripeSecretKey) {
-      return null;
-    }
+    const settings = result?.rows[0];
+    if (!settings?.stripeSecretKey) return null;
 
     return {
       secretKey: settings.stripeSecretKey,
       publishableKey: settings.stripePublishableKey || '',
-      webhookSecret: settings.stripeWebhookSecret || ''
+      webhookSecret: settings.stripeWebhookSecret || '',
     };
   } catch (error) {
     console.error('Error getting Stripe config:', error);
@@ -44,87 +41,62 @@ export async function getStripeConfig(locationId?: number): Promise<StripeConfig
   }
 }
 
-/**
- * Initialize Stripe client
- */
-export async function initializeStripe(locationId?: number): Promise<Stripe | null> {
-  const config = await getStripeConfig(locationId);
-
-  if (!config) {
-    return null;
-  }
-
-  stripeClient = new Stripe(config.secretKey);
-  return stripeClient;
-}
-
-/**
- * Get or initialize Stripe client
- */
 export async function getStripe(locationId?: number): Promise<Stripe | null> {
-  if (stripeClient) {
-    return stripeClient;
-  }
-  return initializeStripe(locationId);
+  const cacheKey = locationId ? String(locationId) : 'global';
+
+  // Always re-fetch config so key changes take effect without restart
+  const config = await getStripeConfig(locationId);
+  if (!config) return null;
+
+  // Return cached client only if key hasn't changed
+  const cached = stripeClients.get(cacheKey);
+  if (cached) return cached;
+
+  const client = new Stripe(config.secretKey);
+  stripeClients.set(cacheKey, client);
+  return client;
 }
 
-/**
- * Test Stripe connection with provided credentials
- */
+// Call this after saving new keys so the cache is invalidated
+export function invalidateStripeCache(locationId?: number) {
+  const cacheKey = locationId ? String(locationId) : 'global';
+  stripeClients.delete(cacheKey);
+}
+
 export async function testStripeConnection(secretKey: string): Promise<{ success: boolean; error?: string }> {
   try {
     const testClient = new Stripe(secretKey);
     await testClient.customers.list({ limit: 1 });
     return { success: true };
   } catch (error: any) {
-    return {
-      success: false,
-      error: error.message || 'Failed to connect to Stripe'
-    };
+    return { success: false, error: error.message || 'Failed to connect to Stripe' };
   }
 }
 
-/**
- * Create a Stripe customer for a member
- */
 export async function createCustomer(memberId: number): Promise<{ success: boolean; customerId?: string; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
+    // Get member's locationId to use the right Stripe account
+    const memberResult = await pool.query('SELECT * FROM members WHERE id = $1', [memberId]);
+    const member = memberResult.rows[0];
+    if (!member) return { success: false, error: 'Member not found' };
+
+    const stripe = await getStripe(member.locationId || undefined);
+    if (!stripe) return { success: false, error: 'Stripe is not configured for this location' };
+
+    const existingResult = await pool.query('SELECT * FROM stripe_customers WHERE "memberId" = $1', [memberId]);
+    if (existingResult.rows.length > 0) {
+      return { success: true, customerId: existingResult.rows[0].stripeCustomerId };
     }
 
-    // Get member details
-    const member = await get('SELECT * FROM members WHERE id = ?', [memberId]);
-    if (!member) {
-      return { success: false, error: 'Member not found' };
-    }
-
-    // Check if customer already exists
-    const existingCustomer = await get(
-      'SELECT * FROM stripe_customers WHERE memberId = ?',
-      [memberId]
-    );
-    if (existingCustomer) {
-      return { success: true, customerId: existingCustomer.stripeCustomerId };
-    }
-
-    // Create Stripe customer
     const customer = await stripe.customers.create({
       email: member.email,
       name: `${member.firstName} ${member.lastName}`,
       phone: member.phone,
-      metadata: {
-        memberId: member.id.toString(),
-        accountType: member.accountType,
-        programType: member.programType
-      }
+      metadata: { memberId: member.id.toString(), programType: member.programType },
     });
 
-    // Save to database
-    await run(
-      `INSERT INTO stripe_customers (memberId, stripeCustomerId, email, name)
-       VALUES (?, ?, ?, ?)`,
+    await pool.query(
+      `INSERT INTO stripe_customers ("memberId", "stripeCustomerId", email, name) VALUES ($1,$2,$3,$4)`,
       [memberId, customer.id, member.email, `${member.firstName} ${member.lastName}`]
     );
 
@@ -135,37 +107,27 @@ export async function createCustomer(memberId: number): Promise<{ success: boole
   }
 }
 
-/**
- * Get or create Stripe customer for a member
- */
 export async function getOrCreateCustomer(memberId: number): Promise<string | null> {
-  const existing = await get(
-    'SELECT stripeCustomerId FROM stripe_customers WHERE memberId = ?',
-    [memberId]
-  );
+  const result = await pool.query('SELECT "stripeCustomerId" FROM stripe_customers WHERE "memberId" = $1', [memberId]);
+  if (result.rows.length > 0) return result.rows[0].stripeCustomerId;
 
-  if (existing) {
-    return existing.stripeCustomerId;
-  }
-
-  const result = await createCustomer(memberId);
-  return result.success ? result.customerId! : null;
+  const created = await createCustomer(memberId);
+  return created.success ? created.customerId! : null;
 }
 
-/**
- * Create a Setup Intent for adding a payment method
- */
+async function getMemberLocationId(memberId: number): Promise<number | undefined> {
+  const result = await pool.query('SELECT "locationId" FROM members WHERE id = $1', [memberId]);
+  return result.rows[0]?.locationId || undefined;
+}
+
 export async function createSetupIntent(memberId: number): Promise<{ success: boolean; clientSecret?: string; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const locationId = await getMemberLocationId(memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured for this location' };
 
     const customerId = await getOrCreateCustomer(memberId);
-    if (!customerId) {
-      return { success: false, error: 'Failed to get or create customer' };
-    }
+    if (!customerId) return { success: false, error: 'Failed to get or create customer' };
 
     const setupIntent = await stripe.setupIntents.create({
       customer: customerId,
@@ -179,71 +141,42 @@ export async function createSetupIntent(memberId: number): Promise<{ success: bo
   }
 }
 
-/**
- * Attach a payment method to a customer
- */
 export async function attachPaymentMethod(
   memberId: number,
   paymentMethodId: string,
   setAsDefault: boolean = true
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const locationId = await getMemberLocationId(memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured for this location' };
 
-    const customer = await get(
-      'SELECT * FROM stripe_customers WHERE memberId = ?',
-      [memberId]
-    );
-    if (!customer) {
-      return { success: false, error: 'Customer not found' };
-    }
+    const customerResult = await pool.query('SELECT * FROM stripe_customers WHERE "memberId" = $1', [memberId]);
+    const customer = customerResult.rows[0];
+    if (!customer) return { success: false, error: 'Customer not found' };
 
-    // Attach payment method to customer
     const paymentMethod = await stripe.paymentMethods.attach(paymentMethodId, {
       customer: customer.stripeCustomerId,
     });
 
-    // Set as default if requested
     if (setAsDefault) {
       await stripe.customers.update(customer.stripeCustomerId, {
-        invoice_settings: {
-          default_payment_method: paymentMethodId,
-        },
+        invoice_settings: { default_payment_method: paymentMethodId },
       });
-
-      // Update any existing default in our DB
-      await run(
-        'UPDATE payment_methods SET isDefault = 0 WHERE memberId = ?',
-        [memberId]
-      );
+      await pool.query(`UPDATE payment_methods SET "isDefault" = false WHERE "memberId" = $1`, [memberId]);
     }
 
-    // Save payment method to database
     const card = paymentMethod.card;
-    await run(
-      `INSERT INTO payment_methods (
-        memberId, stripePaymentMethodId, stripeCustomerId, type, brand, last4, expMonth, expYear, isDefault
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        memberId,
-        paymentMethodId,
-        customer.stripeCustomerId,
-        paymentMethod.type,
-        card?.brand || null,
-        card?.last4 || null,
-        card?.exp_month || null,
-        card?.exp_year || null,
-        setAsDefault ? 1 : 0
-      ]
+    await pool.query(
+      `INSERT INTO payment_methods ("memberId", "stripePaymentMethodId", "stripeCustomerId", type, brand, last4, "expMonth", "expYear", "isDefault")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [memberId, paymentMethodId, customer.stripeCustomerId, paymentMethod.type, card?.brand || null,
+       card?.last4 || null, card?.exp_month || null, card?.exp_year || null, setAsDefault]
     );
 
-    // Update customer default payment method in our DB
     if (setAsDefault) {
-      await run(
-        'UPDATE stripe_customers SET defaultPaymentMethodId = ?, updatedAt = CURRENT_TIMESTAMP WHERE memberId = ?',
+      await pool.query(
+        `UPDATE stripe_customers SET "defaultPaymentMethodId" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "memberId" = $2`,
         [paymentMethodId, memberId]
       );
     }
@@ -255,23 +188,20 @@ export async function attachPaymentMethod(
   }
 }
 
-/**
- * Detach a payment method
- */
 export async function detachPaymentMethod(paymentMethodId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
-
-    await stripe.paymentMethods.detach(paymentMethodId);
-
-    // Remove from database
-    await run(
-      'DELETE FROM payment_methods WHERE stripePaymentMethodId = ?',
+    // Find the member to get the right Stripe account
+    const pmResult = await pool.query(
+      `SELECT pm."memberId", m."locationId" FROM payment_methods pm JOIN members m ON pm."memberId" = m.id WHERE pm."stripePaymentMethodId" = $1`,
       [paymentMethodId]
     );
+    const locationId = pmResult.rows[0]?.locationId || undefined;
+
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured' };
+
+    await stripe.paymentMethods.detach(paymentMethodId);
+    await pool.query('DELETE FROM payment_methods WHERE "stripePaymentMethodId" = $1', [paymentMethodId]);
 
     return { success: true };
   } catch (error: any) {
@@ -280,42 +210,29 @@ export async function detachPaymentMethod(paymentMethodId: string): Promise<{ su
   }
 }
 
-/**
- * Create a subscription for a member
- */
 export async function createSubscription(
   memberId: number,
   pricingPlanId: number
 ): Promise<{ success: boolean; subscriptionId?: string; clientSecret?: string; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const locationId = await getMemberLocationId(memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured for this location' };
 
-    // Get pricing plan
-    const plan = await get('SELECT * FROM pricing_plans WHERE id = ?', [pricingPlanId]);
-    if (!plan) {
-      return { success: false, error: 'Pricing plan not found' };
-    }
+    const planResult = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [pricingPlanId]);
+    const plan = planResult.rows[0];
+    if (!plan) return { success: false, error: 'Pricing plan not found' };
 
-    // Get or create customer
     const customerId = await getOrCreateCustomer(memberId);
-    if (!customerId) {
-      return { success: false, error: 'Failed to get or create customer' };
-    }
+    if (!customerId) return { success: false, error: 'Failed to get or create customer' };
 
-    // Check if plan has a Stripe price ID, if not create one
     let stripePriceId = plan.stripePriceId;
     if (!stripePriceId) {
-      const priceResult = await createStripePrice(plan);
-      if (!priceResult.success) {
-        return { success: false, error: priceResult.error };
-      }
+      const priceResult = await createStripePrice(plan, locationId);
+      if (!priceResult.success) return { success: false, error: priceResult.error };
       stripePriceId = priceResult.priceId!;
     }
 
-    // Create subscription
     const subscriptionParams: Stripe.SubscriptionCreateParams = {
       customer: customerId,
       items: [{ price: stripePriceId }],
@@ -324,87 +241,57 @@ export async function createSubscription(
       expand: ['latest_invoice.payment_intent'],
     };
 
-    // Add trial if configured
-    if (plan.trialDays > 0) {
-      subscriptionParams.trial_period_days = plan.trialDays;
-    }
+    if (plan.trialDays > 0) subscriptionParams.trial_period_days = plan.trialDays;
 
     const subscription = await stripe.subscriptions.create(subscriptionParams);
 
-    // Save subscription to database
-    await run(
-      `INSERT INTO subscriptions (
-        memberId, pricingPlanId, stripeSubscriptionId, stripeCustomerId, status,
-        currentPeriodStart, currentPeriodEnd, trialStart, trialEnd
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    await pool.query(
+      `INSERT INTO subscriptions ("memberId", "pricingPlanId", "stripeSubscriptionId", "stripeCustomerId", status,
+        "currentPeriodStart", "currentPeriodEnd", "trialStart", "trialEnd")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
-        memberId,
-        pricingPlanId,
-        subscription.id,
-        customerId,
-        subscription.status,
+        memberId, pricingPlanId, subscription.id, customerId, subscription.status,
         new Date((subscription as any).current_period_start * 1000).toISOString(),
         new Date((subscription as any).current_period_end * 1000).toISOString(),
         subscription.trial_start ? new Date(subscription.trial_start * 1000).toISOString() : null,
-        subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null
+        subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null,
       ]
     );
 
-    // Get client secret for payment confirmation if needed
     const latestInvoice = subscription.latest_invoice as Stripe.Invoice;
     const paymentIntent = (latestInvoice as any)?.payment_intent as Stripe.PaymentIntent;
 
-    return {
-      success: true,
-      subscriptionId: subscription.id,
-      clientSecret: paymentIntent?.client_secret || undefined
-    };
+    return { success: true, subscriptionId: subscription.id, clientSecret: paymentIntent?.client_secret || undefined };
   } catch (error: any) {
     console.error('Error creating subscription:', error);
     return { success: false, error: error.message || 'Failed to create subscription' };
   }
 }
 
-/**
- * Cancel a subscription
- */
 export async function cancelSubscription(
   subscriptionId: number,
   immediately: boolean = false,
   reason?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const subResult = await pool.query('SELECT * FROM subscriptions WHERE id = $1', [subscriptionId]);
+    const subscription = subResult.rows[0];
+    if (!subscription) return { success: false, error: 'Subscription not found' };
 
-    // Get subscription from database
-    const subscription = await get('SELECT * FROM subscriptions WHERE id = ?', [subscriptionId]);
-    if (!subscription) {
-      return { success: false, error: 'Subscription not found' };
-    }
+    const locationId = await getMemberLocationId(subscription.memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured' };
 
     if (immediately) {
-      // Cancel immediately
       await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
-
-      await run(
-        `UPDATE subscriptions SET
-          status = 'canceled', canceledAt = CURRENT_TIMESTAMP, cancelReason = ?, updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
+      await pool.query(
+        `UPDATE subscriptions SET status = 'canceled', "canceledAt" = CURRENT_TIMESTAMP, "cancelReason" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $2`,
         [reason, subscriptionId]
       );
     } else {
-      // Cancel at end of period
-      await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-        cancel_at_period_end: true,
-      });
-
-      await run(
-        `UPDATE subscriptions SET
-          cancelAtPeriodEnd = 1, cancelReason = ?, updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
+      await stripe.subscriptions.update(subscription.stripeSubscriptionId, { cancel_at_period_end: true });
+      await pool.query(
+        `UPDATE subscriptions SET "cancelAtPeriodEnd" = true, "cancelReason" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $2`,
         [reason, subscriptionId]
       );
     }
@@ -416,29 +303,19 @@ export async function cancelSubscription(
   }
 }
 
-/**
- * Resume a canceled subscription (if canceled at period end)
- */
 export async function resumeSubscription(subscriptionId: number): Promise<{ success: boolean; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const subResult = await pool.query('SELECT * FROM subscriptions WHERE id = $1', [subscriptionId]);
+    const subscription = subResult.rows[0];
+    if (!subscription) return { success: false, error: 'Subscription not found' };
 
-    const subscription = await get('SELECT * FROM subscriptions WHERE id = ?', [subscriptionId]);
-    if (!subscription) {
-      return { success: false, error: 'Subscription not found' };
-    }
+    const locationId = await getMemberLocationId(subscription.memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured' };
 
-    await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-      cancel_at_period_end: false,
-    });
-
-    await run(
-      `UPDATE subscriptions SET
-        cancelAtPeriodEnd = 0, cancelReason = NULL, updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+    await stripe.subscriptions.update(subscription.stripeSubscriptionId, { cancel_at_period_end: false });
+    await pool.query(
+      `UPDATE subscriptions SET "cancelAtPeriodEnd" = false, "cancelReason" = NULL, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
       [subscriptionId]
     );
 
@@ -449,54 +326,38 @@ export async function resumeSubscription(subscriptionId: number): Promise<{ succ
   }
 }
 
-/**
- * Update subscription to a different plan
- */
 export async function updateSubscriptionPlan(
   subscriptionId: number,
   newPricingPlanId: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const subResult = await pool.query('SELECT * FROM subscriptions WHERE id = $1', [subscriptionId]);
+    const subscription = subResult.rows[0];
+    if (!subscription) return { success: false, error: 'Subscription not found' };
 
-    const subscription = await get('SELECT * FROM subscriptions WHERE id = ?', [subscriptionId]);
-    if (!subscription) {
-      return { success: false, error: 'Subscription not found' };
-    }
+    const locationId = await getMemberLocationId(subscription.memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured' };
 
-    const newPlan = await get('SELECT * FROM pricing_plans WHERE id = ?', [newPricingPlanId]);
-    if (!newPlan) {
-      return { success: false, error: 'New pricing plan not found' };
-    }
+    const planResult = await pool.query('SELECT * FROM pricing_plans WHERE id = $1', [newPricingPlanId]);
+    const newPlan = planResult.rows[0];
+    if (!newPlan) return { success: false, error: 'New pricing plan not found' };
 
-    // Ensure plan has Stripe price ID
     let stripePriceId = newPlan.stripePriceId;
     if (!stripePriceId) {
-      const priceResult = await createStripePrice(newPlan);
-      if (!priceResult.success) {
-        return { success: false, error: priceResult.error };
-      }
+      const priceResult = await createStripePrice(newPlan, locationId);
+      if (!priceResult.success) return { success: false, error: priceResult.error };
       stripePriceId = priceResult.priceId!;
     }
 
-    // Get current subscription from Stripe
     const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
-
-    // Update subscription
     await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-      items: [{
-        id: stripeSubscription.items.data[0].id,
-        price: stripePriceId,
-      }],
+      items: [{ id: stripeSubscription.items.data[0].id, price: stripePriceId }],
       proration_behavior: 'create_prorations',
     });
 
-    // Update database
-    await run(
-      `UPDATE subscriptions SET pricingPlanId = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`,
+    await pool.query(
+      `UPDATE subscriptions SET "pricingPlanId" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $2`,
       [newPricingPlanId, subscriptionId]
     );
 
@@ -507,54 +368,38 @@ export async function updateSubscriptionPlan(
   }
 }
 
-/**
- * Create a Stripe Product and Price for a pricing plan
- */
-export async function createStripePrice(plan: any): Promise<{ success: boolean; priceId?: string; productId?: string; error?: string }> {
+export async function createStripePrice(
+  plan: any,
+  locationId?: number
+): Promise<{ success: boolean; priceId?: string; productId?: string; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const stripe = await getStripe(locationId ?? plan.locationId ?? undefined);
+    if (!stripe) return { success: false, error: 'Stripe is not configured for this location' };
 
-    // Create product if needed
     let productId = plan.stripeProductId;
     if (!productId) {
       const product = await stripe.products.create({
         name: plan.name,
         description: plan.description || undefined,
-        metadata: {
-          planId: plan.id.toString(),
-          accountType: plan.accountType,
-          programType: plan.programType || 'All'
-        }
+        metadata: { planId: plan.id.toString(), programType: plan.programType || 'All' },
       });
       productId = product.id;
-
-      // Save product ID
-      await run(
-        'UPDATE pricing_plans SET stripeProductId = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+      await pool.query(
+        `UPDATE pricing_plans SET "stripeProductId" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $2`,
         [productId, plan.id]
       );
     }
 
-    // Create price
     const price = await stripe.prices.create({
       product: productId,
-      unit_amount: plan.amount, // Amount in cents
+      unit_amount: plan.amount,
       currency: plan.currency || 'usd',
-      recurring: {
-        interval: plan.billingInterval,
-        interval_count: plan.intervalCount || 1
-      },
-      metadata: {
-        planId: plan.id.toString()
-      }
+      recurring: { interval: plan.billingInterval, interval_count: plan.intervalCount || 1 },
+      metadata: { planId: plan.id.toString() },
     });
 
-    // Save price ID
-    await run(
-      'UPDATE pricing_plans SET stripePriceId = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+    await pool.query(
+      `UPDATE pricing_plans SET "stripePriceId" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $2`,
       [price.id, plan.id]
     );
 
@@ -565,27 +410,18 @@ export async function createStripePrice(plan: any): Promise<{ success: boolean; 
   }
 }
 
-/**
- * Retry a failed invoice payment
- */
 export async function retryInvoicePayment(invoiceId: number): Promise<{ success: boolean; error?: string }> {
   try {
-    const stripe = await getStripe();
-    if (!stripe) {
-      return { success: false, error: 'Stripe is not configured' };
-    }
+    const invoiceResult = await pool.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
+    const invoice = invoiceResult.rows[0];
+    if (!invoice) return { success: false, error: 'Invoice not found' };
+    if (!invoice.stripeInvoiceId) return { success: false, error: 'No Stripe invoice ID' };
 
-    const invoice = await get('SELECT * FROM invoices WHERE id = ?', [invoiceId]);
-    if (!invoice) {
-      return { success: false, error: 'Invoice not found' };
-    }
-
-    if (!invoice.stripeInvoiceId) {
-      return { success: false, error: 'No Stripe invoice ID' };
-    }
+    const locationId = await getMemberLocationId(invoice.memberId);
+    const stripe = await getStripe(locationId);
+    if (!stripe) return { success: false, error: 'Stripe is not configured' };
 
     await stripe.invoices.pay(invoice.stripeInvoiceId);
-
     return { success: true };
   } catch (error: any) {
     console.error('Error retrying invoice payment:', error);
@@ -593,29 +429,14 @@ export async function retryInvoicePayment(invoiceId: number): Promise<{ success:
   }
 }
 
-/**
- * Get Stripe publishable key for client
- */
 export async function getPublishableKey(locationId?: number): Promise<string | null> {
   const config = await getStripeConfig(locationId);
   return config?.publishableKey || null;
 }
 
 export default {
-  getStripeConfig,
-  initializeStripe,
-  getStripe,
-  testStripeConnection,
-  createCustomer,
-  getOrCreateCustomer,
-  createSetupIntent,
-  attachPaymentMethod,
-  detachPaymentMethod,
-  createSubscription,
-  cancelSubscription,
-  resumeSubscription,
-  updateSubscriptionPlan,
-  createStripePrice,
-  retryInvoicePayment,
-  getPublishableKey
+  getStripeConfig, getStripe, invalidateStripeCache, testStripeConnection,
+  createCustomer, getOrCreateCustomer, createSetupIntent, attachPaymentMethod,
+  detachPaymentMethod, createSubscription, cancelSubscription, resumeSubscription,
+  updateSubscriptionPlan, createStripePrice, retryInvoicePayment, getPublishableKey,
 };
