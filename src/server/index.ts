@@ -131,16 +131,6 @@ app.post('/api/admin/assign-plans', async (req, res) => {
   }
 });
 
-// Temporary: wipe all members for fresh import
-app.delete('/api/admin/wipe-members', async (req, res) => {
-  try {
-    await pool.query('TRUNCATE members CASCADE');
-    res.json({ message: 'All members deleted.' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   const clientPath = path.join(__dirname, '../client');
