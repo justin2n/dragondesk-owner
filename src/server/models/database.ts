@@ -868,6 +868,7 @@ async function initializeDatabase() {
 
     // Migrations
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`);
 
     // Expand programType CHECK constraints to support all 14 Dragon Gym programs
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);

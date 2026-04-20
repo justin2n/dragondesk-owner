@@ -140,14 +140,24 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
   for (const row of rows) {
     try {
       // Resolve name — prefer Participant, fall back to Buyer/Customer
-      const firstName = (row['Participant First Name'] || row['Buyer First Name'] || row['Customer First Name'] || row['First Name'] || '').trim();
-      const lastName = (row['Participant Last Name'] || row['Buyer Last Name'] || row['Customer Last Name'] || row['Last Name'] || '').trim();
+      let firstName = (row['Participant First Name'] || row['Buyer First Name'] || row['Customer First Name'] || row['First Name'] || '').trim();
+      let lastName = (row['Participant Last Name'] || row['Buyer Last Name'] || row['Customer Last Name'] || row['Last Name'] || '').trim();
       const email = (row['Email'] || row['Email Address'] || '').trim().toLowerCase();
 
-      if (!firstName || !lastName || !email) {
+      // Handle full name in first name field
+      if (firstName && !lastName && firstName.includes(' ')) {
+        const parts = firstName.split(' ');
+        firstName = parts[0];
+        lastName = parts.slice(1).join(' ');
+      }
+
+      // Skip placeholder last names like "."
+      if (lastName === '.') lastName = '';
+
+      if (!firstName || !email) {
         results.skipped++;
         if (results.skipReasons.length < 3) {
-          results.skipReasons.push(`Missing field — firstName:"${firstName}" lastName:"${lastName}" email:"${email}" | keys: ${Object.keys(row).slice(0,6).join(', ')}`);
+          results.skipReasons.push(`Missing firstName or email — firstName:"${firstName}" email:"${email}"`);
         }
         continue;
       }
