@@ -231,10 +231,12 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       } else {
         // member
         accountStatus = 'member';
-        const resolvedProgram = normalizeProgram(
-          row['Program'] || row['Program Name'] || row['Membership'] ||
-          row['membership'] || row['program'] || programOverride || ''
-        );
+        // Membership column format: "Program Name, _Plan Name_"
+        const membershipRaw = row['Program'] || row['Program Name'] || row['Membership'] || row['membership'] || row['program'] || '';
+        const membershipParts = membershipRaw.split(', _');
+        const programRaw = membershipParts[0] || programOverride || '';
+        const planNameFromMembership = membershipParts[1] ? membershipParts[1].replace(/_/g, '').trim() : '';
+        const resolvedProgram = normalizeProgram(programRaw || programOverride || '');
         if (!resolvedProgram) {
           results.skipped++;
           if (results.skipReasons.length < 5) results.skipReasons.push(`Unrecognized member program: "${row['Program']}" for ${firstName} ${lastName}`);
@@ -252,13 +254,15 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
 
       // Try to match a pricing plan for members
       let pricingPlanId: number | null = null;
-      if (type === 'member' && row['Membership']) {
-        const planName = row['Membership'].trim();
-        const planMatch = await pool.query(
-          `SELECT id FROM pricing_plans WHERE LOWER(name) LIKE LOWER($1) AND "isActive" = true LIMIT 1`,
-          [`%${planName}%`]
-        );
-        if (planMatch.rows.length > 0) pricingPlanId = planMatch.rows[0].id;
+      if (type === 'member') {
+        const planName = planNameFromMembership || row['Membership']?.trim() || '';
+        if (planName) {
+          const planMatch = await pool.query(
+            `SELECT id FROM pricing_plans WHERE LOWER(name) LIKE LOWER($1) AND "isActive" = true LIMIT 1`,
+            [`%${planName}%`]
+          );
+          if (planMatch.rows.length > 0) pricingPlanId = planMatch.rows[0].id;
+        }
       }
 
       const totalAttendance = parseInt(row['Total Attendance Count'] || row['Attendance Count'] || '0') || 0;
