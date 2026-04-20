@@ -270,7 +270,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       results.imported++;
     } catch (err: any) {
       results.errors++;
-      results.errorDetails.push(`${err.message} (row: ${firstName} ${lastName} / ${email})`);
+      results.errorDetails.push(err.message);
     }
   }
 
