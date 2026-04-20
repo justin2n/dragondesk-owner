@@ -53,6 +53,13 @@ function detectType(headers: string[]): 'lead' | 'trial' | 'member' | 'unknown' 
   return 'unknown';
 }
 
+const VALID_PROGRAMS = [
+  "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
+  'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
+  'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
+  'Dragon Launch', 'Personal Training', 'DGMT Private Training',
+];
+
 function normalizeProgram(raw: string): string {
   if (!raw) return 'Adult BJJ';
   const v = raw.trim();
@@ -71,6 +78,8 @@ function normalizeProgram(raw: string): string {
   if (v === 'Dragon Launch - Cross Training, Nutrition, Recovery' || v.toLowerCase().includes('dragon launch')) return 'Dragon Launch';
   if (v === 'PERSONAL TRAINING' || v.toLowerCase() === 'personal training') return 'Personal Training';
   if (v === 'DGMT Private and Semi-Private Training' || v.toLowerCase().includes('dgmt private') || v.toLowerCase().includes('semi-private')) return 'DGMT Private Training';
+  // If already a valid program name, return as-is
+  if (VALID_PROGRAMS.includes(v)) return v;
   return 'Adult BJJ';
 }
 
@@ -253,7 +262,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       results.imported++;
     } catch (err: any) {
       results.errors++;
-      results.errorDetails.push(err.message);
+      results.errorDetails.push(`${err.message} (row: ${firstName} ${lastName} / ${email})`);
     }
   }
 
