@@ -131,6 +131,16 @@ app.post('/api/admin/assign-plans', async (req, res) => {
   }
 });
 
+// Temporary: check member count
+app.get('/api/admin/member-count', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) as count, COUNT("locationId") as with_location FROM members');
+    res.json(result.rows[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   const clientPath = path.join(__dirname, '../client');
