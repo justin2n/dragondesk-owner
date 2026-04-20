@@ -231,7 +231,10 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       } else {
         // member
         accountStatus = 'member';
-        const resolvedProgram = normalizeProgram(row['Program'] || programOverride || '');
+        const resolvedProgram = normalizeProgram(
+          row['Program'] || row['Program Name'] || row['Membership'] ||
+          row['membership'] || row['program'] || programOverride || ''
+        );
         if (!resolvedProgram) {
           results.skipped++;
           if (results.skipReasons.length < 5) results.skipReasons.push(`Unrecognized member program: "${row['Program']}" for ${firstName} ${lastName}`);
@@ -289,7 +292,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     type,
     total: rows.length,
     ...results,
-    detectedHeaders: headers.slice(0, 15),
+    detectedHeaders: headers,
     firstErrors: results.errorDetails.slice(0, 5),
     duplicateCount: results.duplicates.length,
     duplicateList: results.duplicates,
