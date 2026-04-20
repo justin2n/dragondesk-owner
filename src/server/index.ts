@@ -134,8 +134,9 @@ app.post('/api/admin/assign-plans', async (req, res) => {
 // Temporary: check member count
 app.get('/api/admin/member-count', async (req, res) => {
   try {
-    const result = await pool.query('SELECT COUNT(*) as count, COUNT("locationId") as with_location FROM members');
-    res.json(result.rows[0]);
+    const total = await pool.query('SELECT COUNT(*) as count, COUNT("locationId") as with_location FROM members');
+    const byStatus = await pool.query('SELECT "accountStatus", COUNT(*) as count FROM members GROUP BY "accountStatus"');
+    res.json({ ...total.rows[0], byStatus: byStatus.rows });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
