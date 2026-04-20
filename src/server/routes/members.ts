@@ -16,7 +16,7 @@ router.get('/', async (req: AuthRequest, res) => {
     let sql = 'SELECT * FROM members WHERE 1=1';
 
     if (locationId && locationId !== 'all') {
-      sql += ` AND "locationId" = $${idx++}`;
+      sql += ` AND ("locationId" = $${idx++} OR "locationId" IS NULL)`;
       params.push(locationId);
     }
 
