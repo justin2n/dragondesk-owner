@@ -874,7 +874,8 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programType_check`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v2`);
-    await client.query(`ALTER TABLE members ADD CONSTRAINT members_programtype_check_v2 CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
+    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v3`);
+    await client.query(`ALTER TABLE members ADD CONSTRAINT members_programtype_check_v3 CHECK("programType" IN ('No Program Selected', 'Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
 
     await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programtype_check`);
     await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programType_check`);

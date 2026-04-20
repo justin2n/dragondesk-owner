@@ -23,6 +23,7 @@ export type AccountStatus = 'lead' | 'trialer' | 'member' | 'cancelled';
 export type AccountType = 'basic' | 'premium' | 'elite' | 'family';
 
 export type ProgramType =
+  | 'No Program Selected'
   | "Children's Martial Arts"
   | 'Adult BJJ'
   | 'Adult TKD & HKD'

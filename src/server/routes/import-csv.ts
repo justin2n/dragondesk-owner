@@ -54,14 +54,14 @@ function detectType(headers: string[]): 'lead' | 'trial' | 'member' | 'unknown' 
 }
 
 const VALID_PROGRAMS = [
-  "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
+  'No Program Selected', "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
   'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
   'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
   'Dragon Launch', 'Personal Training', 'DGMT Private Training',
 ];
 
-function normalizeProgram(raw: string): string {
-  if (!raw) return 'Adult BJJ';
+function normalizeProgram(raw: string, isLead = false): string {
+  if (!raw) return isLead ? 'No Program Selected' : 'Adult BJJ';
   const v = raw.trim();
   // Exact or near-exact MyStudio full names
   if (v === "Children's Martial Arts Programs" || v.toLowerCase().includes("children's martial arts")) return "Children's Martial Arts";
@@ -80,7 +80,7 @@ function normalizeProgram(raw: string): string {
   if (v === 'DGMT Private and Semi-Private Training' || v.toLowerCase().includes('dgmt private') || v.toLowerCase().includes('semi-private')) return 'DGMT Private Training';
   // If already a valid program name, return as-is
   if (VALID_PROGRAMS.includes(v)) return v;
-  return 'Adult BJJ';
+  return isLead ? 'No Program Selected' : 'Adult BJJ';
 }
 
 function normalizeAge(programType: string, ageStr: string, dob: string): 'Adult' | 'Kids' {
@@ -193,7 +193,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
 
       if (type === 'lead') {
         accountStatus = 'lead';
-        programType = normalizeProgram(row['Program Interest'] || programOverride || '');
+        programType = normalizeProgram(row['Program Interest'] || programOverride || '', true);
         membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = 'White';
         leadSource = normalizeLeadSource(row['Source'] || '');
