@@ -131,7 +131,16 @@ function parseDate(raw: string): string | null {
 router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const locationId = req.body.locationId ? parseInt(req.body.locationId) : null;
+  let locationId = req.body.locationId ? parseInt(req.body.locationId) : null;
+  // If no location specified, fall back to the primary location
+  if (!locationId) {
+    const primaryLoc = await pool.query(`SELECT id FROM locations WHERE "isPrimary" = true LIMIT 1`);
+    if (primaryLoc.rows.length > 0) locationId = primaryLoc.rows[0].id;
+    else {
+      const anyLoc = await pool.query(`SELECT id FROM locations ORDER BY id ASC LIMIT 1`);
+      if (anyLoc.rows.length > 0) locationId = anyLoc.rows[0].id;
+    }
+  }
   const programOverride = req.body.program || null; // for member CSVs split by program
 
   const text = req.file.buffer.toString('utf-8');
@@ -144,7 +153,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     return res.status(400).json({ error: 'Could not detect CSV type. Expected Lead, Trial, or Member format from MyStudio.' });
   }
 
-  const results = { imported: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[] };
+  const results = { imported: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[], duplicates: [] as string[] };
 
   for (const row of rows) {
     try {
@@ -172,9 +181,11 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       }
 
       // Skip duplicates
-      const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
+      const existing = await pool.query('SELECT id, "firstName", "lastName", "accountStatus" FROM members WHERE email = $1', [email]);
       if (existing.rows.length > 0) {
         results.skipped++;
+        const ex = existing.rows[0];
+        results.duplicates.push(`${firstName} ${lastName} (${email}) — already exists as ${ex.firstName} ${ex.lastName} [${ex.accountStatus}]`);
         continue;
       }
 
@@ -280,6 +291,8 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     ...results,
     detectedHeaders: headers.slice(0, 15),
     firstErrors: results.errorDetails.slice(0, 5),
+    duplicateCount: results.duplicates.length,
+    duplicateList: results.duplicates,
   });
 });
 

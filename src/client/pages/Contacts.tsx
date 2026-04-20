@@ -956,7 +956,21 @@ const Contacts = () => {
                       <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.errors}</span>
                     </div>
                   )}
+                  {importResult.duplicateCount > 0 && (
+                    <div className={styles.importResultRow}>
+                      <span className={styles.importResultLabel}>Duplicates</span>
+                      <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.duplicateCount}</span>
+                    </div>
+                  )}
                 </div>
+                {importResult.duplicateList?.length > 0 && (
+                  <div className={styles.duplicateList}>
+                    <p className={styles.duplicateListTitle}>Duplicate records (already in system):</p>
+                    {importResult.duplicateList.map((d: string, i: number) => (
+                      <div key={i} className={styles.duplicateRow}>{d}</div>
+                    ))}
+                  </div>
+                )}
                 <div className={styles.modalFooter}>
                   <button onClick={() => { setImportResult(null); setImportFile(null); }} className={styles.cancelBtn} type="button">Import Another</button>
                   <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>
