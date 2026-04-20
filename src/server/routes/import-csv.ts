@@ -252,16 +252,31 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         }
       }
 
-      // Try to match a pricing plan for members
+      // Try to match or create a pricing plan for members
       let pricingPlanId: number | null = null;
       if (type === 'member') {
         const planName = planNameFromMembership || row['Membership']?.trim() || '';
         if (planName) {
           const planMatch = await pool.query(
-            `SELECT id FROM pricing_plans WHERE LOWER(name) LIKE LOWER($1) AND "isActive" = true LIMIT 1`,
+            `SELECT id FROM pricing_plans WHERE LOWER(name) LIKE LOWER($1) LIMIT 1`,
             [`%${planName}%`]
           );
-          if (planMatch.rows.length > 0) pricingPlanId = planMatch.rows[0].id;
+          if (planMatch.rows.length > 0) {
+            pricingPlanId = planMatch.rows[0].id;
+          } else {
+            // Create the plan so it can be configured later
+            const inserted = await pool.query(
+              `INSERT INTO pricing_plans (name, description, "accountType", "programType", "membershipAge", amount, currency, "billingInterval", "intervalCount", "isActive")
+               VALUES ($1, $2, 'basic', $3, $4, 0, 'usd', 'month', 1, true) RETURNING id`,
+              [
+                planName,
+                `Auto-created from MyStudio import`,
+                programType || 'No Program Selected',
+                membershipAge || 'Adult',
+              ]
+            );
+            pricingPlanId = inserted.rows[0].id;
+          }
         }
       }
 
