@@ -60,8 +60,8 @@ const VALID_PROGRAMS = [
   'Dragon Launch', 'Personal Training', 'DGMT Private Training',
 ];
 
-function normalizeProgram(raw: string, isLead = false): string {
-  if (!raw) return isLead ? 'No Program Selected' : 'Adult BJJ';
+function normalizeProgram(raw: string, isLead = false): string | null {
+  if (!raw) return isLead ? 'No Program Selected' : null;
   const v = raw.trim();
   // Exact or near-exact MyStudio full names
   if (v === "Children's Martial Arts Programs" || v.toLowerCase().includes("children's martial arts")) return "Children's Martial Arts";
@@ -80,7 +80,7 @@ function normalizeProgram(raw: string, isLead = false): string {
   if (v === 'DGMT Private and Semi-Private Training' || v.toLowerCase().includes('dgmt private') || v.toLowerCase().includes('semi-private')) return 'DGMT Private Training';
   // If already a valid program name, return as-is
   if (VALID_PROGRAMS.includes(v)) return v;
-  return isLead ? 'No Program Selected' : 'Adult BJJ';
+  return isLead ? 'No Program Selected' : null;
 }
 
 function normalizeAge(programType: string, ageStr: string, dob: string): 'Adult' | 'Kids' {
@@ -193,24 +193,26 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
 
       if (type === 'lead') {
         accountStatus = 'lead';
-        programType = normalizeProgram(row['Program Interest'] || programOverride || '', true);
+        programType = normalizeProgram(row['Program Interest'] || programOverride || '', true) as string;
         membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = 'White';
         leadSource = normalizeLeadSource(row['Source'] || '');
-        const optIn = parseDate(row['Opt In date'] || '');
         memberStartDate = null;
         trialStartDate = null;
 
       } else if (type === 'trial') {
         accountStatus = 'trialer';
-        programType = normalizeProgram(row['Trial Program'] || programOverride || '');
+        const resolvedProgram = normalizeProgram(row['Trial Program'] || programOverride || '');
+        if (!resolvedProgram) {
+          results.skipped++;
+          if (results.skipReasons.length < 5) results.skipReasons.push(`Unrecognized trial program: "${row['Trial Program']}" for ${firstName} ${lastName}`);
+          continue;
+        }
+        programType = resolvedProgram;
         membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = 'White';
         leadSource = normalizeLeadSource(row['Source'] || '');
         trialStartDate = parseDate(row['Start Date'] || row['Registered Date'] || '');
-
-        const attendanceCount = parseInt(row['Attendance Count'] || '0') || 0;
-        const last14 = parseInt(row['Attendance Last 14 Days'] || '0') || 0;
         if (row['Custom Field 1'] && row['Custom Value 1']) {
           notes = `${row['Custom Field 1']}: ${row['Custom Value 1']}`;
         }
@@ -218,7 +220,13 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       } else {
         // member
         accountStatus = 'member';
-        programType = normalizeProgram(row['Program'] || programOverride || '');
+        const resolvedProgram = normalizeProgram(row['Program'] || programOverride || '');
+        if (!resolvedProgram) {
+          results.skipped++;
+          if (results.skipReasons.length < 5) results.skipReasons.push(`Unrecognized member program: "${row['Program']}" for ${firstName} ${lastName}`);
+          continue;
+        }
+        programType = resolvedProgram;
         membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = normalizeRanking(row['Rank'] || '', programType);
         leadSource = normalizeLeadSource(row['Source'] || '');
