@@ -135,17 +135,20 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     return res.status(400).json({ error: 'Could not detect CSV type. Expected Lead, Trial, or Member format from MyStudio.' });
   }
 
-  const results = { imported: 0, skipped: 0, errors: 0, errorDetails: [] as string[] };
+  const results = { imported: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[] };
 
   for (const row of rows) {
     try {
       // Resolve name — prefer Participant, fall back to Buyer/Customer
-      const firstName = (row['Participant First Name'] || row['Buyer First Name'] || row['Customer First Name'] || '').trim();
-      const lastName = (row['Participant Last Name'] || row['Buyer Last Name'] || row['Customer Last Name'] || '').trim();
-      const email = (row['Email'] || '').trim().toLowerCase();
+      const firstName = (row['Participant First Name'] || row['Buyer First Name'] || row['Customer First Name'] || row['First Name'] || '').trim();
+      const lastName = (row['Participant Last Name'] || row['Buyer Last Name'] || row['Customer Last Name'] || row['Last Name'] || '').trim();
+      const email = (row['Email'] || row['Email Address'] || '').trim().toLowerCase();
 
       if (!firstName || !lastName || !email) {
         results.skipped++;
+        if (results.skipReasons.length < 3) {
+          results.skipReasons.push(`Missing field — firstName:"${firstName}" lastName:"${lastName}" email:"${email}" | keys: ${Object.keys(row).slice(0,6).join(', ')}`);
+        }
         continue;
       }
 
@@ -248,6 +251,8 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     type,
     total: rows.length,
     ...results,
+    detectedHeaders: headers.slice(0, 15),
+    firstErrors: results.errorDetails.slice(0, 5),
   });
 });
 
