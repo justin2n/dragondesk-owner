@@ -98,6 +98,45 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
 });
 
+// Public lead capture — no auth required, for marketing site and lead forms
+app.post('/api/public/lead', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const { firstName, lastName, email, phone, studio, message, program } = req.body;
+    if (!firstName || !email) return res.status(400).json({ error: 'Name and email required' });
+
+    const notes = [
+      studio ? `Studio: ${studio}` : null,
+      message || null,
+    ].filter(Boolean).join('. ') || null;
+
+    await pool.query(
+      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", notes)
+       VALUES ($1, $2, $3, $4, 'lead', 'basic', $5, $6)
+       ON CONFLICT (email) DO NOTHING`,
+      [
+        firstName.trim(),
+        (lastName || '').trim(),
+        email.trim().toLowerCase(),
+        phone || null,
+        program || 'No Program Selected',
+        notes,
+      ]
+    );
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CORS preflight for public lead endpoint
+app.options('/api/public/lead', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
+
 // Temporary: assign pricing plans to members that don't have one
 app.post('/api/admin/assign-plans', async (req, res) => {
   try {
