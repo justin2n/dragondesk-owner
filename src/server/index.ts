@@ -51,6 +51,7 @@ pool.query(`ALTER TABLE members ALTER COLUMN "programType" SET DEFAULT 'No Progr
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`).catch(() => {});
+pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "gaClientId" TEXT`).catch(() => {});
 pool.query(`
   CREATE TABLE IF NOT EXISTS churn_metrics (
     id SERIAL PRIMARY KEY,
@@ -127,13 +128,13 @@ app.get('/api/health', (req, res) => {
 app.post('/api/public/lead', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   try {
-    const { firstName, lastName, email, phone, studio, message, program } = req.body;
+    const { firstName, lastName, email, phone, studio, message, program, gaClientId } = req.body;
     if (!firstName || !email) return res.status(400).json({ error: 'Name and email required' });
 
     await pool.query(
-      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, "companyName", notes)
-       VALUES ($1, $2, $3, $4, 'lead', 'basic', 'No Program Selected', 'Adult', 'White', $5, $6)
-       ON CONFLICT (email) DO NOTHING`,
+      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, "companyName", notes, "gaClientId")
+       VALUES ($1, $2, $3, $4, 'lead', 'basic', 'No Program Selected', 'Adult', 'White', $5, $6, $7)
+       ON CONFLICT (email) DO UPDATE SET "gaClientId" = EXCLUDED."gaClientId" WHERE members."gaClientId" IS NULL`,
       [
         firstName.trim(),
         (lastName || '').trim(),
@@ -141,6 +142,7 @@ app.post('/api/public/lead', async (req, res) => {
         phone || null,
         studio || null,
         message || null,
+        gaClientId || null,
       ]
     );
     res.json({ success: true });

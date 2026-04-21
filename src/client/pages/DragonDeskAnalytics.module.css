@@ -540,3 +540,83 @@
     gap: 0.5rem;
   }
 }
+
+/* ── Web Analytics ── */
+.webNotConfigured {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.webNotConfigured h3 { color: var(--color-text-primary); font-size: 1.2rem; }
+.webNotConfigured p { max-width: 560px; font-size: 0.9rem; line-height: 1.6; }
+.webEnvVars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  text-align: left;
+  width: 100%;
+  max-width: 560px;
+}
+.webEnvVars code {
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+.webEnvNote { font-size: 0.82rem !important; color: var(--color-text-secondary); }
+
+.webKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+@media (max-width: 900px) { .webKpiGrid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px) { .webKpiGrid { grid-template-columns: repeat(2, 1fr); } }
+
+.webKpiCard {
+  background: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+  text-align: center;
+}
+.webKpiValue { font-size: 1.5rem; font-weight: 700; color: var(--color-text-primary); }
+.webKpiLabel { font-size: 0.78rem; color: var(--color-text-secondary); margin-top: 0.25rem; }
+
+.webTwoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 800px) { .webTwoCol { grid-template-columns: 1fr; } }
+
+.webPagePath {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+.webStitchNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+.webStitchNote strong { color: var(--color-text-primary); }

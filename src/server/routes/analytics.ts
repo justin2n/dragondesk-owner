@@ -560,4 +560,33 @@ router.get('/value', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
+// ─── Google Analytics web overview ───────────────────────────────────────────
+router.get('/web/overview', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { getWebOverview, isGAConfigured } = await import('../services/googleAnalytics.js');
+    if (!isGAConfigured()) {
+      return res.json({ configured: false });
+    }
+    const days = parseInt(String(req.query.days || '30'));
+    const data = await getWebOverview(days);
+    res.json({ configured: true, ...data });
+  } catch (error: any) {
+    console.error('GA overview error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Per-user GA sessions by stored client ID
+router.get('/web/user/:clientId', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { getUserWebSessions, isGAConfigured } = await import('../services/googleAnalytics.js');
+    if (!isGAConfigured()) return res.json({ configured: false, sessions: [] });
+    const sessions = await getUserWebSessions(req.params.clientId);
+    res.json({ configured: true, sessions });
+  } catch (error: any) {
+    console.error('GA user sessions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

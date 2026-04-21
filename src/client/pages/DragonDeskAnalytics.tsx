@@ -10,6 +10,9 @@ import {
   MdBarChart,
   MdAreaChart,
   MdPieChart,
+  MdLanguage,
+  MdDevices,
+  MdOpenInNew,
 } from 'react-icons/md';
 import {
   LineChart,
@@ -31,7 +34,7 @@ import {
 import styles from './DragonDeskAnalytics.module.css';
 
 type ChartType = 'line' | 'bar' | 'area' | 'pie';
-type ActiveSection = 'trials' | 'leads' | 'members' | 'value';
+type ActiveSection = 'trials' | 'leads' | 'members' | 'value' | 'web';
 
 interface ValueData {
   acv: number;
@@ -106,12 +109,17 @@ const DragonDeskAnalytics = () => {
   const [monthsBack, setMonthsBack] = useState<number>(12);
   const [valueData, setValueData] = useState<ValueData | null>(null);
   const [valueLoading, setValueLoading] = useState(false);
+  const [webData, setWebData] = useState<any | null>(null);
+  const [webLoading, setWebLoading] = useState(false);
+  const [webDays, setWebDays] = useState(30);
 
   // Chart type preferences for each section
   const [chartTypes, setChartTypes] = useState<Record<ActiveSection, ChartType>>({
     trials: 'bar',
     leads: 'area',
     members: 'line',
+    value: 'bar',
+    web: 'bar',
   });
 
   const locationId = isAllLocations ? 'all' : String(selectedLocation?.id || '');
@@ -151,6 +159,22 @@ const DragonDeskAnalytics = () => {
     };
     fetchValue();
   }, [activeSection, selectedLocation, isAllLocations, selectedProgram, selectedMembershipAge]);
+
+  useEffect(() => {
+    if (activeSection !== 'web') return;
+    const fetchWeb = async () => {
+      try {
+        setWebLoading(true);
+        const response = await api.get(`/analytics/web/overview?days=${webDays}`);
+        setWebData(response);
+      } catch (error) {
+        console.error('Failed to load web analytics:', error);
+      } finally {
+        setWebLoading(false);
+      }
+    };
+    fetchWeb();
+  }, [activeSection, webDays]);
 
   const getChartTypeIcon = (type: ChartType) => {
     switch (type) {
@@ -403,6 +427,161 @@ const DragonDeskAnalytics = () => {
             </ResponsiveContainer>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const fmtDuration = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.round(secs % 60);
+    return `${m}m ${s}s`;
+  };
+
+  const renderWebSection = () => {
+    if (webLoading) return <div className={styles.loading}>Loading web analytics...</div>;
+    if (!webData) return null;
+
+    if (!webData.configured) {
+      return (
+        <div className={styles.sectionContent}>
+          <div className={styles.webNotConfigured}>
+            <MdLanguage size={48} style={{ opacity: 0.3 }} />
+            <h3>Google Analytics Not Configured</h3>
+            <p>Add these environment variables to your Railway deployment to enable web analytics:</p>
+            <div className={styles.webEnvVars}>
+              <code>GA_PROPERTY_ID=properties/YOUR_PROPERTY_ID</code>
+              <code>GA_SERVICE_ACCOUNT_JSON={`{"type":"service_account","project_id":"..."}`}</code>
+            </div>
+            <p className={styles.webEnvNote}>
+              Create a service account in Google Cloud Console, grant it <strong>Viewer</strong> access
+              to your GA4 property, and paste the JSON key as the env var value.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    const { kpis, byChannel, topPages, byDevice, dailyTrend } = webData;
+    const deviceColors: Record<string, string> = { desktop: '#3b82f6', mobile: '#dc2626', tablet: '#f59e0b' };
+
+    return (
+      <div className={styles.sectionContent}>
+        {/* KPI row */}
+        <div className={styles.webKpiGrid}>
+          {[
+            { label: 'Sessions', value: (kpis.sessions || 0).toLocaleString() },
+            { label: 'Users', value: (kpis.users || 0).toLocaleString() },
+            { label: 'New Users', value: (kpis.newUsers || 0).toLocaleString() },
+            { label: 'Pageviews', value: (kpis.pageviews || 0).toLocaleString() },
+            { label: 'Avg Session', value: fmtDuration(kpis.avgSessionDuration || 0) },
+            { label: 'Bounce Rate', value: `${((kpis.bounceRate || 0) * 100).toFixed(1)}%` },
+          ].map(k => (
+            <div key={k.label} className={styles.webKpiCard}>
+              <div className={styles.webKpiValue}>{k.value}</div>
+              <div className={styles.webKpiLabel}>{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Daily sessions trend */}
+        <div className={styles.chartContainer}>
+          <div className={styles.chartHeader}>
+            <h3>Daily Sessions</h3>
+            <p>Sessions and new users over the selected period</p>
+          </div>
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={dailyTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="date" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
+                tickFormatter={d => d.slice(5)} />
+              <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
+              <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+              <Legend />
+              <Area type="monotone" dataKey="sessions" name="Sessions" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} />
+              <Area type="monotone" dataKey="newUsers" name="New Users" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className={styles.webTwoCol}>
+          {/* Traffic by channel */}
+          <div className={styles.chartContainer}>
+            <div className={styles.chartHeader}>
+              <h3>Traffic by Channel</h3>
+              <p>Session volume by acquisition channel</p>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={byChannel} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis type="number" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                <YAxis type="category" dataKey="channel" width={110} stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+                <Bar dataKey="sessions" name="Sessions" fill="#dc2626" radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Device breakdown */}
+          <div className={styles.chartContainer}>
+            <div className={styles.chartHeader}>
+              <h3>Device Breakdown</h3>
+              <p>Sessions by device type</p>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={byDevice} cx="50%" cy="50%" outerRadius={90} dataKey="sessions"
+                  label={({ device, percent }) => `${device}: ${((percent || 0) * 100).toFixed(0)}%`}>
+                  {byDevice.map((entry: any, i: number) => (
+                    <Cell key={i} fill={deviceColors[entry.device] || CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Top pages table */}
+        <div className={styles.chartContainer}>
+          <div className={styles.chartHeader}>
+            <h3>Top Landing Pages</h3>
+            <p>Where visitors are entering the site</p>
+          </div>
+          <div className={styles.tableWrapper}>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Page</th>
+                  <th>Sessions</th>
+                  <th>Pageviews</th>
+                  <th>Bounce Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topPages.map((p: any, i: number) => (
+                  <tr key={i}>
+                    <td>
+                      <span className={styles.webPagePath}>{p.page}</span>
+                    </td>
+                    <td>{p.sessions.toLocaleString()}</td>
+                    <td>{p.pageviews.toLocaleString()}</td>
+                    <td>{((p.bounceRate || 0) * 100).toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Stitching note */}
+        <div className={styles.webStitchNote}>
+          <MdDevices size={18} />
+          <span>
+            <strong>Lead stitching active.</strong> When a visitor submits the marketing site contact form,
+            their GA client ID is captured and stored on their lead record. View per-lead web sessions
+            from the Contacts page.
+          </span>
+        </div>
       </div>
     );
   };
@@ -661,13 +840,35 @@ const DragonDeskAnalytics = () => {
               >
                 Value
               </button>
+              <button
+                className={`${styles.tab} ${activeSection === 'web' ? styles.activeTab : ''}`}
+                onClick={() => setActiveSection('web')}
+              >
+                <MdLanguage size={16} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                Web
+              </button>
             </div>
+
+            {activeSection === 'web' && (
+              <div className={styles.controlsRow}>
+                <div className={styles.filterGroup}>
+                  <label>Date Range:</label>
+                  <select value={webDays} onChange={e => setWebDays(parseInt(e.target.value))} className={styles.select}>
+                    <option value={7}>Last 7 Days</option>
+                    <option value={30}>Last 30 Days</option>
+                    <option value={90}>Last 90 Days</option>
+                    <option value={180}>Last 180 Days</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div className={styles.tabContent}>
               {activeSection === 'trials' && renderTrialsSection()}
               {activeSection === 'leads' && renderLeadsSection()}
               {activeSection === 'members' && renderMembersSection()}
               {activeSection === 'value' && renderValueSection()}
+              {activeSection === 'web' && renderWebSection()}
             </div>
           </>
         )}
