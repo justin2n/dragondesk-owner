@@ -870,11 +870,12 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`);
 
-    // Drop all programType CHECK constraints on members — validation handled in application layer
+    // Drop all programType CHECK constraints and NOT NULL on members — validation handled in application layer
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check"`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v2`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v3`);
+    await client.query(`ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL`);
 
     await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programtype_check`);
     await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programType_check`);
