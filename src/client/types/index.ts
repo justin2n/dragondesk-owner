@@ -64,7 +64,7 @@ export interface Member {
   phone: string;
   accountStatus: AccountStatus;
   accountType: AccountType;
-  programType: ProgramType;
+  programType: ProgramType | null;
   membershipAge: MembershipAge;
   ranking: string;
   leadSource?: LeadSource;

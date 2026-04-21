@@ -119,7 +119,7 @@ const Contacts = () => {
         phone: member.phone,
         accountStatus: member.accountStatus,
         accountType: member.accountType,
-        programType: member.programType,
+        programType: member.programType || 'No Program Selected',
         membershipAge: member.membershipAge,
         ranking: member.ranking,
         leadSource: member.leadSource || '',
