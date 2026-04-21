@@ -93,6 +93,9 @@ async function initializeDatabase() {
         "lastCheckInAt" TIMESTAMP,
         "attendanceStreak" INTEGER DEFAULT 0,
         "lastPromotionDate" TIMESTAMP,
+        "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL,
+        "syncedFromMyStudio" BOOLEAN DEFAULT false,
+        "companyName" TEXT,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )

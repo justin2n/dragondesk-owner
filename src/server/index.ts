@@ -43,12 +43,14 @@ import importCsvRoutes from './routes/import-csv';
 
 dotenv.config();
 
-// Unconditionally drop programType constraint and NOT NULL — runs on every boot
-// independent of the main migration chain
+// Unconditionally fix schema on every boot — independent of migration chain
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`).catch(() => {});
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check"`).catch(() => {});
 pool.query(`ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL`).catch(() => {});
 pool.query(`ALTER TABLE members ALTER COLUMN "programType" SET DEFAULT 'No Program Selected'`).catch(() => {});
+pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`).catch(() => {});
+pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
+pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`).catch(() => {});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
