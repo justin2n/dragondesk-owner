@@ -111,8 +111,8 @@ app.post('/api/public/lead', async (req, res) => {
     ].filter(Boolean).join('. ') || null;
 
     await pool.query(
-      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", notes)
-       VALUES ($1, $2, $3, $4, 'lead', 'basic', $5, $6)
+      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, notes)
+       VALUES ($1, $2, $3, $4, 'lead', 'basic', $5, 'Adult', 'White', $6)
        ON CONFLICT (email) DO NOTHING`,
       [
         firstName.trim(),
