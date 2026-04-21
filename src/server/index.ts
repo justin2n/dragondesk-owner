@@ -112,21 +112,17 @@ app.post('/api/public/lead', async (req, res) => {
     const { firstName, lastName, email, phone, studio, message, program } = req.body;
     if (!firstName || !email) return res.status(400).json({ error: 'Name and email required' });
 
-    const notes = [
-      studio ? `Studio: ${studio}` : null,
-      message || null,
-    ].filter(Boolean).join('. ') || null;
-
     await pool.query(
-      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, notes)
-       VALUES ($1, $2, $3, $4, 'lead', 'basic', 'No Program Selected', 'Adult', 'White', $5)
+      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, "companyName", notes)
+       VALUES ($1, $2, $3, $4, 'lead', 'basic', 'No Program Selected', 'Adult', 'White', $5, $6)
        ON CONFLICT (email) DO NOTHING`,
       [
         firstName.trim(),
         (lastName || '').trim(),
         email.trim().toLowerCase(),
         phone || null,
-        notes,
+        studio || null,
+        message || null,
       ]
     );
     res.json({ success: true });

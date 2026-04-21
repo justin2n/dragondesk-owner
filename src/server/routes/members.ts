@@ -87,6 +87,7 @@ router.post('/', async (req: AuthRequest, res) => {
       trialStartDate,
       memberStartDate,
       pricingPlanId,
+      companyName,
     } = req.body;
 
     if (!firstName || !lastName || !email || !accountStatus) {
@@ -102,15 +103,15 @@ router.post('/', async (req: AuthRequest, res) => {
       `INSERT INTO members (
         "firstName", "lastName", email, phone, "accountStatus", "accountType",
         "programType", "membershipAge", ranking, "leadSource", "dateOfBirth", "emergencyContact",
-        "emergencyPhone", notes, tags, "locationId", "trialStartDate", "memberStartDate", "pricingPlanId"
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        "emergencyPhone", notes, tags, "locationId", "trialStartDate", "memberStartDate", "pricingPlanId", "companyName"
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
       RETURNING *`,
       [
         firstName, lastName, email, phone || null, accountStatus, accountType || 'basic',
         programType || 'No Program Selected', membershipAge || 'Adult', ranking || 'White',
         leadSource || null, dateOfBirth || null, emergencyContact || null,
         emergencyPhone || null, notes || null, tags || null, locationId || null, trialStartDate || null, memberStartDate || null,
-        pricingPlanId || null,
+        pricingPlanId || null, companyName || null,
       ]
     );
 
@@ -144,6 +145,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       trialStartDate,
       memberStartDate,
       pricingPlanId,
+      companyName,
     } = req.body;
 
     const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
@@ -158,15 +160,15 @@ router.put('/:id', async (req: AuthRequest, res) => {
         "membershipAge" = $8, ranking = $9, "leadSource" = $10, "dateOfBirth" = $11,
         "emergencyContact" = $12, "emergencyPhone" = $13, notes = $14, tags = $15,
         "locationId" = $16, "trialStartDate" = $17, "memberStartDate" = $18,
-        "pricingPlanId" = $19, "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $20
+        "pricingPlanId" = $19, "companyName" = $20, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $21
       RETURNING *`,
       [
         firstName, lastName, email, phone, accountStatus, accountType || 'basic',
         programType, membershipAge, ranking, leadSource || null, dateOfBirth || null,
         emergencyContact || null, emergencyPhone || null, notes || null, tags || null,
         locationId || null, trialStartDate || null, memberStartDate || null,
-        pricingPlanId || null, id,
+        pricingPlanId || null, companyName || null, id,
       ]
     );
 

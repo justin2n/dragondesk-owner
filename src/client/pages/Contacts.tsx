@@ -81,6 +81,7 @@ const Contacts = () => {
     trialStartDate: '',
     memberStartDate: '',
     pricingPlanId: '' as string,
+    companyName: '',
   });
 
   useEffect(() => {
@@ -133,6 +134,7 @@ const Contacts = () => {
         trialStartDate: member.trialStartDate || '',
         memberStartDate: member.memberStartDate || '',
         pricingPlanId: member.pricingPlanId?.toString() || '',
+        companyName: member.companyName || '',
       });
     } else {
       setEditingMember(null);
@@ -617,6 +619,19 @@ const Contacts = () => {
                     onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                     className={styles.input}
                     required
+                  />
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Company / Studio Name</label>
+                  <input
+                    type="text"
+                    value={formData.companyName}
+                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                    className={styles.input}
+                    placeholder="e.g. Elite BJJ Academy"
                   />
                 </div>
               </div>

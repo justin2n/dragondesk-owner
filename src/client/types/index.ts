@@ -77,6 +77,7 @@ export interface Member {
   trialStartDate?: string;
   memberStartDate?: string;
   pricingPlanId?: number;
+  companyName?: string | null;
   createdAt: string;
   updatedAt: string;
 }
