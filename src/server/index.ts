@@ -181,9 +181,10 @@ app.get('/api/admin/member-count', async (req, res) => {
   }
 });
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  const clientPath = path.join(__dirname, '../client');
+// Serve static client files if built (works regardless of NODE_ENV)
+import { existsSync } from 'fs';
+const clientPath = path.join(__dirname, '../client');
+if (existsSync(clientPath)) {
   app.use(express.static(clientPath));
 
   // Catch-all route for client-side routing (Express 5 syntax)
