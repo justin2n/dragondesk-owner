@@ -77,7 +77,7 @@ async function initializeDatabase() {
         phone TEXT,
         "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member')),
         "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
-        "programType" TEXT NOT NULL CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training')),
+        "programType" TEXT,
         "membershipAge" TEXT NOT NULL CHECK("membershipAge" IN ('Adult', 'Kids')),
         ranking TEXT NOT NULL,
         "leadSource" TEXT,
