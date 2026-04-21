@@ -27,6 +27,7 @@ const Dashboard = () => {
     taekwondo: 0,
     programCounts: {} as Record<string, number>,
   });
+  const [programs, setPrograms] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
@@ -35,6 +36,7 @@ const Dashboard = () => {
   const [zoom, setZoom] = useState<number>(100);
 
   useEffect(() => {
+    api.get('/programs/active').then(setPrograms).catch(() => {});
     loadStats();
     loadAnalytics();
   }, [selectedLocation, isAllLocations]);
@@ -48,23 +50,13 @@ const Dashboard = () => {
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
       const members: Member[] = await api.get(`/members?locationId=${locationId}`);
 
-      // Count paying members per program+age combination
-      const count = (programs: string[], age?: 'Adult' | 'Kids') =>
-        members.filter(m =>
-          m.accountStatus === 'member' &&
-          programs.some(p => m.programType === p) &&
-          (age ? m.membershipAge === age : true)
-        ).length;
-
-      const programCounts: Record<string, number> = {
-        'Adult BJJ': count(['Adult BJJ']),
-        'Kids BJJ': count(['Kids BJJ']),
-        'Adult TKD & HKD': count(['Adult TKD & HKD']),
-        'Kids TKD': count(["Children's Martial Arts"]),
-        'Adult Muay Thai & Kickboxing': count(['Adult Muay Thai & Kickboxing']),
-        'Kids Muay Thai': count(['Kids Muay Thai']),
-        'DG Barbell': count(['DG Barbell']),
-      };
+      // Count active members per programType
+      const programCounts: Record<string, number> = {};
+      for (const m of members) {
+        if (m.accountStatus === 'member' && m.programType) {
+          programCounts[m.programType] = (programCounts[m.programType] || 0) + 1;
+        }
+      }
 
       setStats({
         totalMembers: members.length,
@@ -199,35 +191,22 @@ const Dashboard = () => {
           </div>
         </div>
         <div className={styles.programsGrid}>
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}><h3>Taekwondo</h3></div>
-            <div className={styles.programValue}>
-              {ageFilter === 'Adult' ? stats.programCounts['Adult TKD & HKD'] : stats.programCounts['Kids TKD']}
+          {programs.filter(p => {
+            const name = p.name.toLowerCase();
+            if (ageFilter === 'Kids') return name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
+            return !name.includes('kids') && !name.includes("children's") && !name.includes('youth') && !name.includes('young');
+          }).map(p => (
+            <div key={p.id} className={styles.programCard}>
+              <div className={styles.programHeader}><h3>{p.name}</h3></div>
+              <div className={styles.programValue}>{stats.programCounts[p.name] || 0}</div>
+              <div className={styles.programLabel}>Active Members</div>
             </div>
-            <div className={styles.programLabel}>Active Members</div>
-          </div>
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}><h3>Muay Thai</h3></div>
-            <div className={styles.programValue}>
-              {ageFilter === 'Adult' ? stats.programCounts['Adult Muay Thai & Kickboxing'] : stats.programCounts['Kids Muay Thai']}
+          ))}
+          {programs.length === 0 && (
+            <div className={styles.programCard}>
+              <div className={styles.programLabel}>No programs configured. Add programs in Settings.</div>
             </div>
-            <div className={styles.programLabel}>Active Members</div>
-          </div>
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}><h3>BJJ</h3></div>
-            <div className={styles.programValue}>
-              {ageFilter === 'Adult' ? stats.programCounts['Adult BJJ'] : stats.programCounts['Kids BJJ']}
-            </div>
-            <div className={styles.programLabel}>Active Members</div>
-          </div>
-          <div className={styles.programCard}>
-            <div className={styles.programHeader}>
-              <h3>Barbell Club</h3>
-              {ageFilter === 'Kids' && <span className={styles.adultOnly}>Adults only</span>}
-            </div>
-            <div className={styles.programValue}>{stats.programCounts['DG Barbell']}</div>
-            <div className={styles.programLabel}>Active Members</div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -242,20 +221,9 @@ const Dashboard = () => {
                 className={styles.programFilter}
               >
                 <option value="all">All Programs</option>
-                <option value="Children's Martial Arts">Children's Martial Arts</option>
-                <option value="Adult BJJ">Adult BJJ</option>
-                <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                <option value="DG Barbell">DG Barbell</option>
-                <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                <option value="The Ashtanga Club">The Ashtanga Club</option>
-                <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                <option value="Kids BJJ">Kids BJJ</option>
-                <option value="Kids Muay Thai">Kids Muay Thai</option>
-                <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                <option value="DG Workspace">DG Workspace</option>
-                <option value="Dragon Launch">Dragon Launch</option>
-                <option value="Personal Training">Personal Training</option>
-                <option value="DGMT Private Training">DGMT Private Training</option>
+                {programs.map(p => (
+                  <option key={p.id} value={p.name}>{p.name}</option>
+                ))}
               </select>
               <div className={styles.timeframeToggle}>
                 <button

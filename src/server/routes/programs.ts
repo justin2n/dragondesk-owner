@@ -1,122 +1,93 @@
 import express from 'express';
-import { query, run, get } from '../models/database';
+import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 
-// Get all programs
 router.get('/', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const programs = await query('SELECT * FROM programs ORDER BY name ASC');
-    res.json(programs);
+    const result = await pool.query('SELECT * FROM programs ORDER BY name ASC');
+    res.json(result.rows);
   } catch (error: any) {
-    console.error('Error fetching programs:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get active programs only
 router.get('/active', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const programs = await query('SELECT * FROM programs WHERE isActive = 1 ORDER BY name ASC');
-    res.json(programs);
+    const result = await pool.query(`SELECT * FROM programs WHERE "isActive" = true ORDER BY name ASC`);
+    res.json(result.rows);
   } catch (error: any) {
-    console.error('Error fetching active programs:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Create a new program
 router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { name, description } = req.body;
+    if (!name) return res.status(400).json({ error: 'Program name is required' });
 
-    if (!name) {
-      return res.status(400).json({ error: 'Program name is required' });
-    }
+    const existing = await pool.query('SELECT id FROM programs WHERE name = $1', [name]);
+    if (existing.rows.length > 0) return res.status(409).json({ error: 'Program with this name already exists' });
 
-    // Check if program already exists
-    const existing = await get('SELECT id FROM programs WHERE name = ?', [name]);
-    if (existing) {
-      return res.status(409).json({ error: 'Program with this name already exists' });
-    }
-
-    const result = await run(
-      'INSERT INTO programs (name, description) VALUES (?, ?)',
+    const result = await pool.query(
+      `INSERT INTO programs (name, description, "isActive") VALUES ($1, $2, true) RETURNING *`,
       [name, description || null]
     );
-
-    const newProgram = await get('SELECT * FROM programs WHERE id = ?', [result.id]);
-    res.status(201).json(newProgram);
+    res.status(201).json(result.rows[0]);
   } catch (error: any) {
-    console.error('Error creating program:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Update a program
 router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const { name, description, isActive } = req.body;
 
-    const existing = await get('SELECT * FROM programs WHERE id = ?', [id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Program not found' });
+    const existing = await pool.query('SELECT * FROM programs WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Program not found' });
+
+    if (name && name !== existing.rows[0].name) {
+      const conflict = await pool.query('SELECT id FROM programs WHERE name = $1 AND id != $2', [name, id]);
+      if (conflict.rows.length > 0) return res.status(409).json({ error: 'Program with this name already exists' });
     }
 
-    // Check if name conflicts with another program
-    if (name && name !== existing.name) {
-      const nameConflict = await get('SELECT id FROM programs WHERE name = ? AND id != ?', [name, id]);
-      if (nameConflict) {
-        return res.status(409).json({ error: 'Program with this name already exists' });
-      }
-    }
-
-    await run(
+    const result = await pool.query(
       `UPDATE programs SET
-        name = COALESCE(?, name),
-        description = COALESCE(?, description),
-        isActive = COALESCE(?, isActive),
-        updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?`,
-      [name, description, isActive !== undefined ? (isActive ? 1 : 0) : null, id]
+        name = COALESCE($1, name),
+        description = COALESCE($2, description),
+        "isActive" = COALESCE($3, "isActive"),
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $4 RETURNING *`,
+      [name || null, description || null, isActive !== undefined ? isActive : null, id]
     );
-
-    const updatedProgram = await get('SELECT * FROM programs WHERE id = ?', [id]);
-    res.json(updatedProgram);
+    res.json(result.rows[0]);
   } catch (error: any) {
-    console.error('Error updating program:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete a program
 router.delete('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await get('SELECT * FROM programs WHERE id = ?', [id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Program not found' });
-    }
+    const existing = await pool.query('SELECT * FROM programs WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Program not found' });
 
-    // Check if program is in use by any members
-    const membersCount = await get(
-      'SELECT COUNT(*) as count FROM members WHERE programType = ?',
-      [existing.name]
+    const membersCount = await pool.query(
+      `SELECT COUNT(*) as count FROM members WHERE "programType" = $1`,
+      [existing.rows[0].name]
     );
-
-    if (membersCount.count > 0) {
+    if (parseInt(membersCount.rows[0].count) > 0) {
       return res.status(400).json({
-        error: `Cannot delete program. ${membersCount.count} member(s) are currently enrolled in this program.`,
+        error: `Cannot delete program. ${membersCount.rows[0].count} member(s) are currently enrolled.`,
       });
     }
 
-    await run('DELETE FROM programs WHERE id = ?', [id]);
+    await pool.query('DELETE FROM programs WHERE id = $1', [id]);
     res.json({ message: 'Program deleted successfully' });
   } catch (error: any) {
-    console.error('Error deleting program:', error);
     res.status(500).json({ error: error.message });
   }
 });
