@@ -89,7 +89,7 @@ router.post('/', async (req: AuthRequest, res) => {
       pricingPlanId,
     } = req.body;
 
-    if (!firstName || !lastName || !email || !accountStatus || !programType || !membershipAge || !ranking) {
+    if (!firstName || !lastName || !email || !accountStatus) {
       return res.status(400).json({ error: 'Required fields are missing' });
     }
 
@@ -106,8 +106,9 @@ router.post('/', async (req: AuthRequest, res) => {
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
       RETURNING *`,
       [
-        firstName, lastName, email, phone, accountStatus, accountType || 'basic',
-        programType, membershipAge, ranking, leadSource || null, dateOfBirth || null, emergencyContact || null,
+        firstName, lastName, email, phone || null, accountStatus, accountType || 'basic',
+        programType || 'No Program Selected', membershipAge || 'Adult', ranking || 'White',
+        leadSource || null, dateOfBirth || null, emergencyContact || null,
         emergencyPhone || null, notes || null, tags || null, locationId || null, trialStartDate || null, memberStartDate || null,
         pricingPlanId || null,
       ]
