@@ -875,23 +875,48 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check"`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v2`);
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v3`);
-    await client.query(`ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL;
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
 
-    await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programtype_check`);
-    await client.query(`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programType_check`);
-    await client.query(`ALTER TABLE events ADD CONSTRAINT events_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'))`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programtype_check;
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS events_programType_check;
+        ALTER TABLE events ADD CONSTRAINT events_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'));
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
 
-    await client.query(`ALTER TABLE class_skills DROP CONSTRAINT IF EXISTS class_skills_programtype_check`);
-    await client.query(`ALTER TABLE class_skills DROP CONSTRAINT IF EXISTS class_skills_programType_check`);
-    await client.query(`ALTER TABLE class_skills ADD CONSTRAINT class_skills_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE class_skills DROP CONSTRAINT IF EXISTS class_skills_programtype_check;
+        ALTER TABLE class_skills DROP CONSTRAINT IF EXISTS class_skills_programType_check;
+        ALTER TABLE class_skills ADD CONSTRAINT class_skills_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'));
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
 
-    await client.query(`ALTER TABLE belt_requirements DROP CONSTRAINT IF EXISTS belt_requirements_programtype_check`);
-    await client.query(`ALTER TABLE belt_requirements DROP CONSTRAINT IF EXISTS belt_requirements_programType_check`);
-    await client.query(`ALTER TABLE belt_requirements ADD CONSTRAINT belt_requirements_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'))`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE belt_requirements DROP CONSTRAINT IF EXISTS belt_requirements_programtype_check;
+        ALTER TABLE belt_requirements DROP CONSTRAINT IF EXISTS belt_requirements_programType_check;
+        ALTER TABLE belt_requirements ADD CONSTRAINT belt_requirements_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training'));
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
 
-    await client.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programtype_check`);
-    await client.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programType_check`);
-    await client.query(`ALTER TABLE pricing_plans ADD CONSTRAINT pricing_plans_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'))`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programtype_check;
+        ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programType_check;
+        ALTER TABLE pricing_plans ADD CONSTRAINT pricing_plans_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'));
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
 
 
     // Seed admin user if none exists
