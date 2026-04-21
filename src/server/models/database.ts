@@ -871,12 +871,13 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`);
 
     // Drop all programType CHECK constraints and NOT NULL on members — validation handled in application layer
-    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);
-    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check"`);
-    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v2`);
-    await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v3`);
     await client.query(`
       DO $$ BEGIN
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check;
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check";
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v2;
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check_v3;
+        ALTER TABLE members ALTER COLUMN "programType" SET DEFAULT 'No Program Selected';
         ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL;
       EXCEPTION WHEN others THEN NULL;
       END $$;
