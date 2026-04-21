@@ -9,6 +9,7 @@ import QRCodeDisplay from '../components/QRCodeDisplay';
 import styles from './Contacts.module.css';
 
 const RANKINGS: Record<string, string[]> = {
+  'No Program Selected': ['N/A'],
   "Children's Martial Arts": ['Beginner', 'Intermediate', 'Advanced'],
   'Adult BJJ': ['White', 'Blue', 'Purple', 'Brown', 'Black'],
   'Adult TKD & HKD': ['White', 'Yellow', 'Orange', 'Green', 'Purple', 'Blue', 'Red', 'Brown', 'Il Dan Bo', 'Black'],
@@ -708,6 +709,7 @@ const Contacts = () => {
                     className={styles.input}
                     required
                   >
+                    <option value="No Program Selected">No Program Selected</option>
                     <option value="Children's Martial Arts">Children's Martial Arts</option>
                     <option value="Adult BJJ">Adult BJJ</option>
                     <option value="Adult TKD & HKD">Adult TKD & HKD</option>
@@ -732,7 +734,7 @@ const Contacts = () => {
                     className={styles.input}
                     required
                   >
-                    {RANKINGS[formData.programType].map((rank) => (
+                    {(RANKINGS[formData.programType] || ['N/A']).map((rank) => (
                       <option key={rank} value={rank}>
                         {rank}
                       </option>
