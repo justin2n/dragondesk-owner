@@ -43,6 +43,13 @@ import importCsvRoutes from './routes/import-csv';
 
 dotenv.config();
 
+// Unconditionally drop programType constraint and NOT NULL — runs on every boot
+// independent of the main migration chain
+pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`).catch(() => {});
+pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check"`).catch(() => {});
+pool.query(`ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL`).catch(() => {});
+pool.query(`ALTER TABLE members ALTER COLUMN "programType" SET DEFAULT 'No Program Selected'`).catch(() => {});
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
