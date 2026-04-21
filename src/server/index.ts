@@ -51,6 +51,22 @@ pool.query(`ALTER TABLE members ALTER COLUMN "programType" SET DEFAULT 'No Progr
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS churn_metrics (
+    id SERIAL PRIMARY KEY,
+    "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    "firstName" TEXT NOT NULL,
+    "lastName" TEXT NOT NULL,
+    email TEXT NOT NULL,
+    "accountType" TEXT,
+    "programType" TEXT,
+    "membershipAge" TEXT,
+    "cancelledBy" INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    "cancellationReason" TEXT,
+    "cancelledAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch(() => {});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
