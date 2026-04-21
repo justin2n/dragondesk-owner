@@ -1027,7 +1027,7 @@ const Settings = () => {
               )}
 
               <div className={styles.formGroup}>
-                <label className={styles.label}>Primary Color</label>
+                <label className={styles.label}>Accent Color</label>
                 <div className={styles.colorPicker}>
                   <input
                     type="color"
@@ -1038,14 +1038,41 @@ const Settings = () => {
                   <input
                     type="text"
                     value={branding.primaryColor}
-                    onChange={e => updateBranding({ primaryColor: e.target.value })}
+                    onChange={e => {
+                      if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+                        updateBranding({ primaryColor: e.target.value });
+                      }
+                    }}
                     className={styles.input}
                     placeholder="#dc2626"
-                    pattern="^#[0-9A-Fa-f]{6}$"
                   />
                 </div>
+                <div className={styles.colorSwatches}>
+                  {[
+                    { label: 'Dragon Red', color: '#dc2626' },
+                    { label: 'Midnight Blue', color: '#1d4ed8' },
+                    { label: 'Forest', color: '#15803d' },
+                    { label: 'Amethyst', color: '#7c3aed' },
+                    { label: 'Ember', color: '#ea580c' },
+                    { label: 'Gold', color: '#ca8a04' },
+                    { label: 'Steel', color: '#475569' },
+                    { label: 'Obsidian', color: '#18181b' },
+                  ].map(({ label, color }) => (
+                    <button
+                      key={color}
+                      title={label}
+                      onClick={() => updateBranding({ primaryColor: color })}
+                      className={styles.colorSwatch}
+                      style={{
+                        backgroundColor: color,
+                        outline: branding.primaryColor === color ? '2px solid white' : 'none',
+                        outlineOffset: '2px',
+                      }}
+                    />
+                  ))}
+                </div>
                 <small className={styles.helpText}>
-                  Choose your primary brand color (used for buttons, links, and accents)
+                  Accent color applied to buttons, links, badges, and highlights across the interface
                 </small>
               </div>
 

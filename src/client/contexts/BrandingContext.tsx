@@ -32,7 +32,14 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (savedBranding) {
       try {
         const parsed = JSON.parse(savedBranding);
-        setBranding({ ...defaultBranding, ...parsed });
+        const merged = { ...defaultBranding, ...parsed };
+        setBranding(merged);
+        // Apply accent color immediately on load
+        if (merged.primaryColor) {
+          document.documentElement.style.setProperty('--color-red', merged.primaryColor);
+          document.documentElement.style.setProperty('--color-red-hover', adjustColor(merged.primaryColor, -20));
+          document.documentElement.style.setProperty('--color-red-light', adjustColor(merged.primaryColor, 20));
+        }
       } catch (error) {
         console.error('Failed to parse branding settings:', error);
       }
@@ -44,13 +51,11 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setBranding(newBranding);
     localStorage.setItem('branding', JSON.stringify(newBranding));
 
-    // Update CSS variable for primary color
+    // Update CSS variables for accent color
     if (settings.primaryColor) {
       document.documentElement.style.setProperty('--color-red', settings.primaryColor);
-      document.documentElement.style.setProperty(
-        '--color-red-hover',
-        adjustColor(settings.primaryColor, -20)
-      );
+      document.documentElement.style.setProperty('--color-red-hover', adjustColor(settings.primaryColor, -20));
+      document.documentElement.style.setProperty('--color-red-light', adjustColor(settings.primaryColor, 20));
     }
   };
 

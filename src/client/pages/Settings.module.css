@@ -540,6 +540,28 @@
   border-color: var(--color-red);
 }
 
+.colorSwatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.colorSwatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+  padding: 0;
+}
+
+.colorSwatch:hover {
+  transform: scale(1.2);
+  border-color: rgba(255,255,255,0.4);
+}
+
 /* Info and Warning Messages */
 .info {
   background-color: rgba(59, 130, 246, 0.1);
