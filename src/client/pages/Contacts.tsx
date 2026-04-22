@@ -612,6 +612,7 @@ const Contacts = () => {
                 <option value="programType">Program</option>
                 <option value="membershipAge">Age Group</option>
                 <option value="ranking">Ranking</option>
+                <option value="locationId">Location</option>
               </select>
               {bulkField === 'accountStatus' && (
                 <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
@@ -639,6 +640,12 @@ const Contacts = () => {
                 <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
                   <option value="">Select ranking...</option>
                   {(RANKINGS['Adult BJJ']).map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              )}
+              {bulkField === 'locationId' && (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
+                  <option value="">Select location...</option>
+                  {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               )}
               <button
