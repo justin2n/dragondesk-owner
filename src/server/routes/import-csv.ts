@@ -64,11 +64,11 @@ function normalizeProgram(raw: string, isLead = false): string | null {
   if (!raw) return isLead ? 'No Program Selected' : null;
   const v = raw.trim();
   // Exact or near-exact MyStudio full names
-  if (v === "Children's Martial Arts Programs" || v.toLowerCase().includes("children's martial arts")) return "Children's Martial Arts";
+  if (v === "Children's Martial Arts Programs" || v.toLowerCase().includes("children's martial arts") || v.toLowerCase().includes('quick start confidence')) return "Children's Martial Arts";
   if (v === 'Adult BJJ Classes and Memberships' || (v.toLowerCase().includes('bjj') && !v.toLowerCase().includes('kids'))) return 'Adult BJJ';
   if (v === 'Adult TKD and HKD Classes and Memberships' || v.toLowerCase().includes('tkd') || v.toLowerCase().includes('hkd') || v.toLowerCase().includes('taekwondo') || v.toLowerCase().includes('tae kwon')) return 'Adult TKD & HKD';
   if (v === 'DG BARBELL Classes and Memberships' || v.toLowerCase().includes('barbell')) return 'DG Barbell';
-  if (v === 'Adult Muay Thai and Kickboxing Classes and Memberships' || (v.toLowerCase().includes('muay') && !v.toLowerCase().includes('kids')) || (v.toLowerCase().includes('kickbox') && !v.toLowerCase().includes('kids'))) return 'Adult Muay Thai & Kickboxing';
+  if (v === 'Adult Muay Thai and Kickboxing Classes and Memberships' || v.toLowerCase().includes('kick-start') || (v.toLowerCase().includes('muay') && !v.toLowerCase().includes('kids')) || (v.toLowerCase().includes('kickbox') && !v.toLowerCase().includes('kids'))) return 'Adult Muay Thai & Kickboxing';
   if (v === 'The Ashtanga Club' || v.toLowerCase().includes('ashtanga')) return 'The Ashtanga Club';
   if (v === 'Dragon Gym Learning Center' || v.toLowerCase().includes('learning center')) return 'Dragon Gym Learning Center';
   if (v === 'Kids BJJ Classes and Memberships' || v.toLowerCase().includes('kids bjj')) return 'Kids BJJ';
