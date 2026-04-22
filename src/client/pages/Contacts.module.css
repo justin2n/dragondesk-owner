@@ -422,6 +422,23 @@
   border-color: var(--color-red);
 }
 
+.input[type="file"]::file-selector-button {
+  padding: 0.5rem 1rem;
+  background-color: var(--color-grey);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  margin-right: 0.75rem;
+  transition: background-color 0.2s;
+}
+
+.input[type="file"]::file-selector-button:hover {
+  background-color: var(--color-light-grey);
+}
+
 .textarea {
   resize: vertical;
 }
