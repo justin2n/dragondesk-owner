@@ -342,6 +342,12 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         currentTrials: allMembers.filter(m => m.accountStatus === 'trialer').length,
         currentLeads: allMembers.filter(m => m.accountStatus === 'lead').length,
         totalCancellations: churnData.length,
+        expiredTrials: allMembers.filter(m => {
+          if (m.accountStatus !== 'trialer') return false;
+          const start = m.trialStartDate ? new Date(m.trialStartDate) : new Date(m.createdAt);
+          const daysSince = (Date.now() - start.getTime()) / (1000 * 60 * 60 * 24);
+          return daysSince > 30;
+        }).length,
         mrr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 100) / 100,
         arr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 12 * 100) / 100,
       },

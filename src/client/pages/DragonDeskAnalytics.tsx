@@ -13,6 +13,7 @@ import {
   MdLanguage,
   MdDevices,
   MdOpenInNew,
+  MdTimerOff,
 } from 'react-icons/md';
 import {
   LineChart,
@@ -74,6 +75,7 @@ interface AnalyticsData {
       currentTrials: number;
       currentLeads: number;
       totalCancellations: number;
+      expiredTrials: number;
     };
   };
   programDistribution: { name: string; value: number }[];
@@ -625,6 +627,16 @@ const DragonDeskAnalytics = () => {
           <div className={styles.summaryContent}>
             <div className={styles.summaryValue}>{data.summary.totals.totalCancellations}</div>
             <div className={styles.summaryLabel}>Total Cancellations</div>
+          </div>
+        </div>
+        <div className={`${styles.summaryCard} ${data.summary.totals.expiredTrials > 0 ? styles.summaryCardWarning : ''}`}>
+          <div className={`${styles.summaryIcon} ${data.summary.totals.expiredTrials > 0 ? styles.summaryIconWarning : ''}`}>
+            <MdTimerOff size={28} />
+          </div>
+          <div className={styles.summaryContent}>
+            <div className={styles.summaryValue}>{data.summary.totals.expiredTrials}</div>
+            <div className={styles.summaryLabel}>Expired Trials</div>
+            <div className={styles.summarySubLabel}>Trialers &gt; 30 days</div>
           </div>
         </div>
       </div>
