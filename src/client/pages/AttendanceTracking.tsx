@@ -223,7 +223,7 @@ const AttendanceTracking: React.FC = () => {
             <div className={styles.statLabel}>Unique Members</div>
           </div>
           <div className={styles.statCard}>
-            <div className={styles.statValue}>{(stats.averagePerDay ?? 0).toFixed(1)}</div>
+            <div className={styles.statValue}>{(parseFloat(String(stats.averagePerDay)) || 0).toFixed(1)}</div>
             <div className={styles.statLabel}>Avg per Day (30d)</div>
           </div>
         </div>

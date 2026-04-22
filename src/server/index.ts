@@ -53,6 +53,18 @@ pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BO
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "gaClientId" TEXT`).catch(() => {});
 pool.query(`
+  CREATE TABLE IF NOT EXISTS check_ins (
+    id SERIAL PRIMARY KEY,
+    "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    "locationId" INTEGER REFERENCES locations(id),
+    "checkInTime" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    "checkInMethod" TEXT NOT NULL DEFAULT 'manual',
+    "eventId" INTEGER REFERENCES events(id),
+    notes TEXT,
+    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch(() => {});
+pool.query(`
   CREATE TABLE IF NOT EXISTS churn_metrics (
     id SERIAL PRIMARY KEY,
     "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,

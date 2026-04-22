@@ -133,16 +133,16 @@ router.get('/stats', async (req: AuthRequest, res) => {
     ]);
 
     res.json({
-      totalCheckIns: totalResult.rows[0]?.total || 0,
-      uniqueMembers: uniqueResult.rows[0]?.uniqueMembers || 0,
-      todayCheckIns: todayResult.rows[0]?.today || 0,
-      averagePerDay: avgResult.rows[0]?.avgPerDay || 0,
+      totalCheckIns: parseInt(totalResult.rows[0]?.total) || 0,
+      uniqueMembers: parseInt(uniqueResult.rows[0]?.uniqueMembers) || 0,
+      todayCheckIns: parseInt(todayResult.rows[0]?.today) || 0,
+      averagePerDay: parseFloat(avgResult.rows[0]?.avgPerDay) || 0,
       checkInsByMethod: byMethod.rows.reduce((acc: any, row: any) => {
-        acc[row.checkInMethod] = row.count;
+        acc[row.checkInMethod] = parseInt(row.count) || 0;
         return acc;
       }, {}),
       checkInsByProgram: byProgram.rows.reduce((acc: any, row: any) => {
-        acc[row.programType] = row.count;
+        acc[row.programType] = parseInt(row.count) || 0;
         return acc;
       }, {})
     });
