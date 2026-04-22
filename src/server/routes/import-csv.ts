@@ -201,6 +201,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       let trialStartDate: string | null = null;
       let memberStartDate: string | null = null;
       let notes: string | null = null;
+      let planNameFromMembership = '';
 
       if (type === 'lead') {
         accountStatus = 'lead';
@@ -235,11 +236,11 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         const membershipRaw = row['Program'] || row['Program Name'] || row['Membership'] || row['membership'] || row['program'] || '';
         const membershipParts = membershipRaw.split(', _');
         const programRaw = membershipParts[0] || programOverride || '';
-        const planNameFromMembership = membershipParts[1] ? membershipParts[1].replace(/_/g, '').trim() : '';
+        planNameFromMembership = membershipParts[1] ? membershipParts[1].replace(/_/g, '').trim() : '';
         const resolvedProgram = normalizeProgram(programRaw || programOverride || '');
         if (!resolvedProgram) {
           results.skipped++;
-          if (results.skipReasons.length < 5) results.skipReasons.push(`Unrecognized member program: "${row['Program']}" for ${firstName} ${lastName}`);
+          if (results.skipReasons.length < 5) results.skipReasons.push(`Unrecognized member program: "${programRaw}" for ${firstName} ${lastName}`);
           continue;
         }
         programType = resolvedProgram;
