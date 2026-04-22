@@ -184,7 +184,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       const existing = await pool.query('SELECT id, "firstName", "lastName", "accountStatus" FROM members WHERE email = $1', [email]);
       if (existing.rows.length > 0) {
         const ex = existing.rows[0];
-        if (type === 'member' && ex.accountStatus === 'trialer') {
+        if (type === 'member' && (ex.accountStatus === 'trialer' || ex.accountStatus === 'lead')) {
           results.upgraded++;
           // Fall through — the ON CONFLICT upsert below will upgrade the record
         } else if (type === 'trial' && ex.accountStatus === 'lead') {
