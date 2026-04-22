@@ -153,7 +153,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     return res.status(400).json({ error: 'Could not detect CSV type. Expected Lead, Trial, or Member format from MyStudio.' });
   }
 
-  const results = { imported: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[], duplicates: [] as string[] };
+  const results = { imported: 0, upgraded: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[], duplicates: [] as string[] };
 
   for (const row of rows) {
     try {
@@ -180,13 +180,18 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         continue;
       }
 
-      // Skip duplicates
+      // Duplicate handling — upgrade trialer → member if incoming is a paid member
       const existing = await pool.query('SELECT id, "firstName", "lastName", "accountStatus" FROM members WHERE email = $1', [email]);
       if (existing.rows.length > 0) {
-        results.skipped++;
         const ex = existing.rows[0];
-        results.duplicates.push(`${firstName} ${lastName} (${email}) — already exists as ${ex.firstName} ${ex.lastName} [${ex.accountStatus}]`);
-        continue;
+        if (type === 'member' && ex.accountStatus === 'trialer') {
+          results.upgraded++;
+          // Fall through — the ON CONFLICT upsert below will upgrade the record
+        } else {
+          results.skipped++;
+          results.duplicates.push(`${firstName} ${lastName} (${email}) — already exists as ${ex.firstName} ${ex.lastName} [${ex.accountStatus}]`);
+          continue;
+        }
       }
 
       const phone = (row['Mobile Phone'] || '').trim() || null;
@@ -291,7 +296,17 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
           notes, "locationId", "trialStartDate", "memberStartDate",
           "pricingPlanId", "totalClassesAttended", "lastCheckInAt",
           "syncedFromMyStudio"
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        ON CONFLICT (email) DO UPDATE SET
+          "accountStatus" = EXCLUDED."accountStatus",
+          "programType" = EXCLUDED."programType",
+          "membershipAge" = EXCLUDED."membershipAge",
+          ranking = EXCLUDED.ranking,
+          "pricingPlanId" = COALESCE(EXCLUDED."pricingPlanId", members."pricingPlanId"),
+          "memberStartDate" = EXCLUDED."memberStartDate",
+          "totalClassesAttended" = GREATEST(COALESCE(members."totalClassesAttended", 0), COALESCE(EXCLUDED."totalClassesAttended", 0)),
+          "syncedFromMyStudio" = true,
+          "updatedAt" = CURRENT_TIMESTAMP`,
         [
           firstName, lastName, email, phone, accountStatus, 'basic',
           programType, membershipAge, ranking, leadSource, dob,
