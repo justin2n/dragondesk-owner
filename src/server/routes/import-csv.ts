@@ -187,6 +187,9 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         if (type === 'member' && ex.accountStatus === 'trialer') {
           results.upgraded++;
           // Fall through — the ON CONFLICT upsert below will upgrade the record
+        } else if (type === 'trial' && ex.accountStatus === 'lead') {
+          results.upgraded++;
+          // Fall through — the ON CONFLICT upsert below will upgrade the record
         } else {
           results.skipped++;
           results.duplicates.push(`${firstName} ${lastName} (${email}) — already exists as ${ex.firstName} ${ex.lastName} [${ex.accountStatus}]`);
@@ -303,7 +306,8 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
           "membershipAge" = EXCLUDED."membershipAge",
           ranking = EXCLUDED.ranking,
           "pricingPlanId" = COALESCE(EXCLUDED."pricingPlanId", members."pricingPlanId"),
-          "memberStartDate" = EXCLUDED."memberStartDate",
+          "trialStartDate" = COALESCE(EXCLUDED."trialStartDate", members."trialStartDate"),
+          "memberStartDate" = COALESCE(EXCLUDED."memberStartDate", members."memberStartDate"),
           "totalClassesAttended" = GREATEST(COALESCE(members."totalClassesAttended", 0), COALESCE(EXCLUDED."totalClassesAttended", 0)),
           "syncedFromMyStudio" = true,
           "updatedAt" = CURRENT_TIMESTAMP`,
