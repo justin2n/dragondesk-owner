@@ -611,6 +611,16 @@ const DragonDeskAnalytics = () => {
             <div className={styles.summaryLabel}>Current Trials</div>
           </div>
         </div>
+        <div className={`${styles.summaryCard} ${data.summary.totals.expiredTrials > 0 ? styles.summaryCardWarning : ''}`}>
+          <div className={`${styles.summaryIcon} ${data.summary.totals.expiredTrials > 0 ? styles.summaryIconWarning : ''}`}>
+            <MdTimerOff size={28} />
+          </div>
+          <div className={styles.summaryContent}>
+            <div className={styles.summaryValue}>{data.summary.totals.expiredTrials}</div>
+            <div className={styles.summaryLabel}>Expired Trials</div>
+            <div className={styles.summarySubLabel}>Trialers &gt; 30 days</div>
+          </div>
+        </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryIcon}>
             <MdPersonAdd size={28} />
@@ -627,16 +637,6 @@ const DragonDeskAnalytics = () => {
           <div className={styles.summaryContent}>
             <div className={styles.summaryValue}>{data.summary.totals.totalCancellations}</div>
             <div className={styles.summaryLabel}>Total Cancellations</div>
-          </div>
-        </div>
-        <div className={`${styles.summaryCard} ${data.summary.totals.expiredTrials > 0 ? styles.summaryCardWarning : ''}`}>
-          <div className={`${styles.summaryIcon} ${data.summary.totals.expiredTrials > 0 ? styles.summaryIconWarning : ''}`}>
-            <MdTimerOff size={28} />
-          </div>
-          <div className={styles.summaryContent}>
-            <div className={styles.summaryValue}>{data.summary.totals.expiredTrials}</div>
-            <div className={styles.summaryLabel}>Expired Trials</div>
-            <div className={styles.summarySubLabel}>Trialers &gt; 30 days</div>
           </div>
         </div>
       </div>
