@@ -60,6 +60,10 @@ const Contacts = () => {
     programType: '',
     membershipAge: '',
   });
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkField, setBulkField] = useState('');
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -264,6 +268,59 @@ const Contacts = () => {
       loadMembers();
     } catch (error: any) {
       alert(error.message || 'Failed to delete member');
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === members.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(members.map(m => m.id)));
+    }
+  };
+
+  const handleBulkUpdate = async () => {
+    if (!bulkField || !bulkValue || selectedIds.size === 0) return;
+    if (!confirm(`Update ${selectedIds.size} contact(s) — set ${bulkField} to "${bulkValue}"?`)) return;
+    setBulkLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map(id => {
+          const member = members.find(m => m.id === id)!;
+          return api.put(`/members/${id}`, { ...member, [bulkField]: bulkValue });
+        })
+      );
+      setSelectedIds(new Set());
+      setBulkField('');
+      setBulkValue('');
+      loadMembers();
+    } catch (err: any) {
+      alert(err.message || 'Bulk update failed');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} contact(s)? This cannot be undone.`)) return;
+    setBulkLoading(true);
+    try {
+      await Promise.all(Array.from(selectedIds).map(id => api.delete(`/members/${id}`)));
+      setSelectedIds(new Set());
+      loadMembers();
+    } catch (err: any) {
+      alert(err.message || 'Bulk delete failed');
+    } finally {
+      setBulkLoading(false);
     }
   };
 
@@ -542,9 +599,77 @@ const Contacts = () => {
         </div>
       ) : (
         <div className={styles.tableContainer}>
+          {selectedIds.size > 0 && (
+            <div className={styles.bulkBar}>
+              <span className={styles.bulkCount}>{selectedIds.size} selected</span>
+              <select
+                value={bulkField}
+                onChange={e => { setBulkField(e.target.value); setBulkValue(''); }}
+                className={styles.bulkSelect}
+              >
+                <option value="">Change field...</option>
+                <option value="accountStatus">Status</option>
+                <option value="programType">Program</option>
+                <option value="membershipAge">Age Group</option>
+                <option value="ranking">Ranking</option>
+              </select>
+              {bulkField === 'accountStatus' && (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
+                  <option value="">Select status...</option>
+                  <option value="lead">Lead</option>
+                  <option value="trialer">Trialer</option>
+                  <option value="member">Member</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              )}
+              {bulkField === 'programType' && (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
+                  <option value="">Select program...</option>
+                  {Object.keys(RANKINGS).map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              )}
+              {bulkField === 'membershipAge' && (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
+                  <option value="">Select age group...</option>
+                  <option value="Adult">Adult</option>
+                  <option value="Kids">Kids</option>
+                </select>
+              )}
+              {bulkField === 'ranking' && (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
+                  <option value="">Select ranking...</option>
+                  {(RANKINGS['Adult BJJ']).map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              )}
+              <button
+                className={styles.bulkApplyBtn}
+                onClick={handleBulkUpdate}
+                disabled={bulkLoading || !bulkField || !bulkValue}
+              >
+                {bulkLoading ? 'Applying...' : 'Apply'}
+              </button>
+              <button
+                className={styles.bulkDeleteBtn}
+                onClick={handleBulkDelete}
+                disabled={bulkLoading}
+              >
+                Delete Selected
+              </button>
+              <button className={styles.bulkCancelBtn} onClick={() => setSelectedIds(new Set())}>
+                Clear
+              </button>
+            </div>
+          )}
           <table className={styles.table}>
             <thead>
               <tr>
+                <th onClick={e => e.stopPropagation()} className={styles.checkboxCol}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === members.length && members.length > 0}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Phone</th>
@@ -558,7 +683,19 @@ const Contacts = () => {
             </thead>
             <tbody>
               {members.map((member) => (
-                <tr key={member.id} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
+                <tr
+                  key={member.id}
+                  onClick={() => handleViewMember(member)}
+                  style={{ cursor: 'pointer' }}
+                  className={selectedIds.has(member.id) ? styles.selectedRow : ''}
+                >
+                  <td onClick={e => e.stopPropagation()} className={styles.checkboxCol}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(member.id)}
+                      onChange={() => toggleSelect(member.id)}
+                    />
+                  </td>
                   <td className={styles.nameCell}>
                     {member.firstName} {member.lastName}
                   </td>

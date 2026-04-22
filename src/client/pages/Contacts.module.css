@@ -1015,3 +1015,75 @@
   color: #667eea;
   border-radius: 4px;
 }
+
+/* ── Bulk Edit ── */
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bulkCount {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.bulkSelect {
+  background: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.bulkApplyBtn {
+  padding: 0.4rem 1rem;
+  background: var(--color-red);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bulkApplyBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.bulkDeleteBtn {
+  padding: 0.4rem 1rem;
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bulkDeleteBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.bulkCancelBtn {
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.checkboxCol {
+  width: 40px;
+  text-align: center;
+}
+
+.selectedRow {
+  background: rgba(220, 38, 38, 0.06) !important;
+}
