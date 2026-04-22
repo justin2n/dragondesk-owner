@@ -3,7 +3,15 @@ import { api } from '../utils/api';
 import { Audience, AudienceFilter, Member, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource } from '../types';
 import { DeleteIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
+import { useLocation } from '../contexts/LocationContext';
 import styles from './Audiences.module.css';
+
+const PROGRAM_TYPES: ProgramType[] = [
+  "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
+  'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
+  'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
+  'Dragon Launch', 'Personal Training', 'DGMT Private Training',
+];
 
 const RANKINGS: Record<string, string[]> = {
   "Children's Martial Arts": ['Beginner', 'Intermediate', 'Advanced'],
@@ -22,40 +30,42 @@ const RANKINGS: Record<string, string[]> = {
   'DGMT Private Training': ['Beginner', 'Intermediate', 'Advanced'],
 };
 
+function toggle<T>(arr: T[], val: T): T[] {
+  return arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val];
+}
+
 const Audiences = () => {
   const { toast, confirm } = useToast();
+  const { locations } = useLocation();
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [selectedAudience, setSelectedAudience] = useState<Audience | null>(null);
   const [audienceMembers, setAudienceMembers] = useState<Member[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [rankingOpen, setRankingOpen] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    filters: {
-      accountStatus: [] as AccountStatus[],
-      accountType: [] as AccountType[],
-      programType: [] as ProgramType[],
-      membershipAge: [] as MembershipAge[],
-      ranking: [] as string[],
-      leadSource: [] as LeadSource[],
-      tags: [] as string[],
-    },
-  });
+  const emptyFilters = {
+    accountStatus: [] as AccountStatus[],
+    accountType: [] as AccountType[],
+    programType: [] as ProgramType[],
+    membershipAge: [] as MembershipAge[],
+    ranking: [] as string[],
+    leadSource: [] as LeadSource[],
+    locationIds: [] as number[],
+    tags: [] as string[],
+  };
 
-  useEffect(() => {
-    loadAudiences();
-  }, []);
+  const [formData, setFormData] = useState({ name: '', description: '', filters: emptyFilters });
+
+  useEffect(() => { loadAudiences(); }, []);
 
   const loadAudiences = async () => {
     try {
       const data = await api.get('/audiences');
-      const parsedAudiences = data.map((a: any) => ({
+      setAudiences(data.map((a: any) => ({
         ...a,
         filters: typeof a.filters === 'string' ? JSON.parse(a.filters) : a.filters,
-      }));
-      setAudiences(parsedAudiences);
+      })));
     } catch (error) {
       console.error('Failed to load audiences:', error);
     } finally {
@@ -78,19 +88,8 @@ const Audiences = () => {
   };
 
   const handleOpenModal = () => {
-    setFormData({
-      name: '',
-      description: '',
-      filters: {
-        accountStatus: [],
-        accountType: [],
-        programType: [],
-        membershipAge: [],
-        ranking: [],
-        leadSource: [],
-        tags: [],
-      },
-    });
+    setFormData({ name: '', description: '', filters: emptyFilters });
+    setRankingOpen(false);
     setIsModalOpen(true);
   };
 
@@ -100,40 +99,29 @@ const Audiences = () => {
       await api.post('/audiences', formData);
       setIsModalOpen(false);
       loadAudiences();
+      toast('Audience created successfully', 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to create audience', 'error');
     }
   };
 
-  const handleFilterChange = (category: keyof AudienceFilter, value: string) => {
-    const currentValues = (formData.filters as any)[category] as string[] || [];
-    const newValues = currentValues.includes(value)
-      ? currentValues.filter((v) => v !== value)
-      : [...currentValues, value];
-
-    setFormData({
-      ...formData,
-      filters: {
-        ...formData.filters,
-        [category]: newValues,
-      },
-    });
-  };
-
   const handleDeleteAudience = async (id: number) => {
     if (!await confirm({ title: 'Delete Audience', message: 'Are you sure you want to delete this audience?', confirmLabel: 'Delete', danger: true })) return;
-
     try {
       await api.delete(`/audiences/${id}`);
-      if (selectedAudience?.id === id) {
-        setSelectedAudience(null);
-        setAudienceMembers([]);
-      }
+      if (selectedAudience?.id === id) { setSelectedAudience(null); setAudienceMembers([]); }
       loadAudiences();
     } catch (error: any) {
       toast(error.message || 'Failed to delete audience', 'error');
     }
   };
+
+  const f = formData.filters;
+  const setFilter = (patch: Partial<typeof emptyFilters>) =>
+    setFormData(prev => ({ ...prev, filters: { ...prev.filters, ...patch } }));
+
+  // Selected ranking count for display
+  const selectedRankingCount = f.ranking.length;
 
   return (
     <div className={styles.container}>
@@ -142,9 +130,7 @@ const Audiences = () => {
           <h1 className={styles.title}>Audiences</h1>
           <p className={styles.subtitle}>Create targeted audiences for campaigns</p>
         </div>
-        <button onClick={handleOpenModal} className={styles.addBtn}>
-          + Create Audience
-        </button>
+        <button onClick={handleOpenModal} className={styles.addBtn}>+ Create Audience</button>
       </div>
 
       <div className={styles.content}>
@@ -159,18 +145,13 @@ const Audiences = () => {
               {audiences.map((audience) => (
                 <div
                   key={audience.id}
-                  className={`${styles.audienceItem} ${
-                    selectedAudience?.id === audience.id ? styles.active : ''
-                  }`}
+                  className={`${styles.audienceItem} ${selectedAudience?.id === audience.id ? styles.active : ''}`}
                   onClick={() => handleSelectAudience(audience)}
                 >
                   <div className={styles.audienceName}>{audience.name}</div>
                   <div className={styles.audienceDesc}>{audience.description}</div>
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteAudience(audience.id);
-                    }}
+                    onClick={(e) => { e.stopPropagation(); handleDeleteAudience(audience.id); }}
                     className={styles.deleteIconBtn}
                     aria-label="Delete audience"
                   >
@@ -190,21 +171,15 @@ const Audiences = () => {
                 <p>{selectedAudience.description}</p>
               </div>
               <div className={styles.membersSection}>
-                <h3 className={styles.sectionTitle}>
-                  Members in Audience ({audienceMembers.length})
-                </h3>
+                <h3 className={styles.sectionTitle}>Members in Audience ({audienceMembers.length})</h3>
                 {audienceMembers.length === 0 ? (
                   <div className={styles.empty}>No members match this audience criteria</div>
                 ) : (
                   <div className={styles.membersList}>
                     {audienceMembers.map((member) => (
                       <div key={member.id} className={styles.memberCard}>
-                        <div className={styles.memberName}>
-                          {member.firstName} {member.lastName}
-                        </div>
-                        <div className={styles.memberInfo}>
-                          {member.email} • {member.programType} • {member.ranking}
-                        </div>
+                        <div className={styles.memberName}>{member.firstName} {member.lastName}</div>
+                        <div className={styles.memberInfo}>{member.email} • {member.programType} • {member.ranking}</div>
                       </div>
                     ))}
                   </div>
@@ -212,217 +187,182 @@ const Audiences = () => {
               </div>
             </>
           ) : (
-            <div className={styles.placeholder}>
-              <p>Select an audience to view its members</p>
-            </div>
+            <div className={styles.placeholder}><p>Select an audience to view its members</p></div>
           )}
         </div>
       </div>
 
       {isModalOpen && (
-        <div className={styles.modal}>
+        <div className={styles.modal} onClick={(e) => { if (e.target === e.currentTarget) setIsModalOpen(false); }}>
           <div className={styles.modalContent}>
             <div className={styles.modalHeader}>
-              <h2>Create Audience</h2>
-              <button onClick={() => setIsModalOpen(false)} className={styles.closeBtn}>
-                ✕
-              </button>
+              <div>
+                <h2>Create Audience</h2>
+                <p className={styles.modalSubtitle}>Define filters to automatically match members</p>
+              </div>
+              <button onClick={() => setIsModalOpen(false)} className={styles.closeBtn}>✕</button>
             </div>
+
             <form onSubmit={handleSubmit} className={styles.form}>
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Audience Name *</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className={styles.input}
-                  required
-                />
+              {/* Name + Description */}
+              <div className={styles.formRow2}>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Audience Name <span className={styles.req}>*</span></label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className={styles.input}
+                    placeholder="e.g. Active Adult Members"
+                    required
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Description</label>
+                  <input
+                    type="text"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className={styles.input}
+                    placeholder="Optional notes about this audience"
+                  />
+                </div>
               </div>
 
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Description</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className={styles.textarea}
-                  rows={3}
-                />
+              <div className={styles.divider}>
+                <span>Filters</span>
+                <small>Members matching ALL selected criteria will be included</small>
               </div>
 
-              <div className={styles.filterSection}>
-                <h4>Audience Filters</h4>
-                <p className={styles.filterDescription}>
-                  Select criteria to build your target audience. All selected filters will be combined.
-                </p>
-
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Account Status</label>
-                    <select
-                      multiple
-                      value={formData.filters.accountStatus || []}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, option => option.value as AccountStatus);
-                        setFormData({
-                          ...formData,
-                          filters: { ...formData.filters, accountStatus: selected }
-                        });
-                      }}
-                      className={styles.multiSelect}
-                      size={1}
-                    >
-                      <option value="lead">Lead</option>
-                      <option value="trialer">Trialer</option>
-                      <option value="member">Member</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                    <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple</small>
+              {/* Location */}
+              {locations.length > 0 && (
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Location</label>
+                  <div className={styles.pillGroup}>
+                    {locations.filter(l => l.isActive).map((loc) => (
+                      <button
+                        key={loc.id}
+                        type="button"
+                        className={`${styles.pill} ${f.locationIds.includes(loc.id) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ locationIds: toggle(f.locationIds, loc.id) })}
+                      >
+                        {loc.name}
+                      </button>
+                    ))}
                   </div>
+                </div>
+              )}
 
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Program Type</label>
-                    <select
-                      multiple
-                      value={formData.filters.programType || []}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, option => option.value as ProgramType);
-                        setFormData({
-                          ...formData,
-                          filters: { ...formData.filters, programType: selected }
-                        });
-                      }}
-                      className={styles.multiSelect}
-                      size={1}
-                    >
-                      <option value="Children's Martial Arts">Children's Martial Arts</option>
-                      <option value="Adult BJJ">Adult BJJ</option>
-                      <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                      <option value="DG Barbell">DG Barbell</option>
-                      <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                      <option value="The Ashtanga Club">The Ashtanga Club</option>
-                      <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                      <option value="Kids BJJ">Kids BJJ</option>
-                      <option value="Kids Muay Thai">Kids Muay Thai</option>
-                      <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                      <option value="DG Workspace">DG Workspace</option>
-                      <option value="Dragon Launch">Dragon Launch</option>
-                      <option value="Personal Training">Personal Training</option>
-                      <option value="DGMT Private Training">DGMT Private Training</option>
-                    </select>
-                    <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple</small>
+              {/* Status + Age Group */}
+              <div className={styles.filterGrid2}>
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Account Status</label>
+                  <div className={styles.pillGroup}>
+                    {(['lead', 'trialer', 'member', 'cancelled'] as AccountStatus[]).map(s => (
+                      <button key={s} type="button"
+                        className={`${styles.pill} ${f.accountStatus.includes(s) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ accountStatus: toggle(f.accountStatus, s) })}>
+                        {s.charAt(0).toUpperCase() + s.slice(1)}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Age Group</label>
-                    <select
-                      multiple
-                      value={formData.filters.membershipAge || []}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, option => option.value as MembershipAge);
-                        setFormData({
-                          ...formData,
-                          filters: { ...formData.filters, membershipAge: selected }
-                        });
-                      }}
-                      className={styles.multiSelect}
-                      size={1}
-                    >
-                      <option value="Adult">Adult</option>
-                      <option value="Kids">Kids</option>
-                    </select>
-                    <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple</small>
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Age Group</label>
+                  <div className={styles.pillGroup}>
+                    {(['Adult', 'Kids'] as MembershipAge[]).map(a => (
+                      <button key={a} type="button"
+                        className={`${styles.pill} ${f.membershipAge.includes(a) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ membershipAge: toggle(f.membershipAge, a) })}>
+                        {a}
+                      </button>
+                    ))}
                   </div>
+                </div>
+              </div>
 
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Account Type</label>
-                    <select
-                      multiple
-                      value={formData.filters.accountType || []}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, option => option.value as AccountType);
-                        setFormData({
-                          ...formData,
-                          filters: { ...formData.filters, accountType: selected }
-                        });
-                      }}
-                      className={styles.multiSelect}
-                      size={1}
-                    >
-                      <option value="basic">Basic</option>
-                      <option value="premium">Premium</option>
-                      <option value="elite">Elite</option>
-                      <option value="family">Family</option>
-                    </select>
-                    <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple</small>
+              {/* Account Type + Lead Source */}
+              <div className={styles.filterGrid2}>
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Account Type</label>
+                  <div className={styles.pillGroup}>
+                    {(['basic', 'premium', 'elite', 'family'] as AccountType[]).map(t => (
+                      <button key={t} type="button"
+                        className={`${styles.pill} ${f.accountType.includes(t) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ accountType: toggle(f.accountType, t) })}>
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <div className={styles.rankingSection}>
-                  <label className={styles.formLabel}>Ranking (by Program)</label>
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Lead Source</label>
+                  <div className={styles.pillGroup}>
+                    {([
+                      { val: 'web_form', label: 'Web Form' },
+                      { val: 'inbound_call', label: 'Inbound Call' },
+                      { val: 'manual_add', label: 'Manual Add' },
+                      { val: 'referral', label: 'Referral' },
+                      { val: 'walk_in', label: 'Walk In' },
+                      { val: 'social_media', label: 'Social Media' },
+                    ] as { val: LeadSource; label: string }[]).map(({ val, label }) => (
+                      <button key={val} type="button"
+                        className={`${styles.pill} ${f.leadSource.includes(val) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ leadSource: toggle(f.leadSource, val) })}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Program Type */}
+              <div className={styles.filterBlock}>
+                <label className={styles.filterLabel}>Program Type</label>
+                <div className={styles.pillGroup}>
+                  {PROGRAM_TYPES.map(p => (
+                    <button key={p} type="button"
+                      className={`${styles.pill} ${f.programType.includes(p) ? styles.pillActive : ''}`}
+                      onClick={() => setFilter({ programType: toggle(f.programType, p) })}>
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ranking — collapsible */}
+              <div className={styles.filterBlock}>
+                <button type="button" className={styles.rankingToggle} onClick={() => setRankingOpen(v => !v)}>
+                  <span className={styles.filterLabel} style={{ margin: 0 }}>
+                    Ranking {selectedRankingCount > 0 && <span className={styles.rankingBadge}>{selectedRankingCount} selected</span>}
+                  </span>
+                  <span className={styles.rankingChevron}>{rankingOpen ? '▲' : '▼'}</span>
+                </button>
+                {rankingOpen && (
                   <div className={styles.rankingGrid}>
                     {Object.entries(RANKINGS).map(([program, ranks]) => (
                       <div key={program} className={styles.rankingProgram}>
-                        <h5 className={styles.rankingProgramTitle}>{program}</h5>
-                        <select
-                          multiple
-                          value={formData.filters.ranking?.filter(r => ranks.includes(r)) || []}
-                          onChange={(e) => {
-                            const selected = Array.from(e.target.selectedOptions, option => option.value);
-                            const otherRankings = formData.filters.ranking?.filter(r => !ranks.includes(r)) || [];
-                            setFormData({
-                              ...formData,
-                              filters: { ...formData.filters, ranking: [...otherRankings, ...selected] }
-                            });
-                          }}
-                          className={styles.rankingSelect}
-                          size={1}
-                        >
+                        <div className={styles.rankingProgramTitle}>{program}</div>
+                        <div className={styles.pillGroup}>
                           {ranks.map(rank => (
-                            <option key={rank} value={rank}>{rank}</option>
+                            <button key={rank} type="button"
+                              className={`${styles.pill} ${styles.pillSmall} ${f.ranking.includes(rank) ? styles.pillActive : ''}`}
+                              onClick={() => setFilter({ ranking: toggle(f.ranking, rank) })}>
+                              {rank}
+                            </button>
                           ))}
-                        </select>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple ranks from any program</small>
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Lead Source</label>
-                  <select
-                    multiple
-                    value={formData.filters.leadSource || []}
-                    onChange={(e) => {
-                      const selected = Array.from(e.target.selectedOptions, option => option.value as LeadSource);
-                      setFormData({
-                        ...formData,
-                        filters: { ...formData.filters, leadSource: selected }
-                      });
-                    }}
-                    className={styles.multiSelect}
-                    size={1}
-                  >
-                    <option value="web_form">Web Form</option>
-                    <option value="inbound_call">Inbound Call</option>
-                    <option value="manual_add">Manual Add</option>
-                    <option value="referral">Referral</option>
-                    <option value="walk_in">Walk In</option>
-                    <option value="social_media">Social Media</option>
-                  </select>
-                  <small className={styles.helpText}>Click to expand • Ctrl/Cmd for multiple</small>
-                </div>
+                )}
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" onClick={() => setIsModalOpen(false)} className={styles.cancelBtn}>
-                  Cancel
-                </button>
-                <button type="submit" className={styles.saveBtn}>
-                  Create Audience
-                </button>
+                <button type="button" onClick={() => setIsModalOpen(false)} className={styles.cancelBtn}>Cancel</button>
+                <button type="submit" className={styles.saveBtn}>Create Audience</button>
               </div>
             </form>
           </div>

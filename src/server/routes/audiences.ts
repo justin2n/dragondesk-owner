@@ -47,9 +47,13 @@ router.get('/:id/members', async (req: AuthRequest, res) => {
     let sql = 'SELECT * FROM members WHERE 1=1';
     const params: any[] = [];
 
-    // Filter by location if specified (if not specified, return all locations)
-    if (locationId && locationId !== 'all') {
-      sql += ' AND locationId = ?';
+    // Filter by locationIds stored in audience filters (saved with audience definition)
+    if (filters.locationIds && filters.locationIds.length > 0) {
+      sql += ` AND "locationId" IN (${filters.locationIds.map(() => '?').join(',')})`;
+      params.push(...filters.locationIds);
+    } else if (locationId && locationId !== 'all') {
+      // Fallback: filter by query param for ad-hoc queries
+      sql += ' AND "locationId" = ?';
       params.push(locationId);
     }
 

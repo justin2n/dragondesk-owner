@@ -118,6 +118,7 @@ export interface AudienceFilter {
   ranking?: string[];
   tags?: string[];
   leadSource?: LeadSource[];
+  locationIds?: number[];
   eventIds?: number[];
   eventAttendanceStatus?: ('registered' | 'attended' | 'no-show' | 'cancelled')[];
 }
