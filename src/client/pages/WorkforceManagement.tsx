@@ -3,9 +3,11 @@ import { api } from '../utils/api';
 import { User, WorkSchedule, MyStudioSyncLog } from '../types';
 import { useLocation } from '../contexts/LocationContext';
 import { AddIcon, EditIcon, DeleteIcon, CalendarIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
 import styles from './WorkforceManagement.module.css';
 
 const WorkforceManagement = () => {
+  const { toast, confirm } = useToast();
   const { locations, selectedLocation, isAllLocations } = useLocation();
   const [activeTab, setActiveTab] = useState<'instructors' | 'schedules' | 'sync'>('instructors');
 
@@ -124,7 +126,7 @@ const WorkforceManagement = () => {
       loadInstructors();
     } catch (error) {
       console.error('Failed to save instructor:', error);
-      alert('Failed to save instructor');
+      toast('Failed to save instructor', 'error');
     }
   };
 
@@ -175,19 +177,19 @@ const WorkforceManagement = () => {
       loadSchedules();
     } catch (error) {
       console.error('Failed to save schedule:', error);
-      alert('Failed to save schedule');
+      toast('Failed to save schedule', 'error');
     }
   };
 
   const handleDeleteSchedule = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this schedule?')) return;
+    if (!await confirm({ title: 'Delete Schedule', message: 'Are you sure you want to delete this schedule?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/workforce/schedules/${id}`);
       loadSchedules();
     } catch (error) {
       console.error('Failed to delete schedule:', error);
-      alert('Failed to delete schedule');
+      toast('Failed to delete schedule', 'error');
     }
   };
 
@@ -246,7 +248,7 @@ const WorkforceManagement = () => {
 
   const handleImportSchedule = async () => {
     if (!importFile) {
-      alert('Please select a file to import');
+      toast('Please select a file to import', 'error');
       return;
     }
 
@@ -268,7 +270,7 @@ const WorkforceManagement = () => {
       }
 
       if (!scheduleData || scheduleData.length === 0) {
-        alert('No data found in the file. Please check the CSV format.');
+        toast('No data found in the file. Please check the CSV format.', 'error');
         return;
       }
 
@@ -277,16 +279,16 @@ const WorkforceManagement = () => {
       console.log('API response:', result);
 
       if (result.errors && result.errors.length > 0) {
-        alert(`Import completed with errors:\n${result.imported} records imported\n${result.errors.length} errors:\n${result.errors.slice(0, 3).join('\n')}`);
+        toast(`Import completed: ${result.imported} imported, ${result.errors.length} errors — ${result.errors.slice(0, 2).join('; ')}`, 'error');
       } else {
-        alert(`Import completed successfully: ${result.imported} records imported`);
+        toast(`Import completed successfully: ${result.imported} records imported`, 'success');
       }
 
       loadSyncLogs();
       setImportFile(null);
     } catch (error: any) {
       console.error('Failed to import schedule:', error);
-      alert(error.message || 'Failed to import schedule');
+      toast(error.message || 'Failed to import schedule', 'error');
     } finally {
       setImporting(false);
     }

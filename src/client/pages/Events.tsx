@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useToast } from '../components/Toast';
 import { api } from '../utils/api';
 import {
   AddIcon,
@@ -57,6 +58,7 @@ interface Instructor {
 }
 
 const Events = () => {
+  const { toast, confirm } = useToast();
   const [events, setEvents] = useState<Event[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -191,19 +193,19 @@ const Events = () => {
       resetForm();
       loadEvents();
     } catch (error: any) {
-      alert(error.message || 'Failed to create event');
+      toast(error.message || 'Failed to create event', 'error');
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this event?')) return;
+    if (!await confirm({ title: 'Delete Event', message: 'Are you sure you want to delete this event?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/events/${id}`);
       loadEvents();
       setSelectedEvent(null);
     } catch (error: any) {
-      alert(error.message || 'Failed to delete event');
+      toast(error.message || 'Failed to delete event', 'error');
     }
   };
 
@@ -285,7 +287,7 @@ const Events = () => {
       resetForm();
       loadEvents();
     } catch (error: any) {
-      alert(error.message || 'Failed to update event');
+      toast(error.message || 'Failed to update event', 'error');
     }
   };
 
@@ -295,20 +297,20 @@ const Events = () => {
       const myStudioConfig = config ? JSON.parse(config) : null;
 
       if (!myStudioConfig?.enabled || !myStudioConfig?.apiKey) {
-        alert('Please configure MyStudio API in Settings > MyStudio API first.');
+        toast('Please configure MyStudio API in Settings > MyStudio API first.', 'error');
         return;
       }
 
       const result = await api.post('/events/sync-mystudio', { config: myStudioConfig });
 
       if (result.syncedCount === 0) {
-        alert(result.message + '\n\nNote: ' + result.note);
+        toast(`${result.message}${result.note ? ' — ' + result.note : ''}`, 'info');
       } else {
-        alert(`Synced ${result.syncedCount} events from MyStudio`);
+        toast(`Synced ${result.syncedCount} events from MyStudio`, 'success');
         loadEvents();
       }
     } catch (error: any) {
-      alert(error.message || 'Failed to sync from MyStudio');
+      toast(error.message || 'Failed to sync from MyStudio', 'error');
     }
   };
 
@@ -318,22 +320,22 @@ const Events = () => {
     if (!selectedEvent) return;
 
     if (campaignData.platforms.length === 0) {
-      alert('Please select at least one platform');
+      toast('Please select at least one platform', 'error');
       return;
     }
 
     if (!campaignData.audienceId) {
-      alert('Please select an audience');
+      toast('Please select an audience', 'error');
       return;
     }
 
     try {
       const result = await api.post(`/events/${selectedEvent.id}/create-campaign`, campaignData);
-      alert(`Created ${result.campaigns.length} campaign(s) successfully!`);
+      toast(`Created ${result.campaigns.length} campaign(s) successfully!`, 'success');
       setShowCampaignModal(false);
       resetCampaignForm();
     } catch (error: any) {
-      alert(error.message || 'Failed to create campaigns');
+      toast(error.message || 'Failed to create campaigns', 'error');
     }
   };
 

@@ -3,6 +3,7 @@ import { api } from '../utils/api';
 import { Campaign, Audience, EmailTemplate } from '../types';
 import EmailEditor from '../components/EmailEditor';
 import { useLocation } from '../contexts/LocationContext';
+import { useToast } from '../components/Toast';
 import styles from './DragonDeskEngage.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit';
@@ -25,6 +26,7 @@ interface SMSCampaign {
 }
 
 const DragonDeskEngage = () => {
+  const { toast, confirm } = useToast();
   const { selectedLocation, isAllLocations } = useLocation();
   const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'sms'>('campaigns');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -149,18 +151,18 @@ const DragonDeskEngage = () => {
       setEditingCampaign(null);
       loadData();
     } catch (error: any) {
-      alert(error.message || `Failed to ${editingCampaign ? 'update' : 'create'} campaign`);
+      toast(error.message || `Failed to ${editingCampaign ? 'update' : 'create'} campaign`, 'error');
     }
   };
 
   const handleDeleteCampaign = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this campaign?')) return;
+    if (!await confirm({ title: 'Delete Campaign', message: 'Are you sure you want to delete this campaign?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/campaigns/${id}`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete campaign');
+      toast(error.message || 'Failed to delete campaign', 'error');
     }
   };
 
@@ -198,18 +200,18 @@ const DragonDeskEngage = () => {
       setEditingTemplate(null);
       loadData();
     } catch (error: any) {
-      alert(error.message || `Failed to ${editingTemplate ? 'update' : 'create'} template`);
+      toast(error.message || `Failed to ${editingTemplate ? 'update' : 'create'} template`, 'error');
     }
   };
 
   const handleDeleteTemplate = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this template?')) return;
+    if (!await confirm({ title: 'Delete Template', message: 'Are you sure you want to delete this template?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/templates/${id}`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete template');
+      toast(error.message || 'Failed to delete template', 'error');
     }
   };
 
@@ -231,12 +233,12 @@ const DragonDeskEngage = () => {
 
   const handleSendTest = async () => {
     if (!testEmail) {
-      alert('Please enter an email address');
+      toast('Please enter an email address', 'error');
       return;
     }
 
     if (!formData.subject || !formData.body) {
-      alert('Please fill in subject and body before sending a test');
+      toast('Please fill in subject and body before sending a test', 'error');
       return;
     }
 
@@ -261,12 +263,12 @@ const DragonDeskEngage = () => {
       });
 
       if (result.previewUrl) {
-        alert(`Test email sent to ${testEmail}!\n\nPreview URL: ${result.previewUrl}`);
+        toast(`Test email sent to ${testEmail}! Preview: ${result.previewUrl}`, 'success');
       } else {
-        alert(`Test email sent successfully to ${testEmail}!`);
+        toast(`Test email sent successfully to ${testEmail}!`, 'success');
       }
     } catch (error: any) {
-      alert(error.message || 'Failed to send test email');
+      toast(error.message || 'Failed to send test email', 'error');
     }
   };
 
@@ -318,30 +320,30 @@ const DragonDeskEngage = () => {
       setEditingSMSCampaign(null);
       loadData();
     } catch (error: any) {
-      alert(error.message || `Failed to ${editingSMSCampaign ? 'update' : 'create'} SMS campaign`);
+      toast(error.message || `Failed to ${editingSMSCampaign ? 'update' : 'create'} SMS campaign`, 'error');
     }
   };
 
   const handleDeleteSMSCampaign = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this SMS campaign?')) return;
+    if (!await confirm({ title: 'Delete SMS Campaign', message: 'Are you sure you want to delete this SMS campaign?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/sms-campaigns/${id}`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete SMS campaign');
+      toast(error.message || 'Failed to delete SMS campaign', 'error');
     }
   };
 
   const handleSendSMSCampaign = async (id: number) => {
-    if (!confirm('Are you sure you want to send this SMS campaign? This action cannot be undone.')) return;
+    if (!await confirm({ title: 'Send SMS Campaign', message: 'Are you sure you want to send this SMS campaign? This action cannot be undone.', confirmLabel: 'Send Now', danger: true })) return;
 
     try {
       await api.post(`/sms-campaigns/${id}/send`);
-      alert('SMS campaign is being sent!');
+      toast('SMS campaign is being sent!', 'success');
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to send SMS campaign');
+      toast(error.message || 'Failed to send SMS campaign', 'error');
     }
   };
 
@@ -352,19 +354,19 @@ const DragonDeskEngage = () => {
 
   const handleSendTestSMS = async () => {
     if (!testPhone) {
-      alert('Please enter a phone number');
+      toast('Please enter a phone number', 'error');
       return;
     }
 
     if (!smsFormData.message) {
-      alert('Please write a message before sending a test');
+      toast('Please write a message before sending a test', 'error');
       return;
     }
 
     try {
-      alert(`Test SMS would be sent to ${testPhone}:\n\n"${smsFormData.message}"\n\n(Test SMS sending is simulated in development)`);
+      toast(`Test SMS would be sent to ${testPhone} (simulated in development)`, 'info');
     } catch (error: any) {
-      alert(error.message || 'Failed to send test SMS');
+      toast(error.message || 'Failed to send test SMS', 'error');
     }
   };
 

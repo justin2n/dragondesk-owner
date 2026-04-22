@@ -262,19 +262,19 @@ const Settings = () => {
       setShowProgramModal(false);
       setEditingProgram(null);
     } catch (error: any) {
-      alert(error.message || 'Failed to save program');
+      toast(error.message || 'Failed to save program', 'error');
     }
   };
 
   const handleDeleteProgram = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this program?')) return;
+    if (!await confirm({ title: 'Delete Program', message: 'Are you sure you want to delete this program?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/programs/${id}`);
       await loadPrograms();
       showSaveMessage('Program deleted successfully!');
     } catch (error: any) {
-      alert(error.message || 'Failed to delete program');
+      toast(error.message || 'Failed to delete program', 'error');
     }
   };
 
@@ -284,7 +284,7 @@ const Settings = () => {
       await loadPrograms();
       showSaveMessage(`Program ${!program.isActive ? 'activated' : 'deactivated'} successfully!`);
     } catch (error: any) {
-      alert(error.message || 'Failed to update program status');
+      toast(error.message || 'Failed to update program status', 'error');
     }
   };
 
@@ -478,7 +478,7 @@ const Settings = () => {
       showSaveMessage('Billing settings saved successfully!');
       loadBillingSettings(billingLocationId);
     } catch (error: any) {
-      alert(error.message || 'Failed to save billing settings');
+      toast(error.message || 'Failed to save billing settings', 'error');
     }
   };
 
@@ -568,19 +568,19 @@ const Settings = () => {
       setShowPricingModal(false);
       setEditingPlan(null);
     } catch (error: any) {
-      alert(error.message || 'Failed to save pricing plan');
+      toast(error.message || 'Failed to save pricing plan', 'error');
     }
   };
 
   const handleDeletePricingPlan = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this pricing plan?')) return;
+    if (!await confirm({ title: 'Delete Pricing Plan', message: 'Are you sure you want to delete this pricing plan?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/pricing-plans/${id}`);
       await loadPricingPlans();
       showSaveMessage('Pricing plan deleted successfully!');
     } catch (error: any) {
-      alert(error.message || 'Failed to delete pricing plan');
+      toast(error.message || 'Failed to delete pricing plan', 'error');
     }
   };
 
@@ -590,7 +590,7 @@ const Settings = () => {
       await loadPricingPlans();
       showSaveMessage('Pricing plan synced to Stripe successfully!');
     } catch (error: any) {
-      alert(error.message || 'Failed to sync to Stripe');
+      toast(error.message || 'Failed to sync to Stripe', 'error');
     }
   };
 
@@ -654,19 +654,19 @@ const Settings = () => {
       loadSocialAccounts();
       showSaveMessage(`Social account ${editingSocialAccount ? 'updated' : 'added'} successfully`);
     } catch (error: any) {
-      alert(error.message || 'Failed to save social account');
+      toast(error.message || 'Failed to save social account', 'error');
     }
   };
 
   const handleDeleteSocialAccount = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this social account?')) return;
+    if (!await confirm({ title: 'Delete Social Account', message: 'Are you sure you want to delete this social account?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/social-accounts/${id}`);
       loadSocialAccounts();
       showSaveMessage('Social account deleted successfully');
     } catch (error: any) {
-      alert(error.message || 'Failed to delete social account');
+      toast(error.message || 'Failed to delete social account', 'error');
     }
   };
 
@@ -730,12 +730,12 @@ const Settings = () => {
       loadDkimConfigs();
       showSaveMessage(`DKIM signing ${isActive ? 'enabled' : 'disabled'}`);
     } catch (error: any) {
-      alert(error.message || 'Failed to toggle DKIM status');
+      toast(error.message || 'Failed to toggle DKIM status', 'error');
     }
   };
 
   const handleDeleteDkimConfig = async (domain: string) => {
-    if (!confirm(`Are you sure you want to delete the DKIM configuration for ${domain}?`)) return;
+    if (!await confirm({ title: 'Delete DKIM Configuration', message: `Are you sure you want to delete the DKIM configuration for ${domain}?`, confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/dkim/config/${domain}`);
@@ -748,7 +748,7 @@ const Settings = () => {
 
       showSaveMessage('DKIM configuration deleted successfully');
     } catch (error: any) {
-      alert(error.message || 'Failed to delete DKIM configuration');
+      toast(error.message || 'Failed to delete DKIM configuration', 'error');
     }
   };
 
@@ -814,19 +814,19 @@ const Settings = () => {
       setShowUserModal(false);
       loadUsers();
     } catch (error: any) {
-      alert(error.message || 'Failed to save user');
+      toast(error.message || 'Failed to save user', 'error');
     }
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!await confirm({ title: 'Delete User', message: 'Are you sure you want to delete this user?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/users/${userId}`);
       loadUsers();
       showSaveMessage('User deleted successfully');
     } catch (error: any) {
-      alert(error.message || 'Failed to delete user');
+      toast(error.message || 'Failed to delete user', 'error');
     }
   };
 
@@ -887,12 +887,12 @@ const Settings = () => {
       loadLocationsData();
       loadLocations(); // Refresh location context
     } catch (error: any) {
-      alert(error.message || 'Failed to save location');
+      toast(error.message || 'Failed to save location', 'error');
     }
   };
 
   const handleDeleteLocation = async (locationId: number) => {
-    if (!confirm('Are you sure you want to delete this location?')) return;
+    if (!await confirm({ title: 'Delete Location', message: 'Are you sure you want to delete this location?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/locations/${locationId}`);
@@ -900,7 +900,7 @@ const Settings = () => {
       loadLocationsData();
       loadLocations(); // Refresh location context
     } catch (error: any) {
-      alert(error.message || 'Failed to delete location');
+      toast(error.message || 'Failed to delete location', 'error');
     }
   };
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { Audience, AudienceFilter, Member, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource } from '../types';
 import { DeleteIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
 import styles from './Audiences.module.css';
 
 const RANKINGS: Record<string, string[]> = {
@@ -22,6 +23,7 @@ const RANKINGS: Record<string, string[]> = {
 };
 
 const Audiences = () => {
+  const { toast, confirm } = useToast();
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [selectedAudience, setSelectedAudience] = useState<Audience | null>(null);
   const [audienceMembers, setAudienceMembers] = useState<Member[]>([]);
@@ -99,7 +101,7 @@ const Audiences = () => {
       setIsModalOpen(false);
       loadAudiences();
     } catch (error: any) {
-      alert(error.message || 'Failed to create audience');
+      toast(error.message || 'Failed to create audience', 'error');
     }
   };
 
@@ -119,7 +121,7 @@ const Audiences = () => {
   };
 
   const handleDeleteAudience = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this audience?')) return;
+    if (!await confirm({ title: 'Delete Audience', message: 'Are you sure you want to delete this audience?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/audiences/${id}`);
@@ -129,7 +131,7 @@ const Audiences = () => {
       }
       loadAudiences();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete audience');
+      toast(error.message || 'Failed to delete audience', 'error');
     }
   };
 

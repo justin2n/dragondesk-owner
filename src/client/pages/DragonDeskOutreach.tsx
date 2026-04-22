@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { Campaign, Audience } from '../types';
+import { useToast } from '../components/Toast';
 import styles from './DragonDeskOutreach.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit';
 
 const DragonDeskOutreach = () => {
+  const { toast, confirm } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
@@ -101,7 +103,7 @@ const DragonDeskOutreach = () => {
       setViewMode('list');
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to save outreach campaign');
+      toast(error.message || 'Failed to save outreach campaign', 'error');
     }
   };
 
@@ -111,13 +113,13 @@ const DragonDeskOutreach = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this campaign?')) return;
+    if (!await confirm({ title: 'Delete Campaign', message: 'Are you sure you want to delete this campaign?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/campaigns/${id}`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete campaign');
+      toast(error.message || 'Failed to delete campaign', 'error');
     }
   };
 

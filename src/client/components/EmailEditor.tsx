@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { useToast } from './Toast';
 import styles from './EmailEditor.module.css';
 
 interface EmailEditorProps {
@@ -7,6 +8,7 @@ interface EmailEditorProps {
 }
 
 const EmailEditor: React.FC<EmailEditorProps> = ({ value, onChange }) => {
+  const { toast } = useToast();
   const editorRef = useRef<HTMLDivElement>(null);
   const [viewMode, setViewMode] = useState<'visual' | 'html'>('visual');
 
@@ -64,7 +66,7 @@ const EmailEditor: React.FC<EmailEditorProps> = ({ value, onChange }) => {
         executeCommand('insertImage', imageUrl);
       } catch (error) {
         console.error('Error uploading image:', error);
-        alert('Failed to upload image');
+        toast('Failed to upload image', 'error');
       }
     };
 

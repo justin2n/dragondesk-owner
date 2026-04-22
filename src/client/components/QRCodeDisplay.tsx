@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useToast } from './Toast';
 import styles from './QRCodeDisplay.module.css';
 
 interface QRCodeDisplayProps {
@@ -18,6 +19,7 @@ const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({
   showWalletButtons = false,
   memberId
 }) => {
+  const { toast } = useToast();
   const [downloading, setDownloading] = useState(false);
   const [walletLoading, setWalletLoading] = useState<'apple' | 'google' | null>(null);
 
@@ -67,9 +69,9 @@ const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({
       const data = await response.json();
 
       if (data.stubbed) {
-        alert(data.message);
+        toast(data.message, 'info');
       } else if (data.success) {
-        alert(`${passType === 'apple' ? 'Apple' : 'Google'} Wallet pass generated successfully!`);
+        toast(`${passType === 'apple' ? 'Apple' : 'Google'} Wallet pass generated successfully!`, 'success');
       }
     } catch (error) {
       console.error('Error generating wallet pass:', error);

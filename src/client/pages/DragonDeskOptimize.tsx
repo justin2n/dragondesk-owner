@@ -3,11 +3,13 @@ import { api } from '../utils/api';
 import { ABTest, Audience } from '../types';
 import VisualPageEditor from '../components/VisualPageEditor';
 import ABTestAnalytics from '../components/ABTestAnalytics';
+import { useToast } from '../components/Toast';
 import styles from './DragonDeskOptimize.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit' | 'analytics' | 'tracking';
 
 const DragonDeskOptimize = () => {
+  const { toast, confirm } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [abtests, setAbtests] = useState<ABTest[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
@@ -137,7 +139,7 @@ const DragonDeskOptimize = () => {
       setViewMode('list');
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to save A/B test');
+      toast(error.message || 'Failed to save A/B test', 'error');
     }
   };
 
@@ -147,13 +149,13 @@ const DragonDeskOptimize = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this A/B test?')) return;
+    if (!await confirm({ title: 'Delete A/B Test', message: 'Are you sure you want to delete this A/B test?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/abtests/${id}`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete A/B test');
+      toast(error.message || 'Failed to delete A/B test', 'error');
     }
   };
 
@@ -206,7 +208,7 @@ const DragonDeskOptimize = () => {
                 <pre>{`<script async src="${window.location.origin}/api/tracking/script.js?token=${trackingToken}"></script>`}</pre>
                 <button className={styles.copyBtn} onClick={() => {
                   navigator.clipboard.writeText(`<script async src="${window.location.origin}/api/tracking/script.js?token=${trackingToken}"></script>`);
-                  alert('Copied!');
+                  toast('Copied!', 'success');
                 }}>Copy</button>
               </div>
             ) : (
@@ -522,15 +524,15 @@ const DragonDeskOptimize = () => {
 
   const handleCreateBehaviorAudience = async () => {
     if (!audienceName || behaviorRules.length === 0) {
-      alert('Please enter a name and add at least one rule.');
+      toast('Please enter a name and add at least one rule.', 'error');
       return;
     }
     try {
       await api.post('/tracking/audiences', { name: audienceName, rules: behaviorRules, operator: audienceOperator });
-      alert(`Audience "${audienceName}" created! It will appear in your A/B test audience selector.`);
+      toast(`Audience "${audienceName}" created! It will appear in your A/B test audience selector.`, 'success');
       setAudienceName('');
       setBehaviorRules([]);
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { toast(e.message, 'error'); }
   };
 
   const addRule = (type: string) => {
@@ -587,7 +589,7 @@ const DragonDeskOptimize = () => {
             </p>
             <div className={styles.codeBlock}>
               <pre>{scriptTag}</pre>
-              <button className={styles.copyBtn} onClick={() => { navigator.clipboard.writeText(scriptTag); alert('Copied!'); }}>Copy</button>
+              <button className={styles.copyBtn} onClick={() => { navigator.clipboard.writeText(scriptTag); toast('Copied!', 'success'); }}>Copy</button>
             </div>
             <div className={styles.installDetails}>
               <h4>What gets tracked automatically:</h4>

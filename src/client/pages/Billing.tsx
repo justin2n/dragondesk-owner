@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from '../contexts/LocationContext';
 import { api } from '../utils/api';
 import { CheckIcon, WarningIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
 import styles from './Billing.module.css';
 
 interface Subscription {
@@ -40,6 +41,7 @@ interface BillingStats {
 }
 
 const Billing = () => {
+  const { toast, confirm } = useToast();
   const { selectedLocation, isAllLocations } = useLocation();
   const [activeTab, setActiveTab] = useState('overview');
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -111,13 +113,13 @@ const Billing = () => {
       ? 'Cancel immediately? The member will lose access right away.'
       : 'Cancel at end of billing period? The member will retain access until then.';
 
-    if (!confirm(message)) return;
+    if (!await confirm({ title: 'Cancel Subscription', message, confirmLabel: 'Cancel Subscription', danger: true })) return;
 
     try {
       await api.post(`/subscriptions/${subscriptionId}/cancel`, { immediately });
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to cancel subscription');
+      toast(error.message || 'Failed to cancel subscription', 'error');
     }
   };
 
@@ -126,7 +128,7 @@ const Billing = () => {
       await api.post(`/subscriptions/${subscriptionId}/resume`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to resume subscription');
+      toast(error.message || 'Failed to resume subscription', 'error');
     }
   };
 
@@ -135,7 +137,7 @@ const Billing = () => {
       await api.post(`/invoices/${invoiceId}/pay`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to retry payment');
+      toast(error.message || 'Failed to retry payment', 'error');
     }
   };
 

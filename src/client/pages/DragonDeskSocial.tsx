@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { SocialPost, SocialComment } from '../types';
 import { useLocation } from '../contexts/LocationContext';
+import { useToast } from '../components/Toast';
 import styles from './DragonDeskSocial.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit' | 'feed';
@@ -34,6 +35,7 @@ interface SocialCampaign {
 }
 
 const DragonDeskSocial = () => {
+  const { toast, confirm } = useToast();
   const { selectedLocation, isAllLocations } = useLocation();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [activeTab, setActiveTab] = useState<ActiveTab>('facebook');
@@ -118,14 +120,14 @@ const DragonDeskSocial = () => {
       await api.patch(`/social-comments/${commentId}/hide`, { isHidden: !isHidden });
       await loadComments(selectedPost!.id);
     } catch (error: any) {
-      alert(error.message || 'Failed to hide/unhide comment');
+      toast(error.message || 'Failed to hide/unhide comment', 'error');
     }
   };
 
   const handleReplyToComment = async (commentId: number) => {
     const text = replyText[commentId];
     if (!text || !text.trim()) {
-      alert('Please enter a reply');
+      toast('Please enter a reply', 'error');
       return;
     }
 
@@ -137,7 +139,7 @@ const DragonDeskSocial = () => {
       setReplyText({ ...replyText, [commentId]: '' });
       await loadComments(selectedPost!.id);
     } catch (error: any) {
-      alert(error.message || 'Failed to send reply');
+      toast(error.message || 'Failed to send reply', 'error');
     }
   };
 
@@ -180,12 +182,12 @@ const DragonDeskSocial = () => {
     e.preventDefault();
 
     if (formData.platforms.length === 0) {
-      alert('Please select at least one platform');
+      toast('Please select at least one platform', 'error');
       return;
     }
 
     if (formData.accountIds.length === 0) {
-      alert('Please select at least one social account');
+      toast('Please select at least one social account', 'error');
       return;
     }
 
@@ -199,7 +201,7 @@ const DragonDeskSocial = () => {
       setViewMode('list');
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to save social campaign');
+      toast(error.message || 'Failed to save social campaign', 'error');
     }
   };
 
@@ -209,24 +211,24 @@ const DragonDeskSocial = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this campaign?')) return;
+    if (!await confirm({ title: 'Delete Campaign', message: 'Are you sure you want to delete this campaign?', confirmLabel: 'Delete', danger: true })) return;
 
     try {
       await api.delete(`/social-campaigns/${id}`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to delete campaign');
+      toast(error.message || 'Failed to delete campaign', 'error');
     }
   };
 
   const handlePublishNow = async (id: number) => {
-    if (!confirm('Publish this post now to all selected platforms?')) return;
+    if (!await confirm({ title: 'Publish Now', message: 'Publish this post now to all selected platforms?', confirmLabel: 'Publish' })) return;
 
     try {
       await api.post(`/social-campaigns/${id}/publish`);
       loadData();
     } catch (error: any) {
-      alert(error.message || 'Failed to publish campaign');
+      toast(error.message || 'Failed to publish campaign', 'error');
     }
   };
 
