@@ -913,7 +913,6 @@ async function initializeDatabase() {
       DO $$ BEGIN
         ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programtype_check;
         ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programType_check;
-        ALTER TABLE pricing_plans ADD CONSTRAINT pricing_plans_programtype_check CHECK("programType" IN ('Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell', 'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center', 'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace', 'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'));
       EXCEPTION WHEN others THEN NULL;
       END $$;
     `);

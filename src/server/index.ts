@@ -52,6 +52,8 @@ pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`).catch(() => {});
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "gaClientId" TEXT`).catch(() => {});
+pool.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programtype_check`).catch(() => {});
+pool.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS "pricing_plans_programType_check"`).catch(() => {});
 pool.query(`
   CREATE TABLE IF NOT EXISTS check_ins (
     id SERIAL PRIMARY KEY,
