@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { Member, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
 import { CardViewIcon, TableViewIcon, AddIcon, CheckIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
 import { useLocation } from '../contexts/LocationContext';
 import StripeElements from '../components/StripeElements';
 import BeltProgressionCard from '../components/BeltProgressionCard';
@@ -26,8 +27,22 @@ const RANKINGS: Record<string, string[]> = {
   'DGMT Private Training': ['Beginner', 'Intermediate', 'Advanced'],
 };
 
+const BULK_FIELD_LABELS: Record<string, string> = {
+  accountStatus: 'Status',
+  programType: 'Program',
+  membershipAge: 'Age Group',
+  ranking: 'Ranking',
+  locationId: 'Location',
+};
+
+const BULK_VALUE_LABELS: Record<string, Record<string, string>> = {
+  accountStatus: { lead: 'Lead', trialer: 'Trialer', member: 'Member', cancelled: 'Cancelled' },
+  membershipAge: { Adult: 'Adult', Kids: 'Kids' },
+};
+
 const Contacts = () => {
   const { selectedLocation, isAllLocations, locations } = useLocation();
+  const { toast, confirm } = useToast();
   const [members, setMembers] = useState<Member[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -196,8 +211,9 @@ const Contacts = () => {
       }
       handleCloseModal();
       loadMembers();
+      toast(editingMember ? 'Contact updated successfully.' : 'Contact added successfully.', 'success');
     } catch (error: any) {
-      alert(error.message || 'Failed to save member');
+      toast(error.message || 'Failed to save contact.', 'error');
     }
   };
 
@@ -227,8 +243,9 @@ const Contacts = () => {
       setCancellationReason('');
       handleCloseModal();
       loadMembers();
+      toast('Account cancelled and churn recorded.', 'success');
     } catch (error: any) {
-      alert(error.message || 'Failed to cancel account');
+      toast(error.message || 'Failed to cancel account.', 'error');
     }
   };
 
@@ -261,13 +278,22 @@ const Contacts = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this member?')) return;
+    const member = members.find(m => m.id === id);
+    const name = member ? `${member.firstName} ${member.lastName}` : 'this contact';
+    const ok = await confirm({
+      title: 'Delete Contact',
+      message: `Are you sure you want to permanently delete ${name}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
 
     try {
       await api.delete(`/members/${id}`);
       loadMembers();
+      toast(`${name} has been deleted.`, 'success');
     } catch (error: any) {
-      alert(error.message || 'Failed to delete member');
+      toast(error.message || 'Failed to delete contact.', 'error');
     }
   };
 
@@ -289,7 +315,16 @@ const Contacts = () => {
 
   const handleBulkUpdate = async () => {
     if (!bulkField || !bulkValue || selectedIds.size === 0) return;
-    if (!confirm(`Update ${selectedIds.size} contact(s) — set ${bulkField} to "${bulkValue}"?`)) return;
+    const fieldLabel = BULK_FIELD_LABELS[bulkField] || bulkField;
+    const valueLabel = bulkField === 'locationId'
+      ? (locations.find(l => String(l.id) === String(bulkValue))?.name ?? bulkValue)
+      : (BULK_VALUE_LABELS[bulkField]?.[bulkValue] ?? bulkValue);
+    const ok = await confirm({
+      title: 'Bulk Update',
+      message: `Update ${selectedIds.size} contact${selectedIds.size > 1 ? 's' : ''} — set ${fieldLabel} to "${valueLabel}"?`,
+      confirmLabel: 'Apply',
+    });
+    if (!ok) return;
     setBulkLoading(true);
     try {
       await Promise.all(
@@ -302,8 +337,9 @@ const Contacts = () => {
       setBulkField('');
       setBulkValue('');
       loadMembers();
+      toast(`${selectedIds.size} contact${selectedIds.size > 1 ? 's' : ''} updated — ${fieldLabel} set to "${valueLabel}".`, 'success');
     } catch (err: any) {
-      alert(err.message || 'Bulk update failed');
+      toast(err.message || 'Bulk update failed.', 'error');
     } finally {
       setBulkLoading(false);
     }
@@ -311,14 +347,22 @@ const Contacts = () => {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} contact(s)? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete Contacts',
+      message: `Permanently delete ${selectedIds.size} contact${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     setBulkLoading(true);
+    const count = selectedIds.size;
     try {
       await Promise.all(Array.from(selectedIds).map(id => api.delete(`/members/${id}`)));
       setSelectedIds(new Set());
       loadMembers();
+      toast(`${count} contact${count > 1 ? 's' : ''} deleted.`, 'success');
     } catch (err: any) {
-      alert(err.message || 'Bulk delete failed');
+      toast(err.message || 'Bulk delete failed.', 'error');
     } finally {
       setBulkLoading(false);
     }
@@ -388,8 +432,9 @@ const Contacts = () => {
     try {
       const qrCode = await api.post(`/qr-codes/generate/${viewingMember.id}`, {});
       setMemberQRCode(qrCode);
+      toast('QR code generated.', 'success');
     } catch (error: any) {
-      alert(error.message || 'Failed to generate QR code');
+      toast(error.message || 'Failed to generate QR code.', 'error');
     }
   };
 
@@ -404,24 +449,29 @@ const Contacts = () => {
       loadMemberBillingData(viewingMember.id);
       setShowSubscribeModal(false);
       setSelectedPlanId(null);
+      toast('Subscription created successfully.', 'success');
     } catch (error: any) {
-      alert(error.message || 'Failed to create subscription');
+      toast(error.message || 'Failed to create subscription.', 'error');
     }
   };
 
   const handleCancelSubscription = async (subscriptionId: number, immediately: boolean) => {
-    const message = immediately
-      ? 'Cancel immediately? The member will lose access right away.'
-      : 'Cancel at end of billing period?';
-    if (!confirm(message)) return;
+    const ok = await confirm({
+      title: 'Cancel Subscription',
+      message: immediately
+        ? 'Cancel immediately? The member will lose access right away.'
+        : 'Cancel at the end of the current billing period?',
+      confirmLabel: 'Yes, Cancel',
+      danger: true,
+    });
+    if (!ok) return;
 
     try {
       await api.post(`/subscriptions/${subscriptionId}/cancel`, { immediately });
-      if (viewingMember) {
-        loadMemberBillingData(viewingMember.id);
-      }
+      if (viewingMember) loadMemberBillingData(viewingMember.id);
+      toast(immediately ? 'Subscription cancelled immediately.' : 'Subscription will cancel at period end.', 'success');
     } catch (error: any) {
-      alert(error.message || 'Failed to cancel subscription');
+      toast(error.message || 'Failed to cancel subscription.', 'error');
     }
   };
 

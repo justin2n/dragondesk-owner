@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { BrandingProvider } from './contexts/BrandingContext';
 import { LocationProvider } from './contexts/LocationContext';
+import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
@@ -137,9 +138,11 @@ const App = () => {
     <BrandingProvider>
       <AuthProvider>
         <LocationProvider>
-          <Router>
-            <AppRoutes />
-          </Router>
+          <ToastProvider>
+            <Router>
+              <AppRoutes />
+            </Router>
+          </ToastProvider>
         </LocationProvider>
       </AuthProvider>
     </BrandingProvider>
