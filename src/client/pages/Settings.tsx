@@ -4,6 +4,7 @@ import { useBranding } from '../contexts/BrandingContext';
 import { useLocation } from '../contexts/LocationContext';
 import { api } from '../utils/api';
 import { CheckIcon, WarningIcon, AddIcon, EditIcon, DeleteIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
 import styles from './Settings.module.css';
 
 interface User {
@@ -60,7 +61,12 @@ const Settings = () => {
   const { user } = useAuth();
   const { branding, updateBranding } = useBranding();
   const { loadLocations } = useLocation();
+  const { toast, confirm } = useToast();
   const [activeTab, setActiveTab] = useState('mystudio');
+  const [webhookKeys, setWebhookKeys] = useState<any[]>([]);
+  const [newKeyLabel, setNewKeyLabel] = useState('Zapier');
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
+  const [keyCopied, setKeyCopied] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
@@ -206,6 +212,7 @@ const Settings = () => {
     loadDkimConfigs();
     loadBillingSettings();
     loadPricingPlans();
+    api.get('/webhooks/keys').then(setWebhookKeys).catch(() => {});
   }, []);
 
   const loadUsers = async () => {
@@ -2574,6 +2581,161 @@ const Settings = () => {
                   API credentials are stored locally in your browser. For production use,
                   consider using environment variables on the server.
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* Zapier / Webhook Integration */}
+          {activeTab === 'integrations' && (
+            <div className={styles.section} style={{ marginTop: '2rem' }}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h2 className={styles.sectionTitle}>Zapier Lead Capture</h2>
+                  <p className={styles.sectionDesc}>
+                    Generate an API key and connect your Zapier workflows to automatically create leads in DragonDesk when someone fills out a form, books a class, or triggers any Zap.
+                  </p>
+                </div>
+              </div>
+
+              {/* Webhook URL */}
+              <div className={styles.infoBox} style={{ marginBottom: '1.5rem' }}>
+                <h4 style={{ marginBottom: '0.5rem', color: '#fff' }}>Webhook URL</h4>
+                <p style={{ fontSize: '0.85rem', color: '#aaa', marginBottom: '0.75rem' }}>
+                  Use this URL in your Zapier "Webhooks by Zapier" action set to <strong>POST</strong>. Pass your API key as the <code>X-Api-Key</code> header.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <code style={{ flex: 1, background: '#0d0d0d', border: '1px solid #333', borderRadius: '6px', padding: '0.6rem 0.9rem', fontSize: '0.82rem', color: '#60a5fa', wordBreak: 'break-all' }}>
+                    {window.location.origin}/api/webhooks/zapier/leads
+                  </code>
+                  <button className={styles.saveBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/zapier/leads`); toast('URL copied!', 'success'); }}>
+                    Copy URL
+                  </button>
+                </div>
+              </div>
+
+              {/* Field mapping reference */}
+              <div className={styles.infoBox} style={{ marginBottom: '1.5rem' }}>
+                <h4 style={{ marginBottom: '0.75rem', color: '#fff' }}>Accepted Fields</h4>
+                <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#aaa', textAlign: 'left' }}>
+                      <th style={{ paddingBottom: '0.4rem', paddingRight: '1rem' }}>Field</th>
+                      <th style={{ paddingBottom: '0.4rem', paddingRight: '1rem' }}>Aliases</th>
+                      <th style={{ paddingBottom: '0.4rem' }}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody style={{ color: '#ccc' }}>
+                    {[
+                      ['firstName', 'first_name, FirstName', 'Required'],
+                      ['email', 'Email', 'Required — used to deduplicate'],
+                      ['lastName', 'last_name, LastName', ''],
+                      ['phone', 'Phone, mobile', ''],
+                      ['program', 'programType, program_type', 'e.g. "Adult BJJ"'],
+                      ['source', 'leadSource, lead_source', 'Defaults to "zapier"'],
+                      ['notes', 'message, Notes', ''],
+                      ['company', 'companyName, studio', ''],
+                    ].map(([field, aliases, notes]) => (
+                      <tr key={field} style={{ borderTop: '1px solid #222' }}>
+                        <td style={{ padding: '0.4rem 1rem 0.4rem 0' }}><code style={{ color: '#60a5fa' }}>{field}</code></td>
+                        <td style={{ padding: '0.4rem 1rem 0.4rem 0', color: '#888' }}>{aliases}</td>
+                        <td style={{ padding: '0.4rem 0', color: '#888' }}>{notes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Generate key */}
+              <div className={styles.formGroup}>
+                <label className={styles.label}>Key Label</label>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <input
+                    type="text"
+                    className={styles.input}
+                    value={newKeyLabel}
+                    onChange={e => setNewKeyLabel(e.target.value)}
+                    placeholder="e.g. Zapier Production"
+                  />
+                  <button
+                    className={styles.saveBtn}
+                    style={{ whiteSpace: 'nowrap' }}
+                    onClick={async () => {
+                      try {
+                        const result = await api.post('/webhooks/keys', { label: newKeyLabel });
+                        setNewlyCreatedKey(result.api_key);
+                        setKeyCopied(false);
+                        setWebhookKeys(prev => [result, ...prev]);
+                        setNewKeyLabel('Zapier');
+                        toast('API key generated. Copy it now — it won\'t be shown again.', 'info');
+                      } catch (err: any) {
+                        toast(err.message || 'Failed to generate key.', 'error');
+                      }
+                    }}
+                  >
+                    Generate API Key
+                  </button>
+                </div>
+              </div>
+
+              {/* Show newly created key once */}
+              {newlyCreatedKey && (
+                <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
+                  <p style={{ fontSize: '0.85rem', color: '#fbbf24', marginBottom: '0.5rem', fontWeight: 600 }}>
+                    ⚠ Copy this key now — it won't be shown again.
+                  </p>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <code style={{ flex: 1, background: '#0d0d0d', border: '1px solid #333', borderRadius: '6px', padding: '0.6rem 0.9rem', fontSize: '0.82rem', color: '#fff', wordBreak: 'break-all' }}>
+                      {newlyCreatedKey}
+                    </code>
+                    <button
+                      className={styles.saveBtn}
+                      style={{ whiteSpace: 'nowrap', background: keyCopied ? '#16a34a' : undefined }}
+                      onClick={() => { navigator.clipboard.writeText(newlyCreatedKey); setKeyCopied(true); toast('API key copied!', 'success'); }}
+                    >
+                      {keyCopied ? 'Copied!' : 'Copy Key'}
+                    </button>
+                  </div>
+                  <button style={{ marginTop: '0.75rem', background: 'none', border: 'none', color: '#888', fontSize: '0.8rem', cursor: 'pointer' }} onClick={() => setNewlyCreatedKey(null)}>
+                    I've saved it — dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Active keys list */}
+              <div>
+                <h4 style={{ color: '#fff', marginBottom: '0.75rem', fontSize: '0.95rem' }}>Active API Keys</h4>
+                {webhookKeys.filter(k => k.is_active).length === 0 ? (
+                  <p style={{ color: '#666', fontSize: '0.875rem' }}>No active keys. Generate one above.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {webhookKeys.filter(k => k.is_active).map(k => (
+                      <div key={k.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1rem', background: '#111', border: '1px solid #222', borderRadius: '8px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>{k.label}</div>
+                          <div style={{ color: '#666', fontSize: '0.78rem', marginTop: '0.15rem' }}>
+                            {k.key_prefix}••••••• · Created {new Date(k.created_at).toLocaleDateString()} {k.last_used_at ? `· Last used ${new Date(k.last_used_at).toLocaleDateString()}` : '· Never used'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            const ok = await confirm({ title: 'Revoke API Key', message: `Revoke the key "${k.label}"? Any Zaps using it will stop working immediately.`, confirmLabel: 'Revoke', danger: true });
+                            if (!ok) return;
+                            try {
+                              await api.delete(`/webhooks/keys/${k.id}`);
+                              setWebhookKeys(prev => prev.map(x => x.id === k.id ? { ...x, is_active: false } : x));
+                              toast(`Key "${k.label}" revoked.`, 'success');
+                            } catch (err: any) {
+                              toast(err.message || 'Failed to revoke key.', 'error');
+                            }
+                          }}
+                          style={{ background: 'none', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '6px', padding: '0.35rem 0.75rem', fontSize: '0.8rem', cursor: 'pointer' }}
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

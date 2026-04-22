@@ -40,6 +40,7 @@ import proxyRoutes from './routes/proxy';
 import assistantRoutes from './routes/assistant';
 import trackingRoutes from './routes/tracking';
 import importCsvRoutes from './routes/import-csv';
+import webhooksRoutes from './routes/webhooks';
 
 dotenv.config();
 
@@ -54,6 +55,18 @@ pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`).ca
 pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "gaClientId" TEXT`).catch(() => {});
 pool.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS pricing_plans_programtype_check`).catch(() => {});
 pool.query(`ALTER TABLE pricing_plans DROP CONSTRAINT IF EXISTS "pricing_plans_programType_check"`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS webhook_api_keys (
+    id SERIAL PRIMARY KEY,
+    label TEXT NOT NULL DEFAULT 'Zapier',
+    api_key TEXT NOT NULL UNIQUE,
+    key_prefix TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_used_at TIMESTAMP,
+    is_active BOOLEAN DEFAULT true
+  )
+`).catch(() => {});
 pool.query(`
   CREATE TABLE IF NOT EXISTS check_ins (
     id SERIAL PRIMARY KEY,
@@ -133,6 +146,7 @@ app.use('/api/tracking', trackingRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/wallet-passes', walletPassesRoutes);
 app.use('/api/import-csv', importCsvRoutes);
+app.use('/api/webhooks', webhooksRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
