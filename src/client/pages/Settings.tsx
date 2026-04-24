@@ -1218,14 +1218,15 @@ const Settings = () => {
                         {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                       </select>
                     </div>
-                    <button
-                      className={styles.primaryBtn}
-                      onClick={handleReassignMembers}
-                      disabled={!reassignTo || reassignLoading}
-                      style={{ alignSelf: 'flex-end' }}
-                    >
-                      {reassignLoading ? 'Reassigning...' : 'Reassign'}
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                      <button
+                        className={styles.primaryBtn}
+                        onClick={handleReassignMembers}
+                        disabled={!reassignTo || reassignLoading}
+                      >
+                        {reassignLoading ? 'Reassigning...' : 'Reassign'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
