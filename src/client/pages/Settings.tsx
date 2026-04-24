@@ -78,6 +78,9 @@ const Settings = () => {
   const [editingProgram, setEditingProgram] = useState<Program | null>(null);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [reassignFrom, setReassignFrom] = useState<string>('null');
+  const [reassignTo, setReassignTo] = useState<string>('');
+  const [reassignLoading, setReassignLoading] = useState(false);
 
   // MyStudio API Settings
   const [myStudioConfig, setMyStudioConfig] = useState({
@@ -904,6 +907,21 @@ const Settings = () => {
     }
   };
 
+  const handleReassignMembers = async () => {
+    if (!reassignTo) return;
+    setReassignLoading(true);
+    try {
+      const fromLocationId = reassignFrom === 'null' ? null : parseInt(reassignFrom);
+      const result = await api.post('/locations/reassign-members', { fromLocationId, toLocationId: parseInt(reassignTo) });
+      toast(`${result.updated} member(s) reassigned successfully`, 'success');
+      loadLocations();
+    } catch (error: any) {
+      toast(error.message || 'Failed to reassign members', 'error');
+    } finally {
+      setReassignLoading(false);
+    }
+  };
+
   const tabGroups = [
     {
       label: 'General',
@@ -1180,6 +1198,37 @@ const Settings = () => {
                   </div>
                 )}
               </div>
+
+              {locations.length > 1 && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subsectionTitle}>Reassign Members</h3>
+                  <p className={styles.sectionDesc}>Move all members from one location to another. Use "Unassigned" as the source to catch members with no location set.</p>
+                  <div className={styles.formRow}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel}>From</label>
+                      <select className={styles.input} value={reassignFrom} onChange={e => setReassignFrom(e.target.value)}>
+                        <option value="null">Unassigned (no location)</option>
+                        {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel}>To</label>
+                      <select className={styles.input} value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
+                        <option value="">Select destination...</option>
+                        {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <button
+                      className={styles.primaryBtn}
+                      onClick={handleReassignMembers}
+                      disabled={!reassignTo || reassignLoading}
+                      style={{ alignSelf: 'flex-end' }}
+                    >
+                      {reassignLoading ? 'Reassigning...' : 'Reassign'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {showLocationModal && (
                 <div className={styles.modal}>

@@ -200,6 +200,44 @@ router.delete('/:id', authorizeAdmin, async (req: AuthRequest, res) => {
   }
 });
 
+// Reassign members from one location to another (admin only)
+router.post('/reassign-members', authorizeAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { fromLocationId, toLocationId } = req.body;
+
+    if (!toLocationId) {
+      return res.status(400).json({ error: 'toLocationId is required' });
+    }
+
+    const toLocation = await get('SELECT id FROM locations WHERE id = ?', [toLocationId]);
+    if (!toLocation) {
+      return res.status(404).json({ error: 'Destination location not found' });
+    }
+
+    let result;
+    if (fromLocationId === null || fromLocationId === undefined || fromLocationId === '') {
+      result = await run(
+        'UPDATE members SET "locationId" = ? WHERE "locationId" IS NULL',
+        [toLocationId]
+      );
+    } else {
+      const fromLocation = await get('SELECT id FROM locations WHERE id = ?', [fromLocationId]);
+      if (!fromLocation) {
+        return res.status(404).json({ error: 'Source location not found' });
+      }
+      result = await run(
+        'UPDATE members SET "locationId" = ? WHERE "locationId" = ?',
+        [toLocationId, fromLocationId]
+      );
+    }
+
+    res.json({ updated: result.changes });
+  } catch (error) {
+    console.error('Reassign members error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get location statistics
 router.get('/:id/stats', async (req: AuthRequest, res) => {
   try {

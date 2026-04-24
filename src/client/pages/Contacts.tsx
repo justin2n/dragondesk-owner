@@ -112,6 +112,7 @@ const Contacts = () => {
   }, []);
 
   const loadMembers = async () => {
+    setIsLoading(true);
     try {
       const params = new URLSearchParams();
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
