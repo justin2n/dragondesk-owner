@@ -195,7 +195,8 @@ const DragonDeskAnalytics = () => {
     chartData: any[],
     dataKeys: string[],
     chartType: ChartType,
-    xAxisKey: string = 'month'
+    xAxisKey: string = 'month',
+    isPercentage: boolean = false
   ) => {
     if (chartType === 'pie') {
       const aggregated = dataKeys.map((key, index) => ({
@@ -240,7 +241,12 @@ const DragonDeskAnalytics = () => {
             stroke="var(--color-text-secondary)"
             tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }}
           />
-          <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
+          <YAxis
+            stroke="var(--color-text-secondary)"
+            tick={{ fill: 'var(--color-text-secondary)' }}
+            tickFormatter={isPercentage ? (v) => `${v}%` : undefined}
+            domain={isPercentage ? [0, 100] : undefined}
+          />
           <Tooltip
             contentStyle={{
               background: 'var(--color-dark-grey)',
@@ -248,6 +254,7 @@ const DragonDeskAnalytics = () => {
               borderRadius: '6px',
               color: 'var(--color-text-primary)',
             }}
+            formatter={isPercentage ? (value: any, name: any) => [`${Math.min(Number(value), 100).toFixed(1)}%`, name] : undefined}
           />
           <Legend />
           {dataKeys.map((key, index) => (
@@ -255,7 +262,7 @@ const DragonDeskAnalytics = () => {
               key={key}
               type="monotone"
               dataKey={key}
-              name={key.replace(/_/g, ' ').replace('volume', 'Volume').replace('active', 'Active')}
+              name={key.replace(/_conversionRate$/, '').replace(/_volume$/, '').replace(/_active$/, '').replace(/_/g, ' ')}
               stroke={CHART_COLORS[index % CHART_COLORS.length]}
               fill={CHART_COLORS[index % CHART_COLORS.length]}
               fillOpacity={chartType === 'area' ? 0.3 : 1}
@@ -289,7 +296,7 @@ const DragonDeskAnalytics = () => {
             <h3>Conversion Rate by Month</h3>
             <p>Percentage of trials converted to members</p>
           </div>
-          {renderChart(data.trialsData, conversionKeys, chartTypes.trials === 'pie' ? 'line' : chartTypes.trials)}
+          {renderChart(data.trialsData, conversionKeys, chartTypes.trials === 'pie' ? 'line' : chartTypes.trials, 'month', true)}
         </div>
 
         <div className={styles.statsGrid}>
