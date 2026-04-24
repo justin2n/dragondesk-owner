@@ -198,12 +198,11 @@ const DragonDeskAnalytics = () => {
     xAxisKey: string = 'month'
   ) => {
     if (chartType === 'pie') {
-      // For pie chart, aggregate the data
       const aggregated = dataKeys.map((key, index) => ({
         name: key.replace(/_/g, ' ').replace('volume', '').replace('active', ''),
         value: chartData.reduce((sum, d) => sum + (d[key] || 0), 0),
         color: CHART_COLORS[index % CHART_COLORS.length],
-      }));
+      })).filter(item => item.value > 0);
 
       return (
         <ResponsiveContainer width="100%" height={400}>
@@ -212,8 +211,8 @@ const DragonDeskAnalytics = () => {
               data={aggregated}
               cx="50%"
               cy="50%"
-              labelLine={true}
-              label={({ name, percent }) => `${name}: ${((percent || 0) * 100).toFixed(0)}%`}
+              labelLine={(props: any) => (props.percent || 0) >= 0.05}
+              label={({ name, percent }) => (percent || 0) >= 0.05 ? `${name}: ${((percent || 0) * 100).toFixed(0)}%` : ''}
               outerRadius={150}
               fill="#8884d8"
               dataKey="value"
@@ -222,7 +221,7 @@ const DragonDeskAnalytics = () => {
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip formatter={(value: any, name: any) => [value, name]} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
@@ -407,16 +406,16 @@ const DragonDeskAnalytics = () => {
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={data.programDistribution}
+                  data={data.programDistribution.filter((e: any) => e.value > 0)}
                   cx="50%"
                   cy="50%"
-                  labelLine={true}
-                  label={({ name, value, percent }) => `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)`}
+                  labelLine={(props: any) => (props.percent || 0) >= 0.05}
+                  label={({ name, value, percent }) => (percent || 0) >= 0.05 ? `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)` : ''}
                   outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {data.programDistribution.map((entry, index) => (
+                  {data.programDistribution.filter((e: any) => e.value > 0).map((entry: any, index: number) => (
                     <Cell
                       key={`cell-${index}`}
                       fill={PROGRAM_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]}
@@ -531,8 +530,9 @@ const DragonDeskAnalytics = () => {
             </div>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie data={byDevice} cx="50%" cy="50%" outerRadius={90} dataKey="sessions"
-                  label={({ device, percent }) => `${device}: ${((percent || 0) * 100).toFixed(0)}%`}>
+                <Pie data={byDevice.filter((d: any) => d.sessions > 0)} cx="50%" cy="50%" outerRadius={90} dataKey="sessions"
+                  labelLine={(props: any) => (props.percent || 0) >= 0.05}
+                  label={({ device, percent }) => (percent || 0) >= 0.05 ? `${device}: ${((percent || 0) * 100).toFixed(0)}%` : ''}>
                   {byDevice.map((entry: any, i: number) => (
                     <Cell key={i} fill={deviceColors[entry.device] || CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
