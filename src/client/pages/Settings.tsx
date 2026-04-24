@@ -1205,20 +1205,21 @@ const Settings = () => {
                   <p className={styles.sectionDesc}>Move all members from one location to another. Use "Unassigned" as the source to catch members with no location set.</p>
                   <div className={styles.formRow}>
                     <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>From</label>
+                      <label className={styles.label}>From</label>
                       <select className={styles.input} value={reassignFrom} onChange={e => setReassignFrom(e.target.value)}>
                         <option value="null">Unassigned (no location)</option>
                         {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                       </select>
                     </div>
                     <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>To</label>
+                      <label className={styles.label}>To</label>
                       <select className={styles.input} value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
                         <option value="">Select destination...</option>
                         {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                       </select>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label}>&nbsp;</label>
                       <button
                         className={styles.primaryBtn}
                         onClick={handleReassignMembers}
