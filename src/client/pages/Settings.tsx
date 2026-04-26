@@ -52,7 +52,19 @@ interface Program {
   id: number;
   name: string;
   description?: string;
+  membershipId?: number | null;
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Membership {
+  id: number;
+  name: string;
+  description?: string;
+  locationId?: number | null;
+  isActive: boolean;
+  programs: Program[];
   createdAt: string;
   updatedAt: string;
 }
@@ -76,6 +88,9 @@ const Settings = () => {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [showProgramModal, setShowProgramModal] = useState(false);
   const [editingProgram, setEditingProgram] = useState<Program | null>(null);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [showMembershipModal, setShowMembershipModal] = useState(false);
+  const [editingMembership, setEditingMembership] = useState<Membership | null>(null);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassignFrom, setReassignFrom] = useState<string>('null');
@@ -210,6 +225,7 @@ const Settings = () => {
     loadUsers();
     loadLocationsData();
     loadPrograms();
+    loadMemberships();
     loadSettings();
     loadSocialAccounts();
     loadDkimConfigs();
@@ -248,9 +264,11 @@ const Settings = () => {
   const handleSaveProgram = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const membershipIdVal = (e.target as any).programMembershipId?.value;
       const programData = {
         name: (e.target as any).programName.value,
         description: (e.target as any).programDescription.value || '',
+        membershipId: membershipIdVal ? parseInt(membershipIdVal) : null,
       };
 
       if (editingProgram) {
@@ -288,6 +306,57 @@ const Settings = () => {
       showSaveMessage(`Program ${!program.isActive ? 'activated' : 'deactivated'} successfully!`);
     } catch (error: any) {
       toast(error.message || 'Failed to update program status', 'error');
+    }
+  };
+
+  const loadMemberships = async () => {
+    try {
+      const response = await api.get('/memberships');
+      setMemberships(response);
+    } catch (error) {
+      console.error('Failed to load memberships:', error);
+    }
+  };
+
+  const handleSaveMembership = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const form = e.target as any;
+      const data = { name: form.membershipName.value, description: form.membershipDescription.value || '' };
+      if (editingMembership) {
+        await api.put(`/memberships/${editingMembership.id}`, data);
+        showSaveMessage('Membership updated successfully!');
+      } else {
+        await api.post('/memberships', data);
+        showSaveMessage('Membership created successfully!');
+      }
+      setShowMembershipModal(false);
+      setEditingMembership(null);
+      await loadMemberships();
+    } catch (error: any) {
+      toast(error.message || 'Failed to save membership', 'error');
+    }
+  };
+
+  const handleDeleteMembership = async (id: number) => {
+    if (!await confirm({ title: 'Delete Membership', message: 'This will unlink all programs from this membership. Continue?', confirmLabel: 'Delete', danger: true })) return;
+    try {
+      await api.delete(`/memberships/${id}`);
+      await loadMemberships();
+      await loadPrograms();
+      showSaveMessage('Membership deleted successfully!');
+    } catch (error: any) {
+      toast(error.message || 'Failed to delete membership', 'error');
+    }
+  };
+
+  const handleAssignProgramMembership = async (programId: number, membershipId: string) => {
+    try {
+      await api.put(`/programs/${programId}`, { membershipId: membershipId ? parseInt(membershipId) : null });
+      await loadMemberships();
+      await loadPrograms();
+    } catch (error: any) {
+      toast(error.message || 'Failed to assign program', 'error');
     }
   };
 
@@ -934,6 +1003,7 @@ const Settings = () => {
       label: 'Gym Settings',
       tabs: [
         { id: 'locations', label: 'Locations' },
+        { id: 'memberships', label: 'Memberships' },
         { id: 'programs', label: 'Programs' },
       ]
     },
@@ -1406,6 +1476,121 @@ const Settings = () => {
             </div>
           )}
 
+          {/* Memberships Management */}
+          {activeTab === 'memberships' && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h2 className={styles.sectionTitle}>Memberships</h2>
+                  <p className={styles.sectionDesc}>
+                    Define membership tiers and assign programs to each one.
+                  </p>
+                </div>
+                <button onClick={() => { setEditingMembership(null); setShowMembershipModal(true); }} className={styles.primaryBtn}>
+                  <AddIcon size={20} />
+                  Add Membership
+                </button>
+              </div>
+
+              <div className={styles.locationsList}>
+                {memberships.map((membership) => (
+                  <div key={membership.id} className={styles.locationCard}>
+                    <div className={styles.locationInfo} style={{ flex: 1 }}>
+                      <div className={styles.locationHeader}>
+                        <h3 className={styles.locationName}>{membership.name}</h3>
+                        <div className={styles.locationBadges}>
+                          {!membership.isActive && <span className={styles.inactiveBadge}>Inactive</span>}
+                        </div>
+                      </div>
+                      {membership.description && (
+                        <p className={styles.locationAddress}>{membership.description}</p>
+                      )}
+                      <div style={{ marginTop: '0.75rem' }}>
+                        <p className={styles.sectionDesc} style={{ marginBottom: '0.5rem' }}>Programs under this membership:</p>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                          {programs.filter(p => p.membershipId === membership.id).map(p => (
+                            <span key={p.id} className={styles.primaryBadge}>{p.name}</span>
+                          ))}
+                          {programs.filter(p => p.membershipId === membership.id).length === 0 && (
+                            <span className={styles.inactiveBadge}>No programs assigned</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.locationActions}>
+                      <button onClick={() => { setEditingMembership(membership); setShowMembershipModal(true); }} className={styles.editBtn}>
+                        <EditIcon size={18} /> Edit
+                      </button>
+                      <button onClick={() => handleDeleteMembership(membership.id)} className={styles.deleteBtn}>
+                        <DeleteIcon size={18} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {memberships.length === 0 && (
+                  <div className={styles.emptyState}>
+                    <p>No memberships yet. Add your first membership to get started!</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Assign programs to memberships */}
+              {memberships.length > 0 && programs.length > 0 && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subsectionTitle}>Assign Programs to Memberships</h3>
+                  <p className={styles.sectionDesc}>Set which membership each program belongs to.</p>
+                  <div className={styles.locationsList}>
+                    {programs.map(program => (
+                      <div key={program.id} className={styles.locationCard} style={{ padding: '0.75rem 1rem' }}>
+                        <div className={styles.locationInfo}>
+                          <span className={styles.locationName} style={{ fontSize: '0.95rem' }}>{program.name}</span>
+                        </div>
+                        <select
+                          className={styles.input}
+                          style={{ width: 'auto', minWidth: '200px' }}
+                          value={program.membershipId ?? ''}
+                          onChange={e => handleAssignProgramMembership(program.id, e.target.value)}
+                        >
+                          <option value="">No membership</option>
+                          {memberships.map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {showMembershipModal && (
+                <div className={styles.modal}>
+                  <div className={styles.modalContent}>
+                    <div className={styles.modalHeader}>
+                      <h2>{editingMembership ? 'Edit Membership' : 'Add New Membership'}</h2>
+                      <button onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.closeBtn}>×</button>
+                    </div>
+                    <form onSubmit={handleSaveMembership}>
+                      <div className={styles.modalBody}>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Membership Name *</label>
+                          <input type="text" name="membershipName" defaultValue={editingMembership?.name || ''} className={styles.input} placeholder="e.g., Children's Martial Arts Programs" required />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Description</label>
+                          <textarea name="membershipDescription" defaultValue={editingMembership?.description || ''} className={styles.textarea} placeholder="Brief description" rows={3} />
+                        </div>
+                      </div>
+                      <div className={styles.modalActions}>
+                        <button type="button" onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.secondaryBtn}>Cancel</button>
+                        <button type="submit" className={styles.saveBtn}>{editingMembership ? 'Update Membership' : 'Create Membership'}</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Programs Management */}
           {activeTab === 'programs' && (
             <div className={styles.section}>
@@ -1519,6 +1704,15 @@ const Settings = () => {
                             rows={3}
                           />
                         </div>
+                        {memberships.length > 0 && (
+                          <div className={styles.formGroup}>
+                            <label className={styles.label}>Membership</label>
+                            <select name="programMembershipId" defaultValue={editingProgram?.membershipId ?? ''} className={styles.input}>
+                              <option value="">No membership</option>
+                              {memberships.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                            </select>
+                          </div>
+                        )}
                       </div>
 
                       <div className={styles.modalActions}>

@@ -415,12 +415,26 @@ async function initializeDatabase() {
       )
     `);
 
+    // Memberships table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS memberships (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Programs table
     await client.query(`
       CREATE TABLE IF NOT EXISTS programs (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         description TEXT,
+        "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL,
         "isActive" BOOLEAN DEFAULT true,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -873,6 +887,9 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipName" TEXT`);
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
 
     // Drop all programType CHECK constraints and NOT NULL on members — validation handled in application layer
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);
@@ -979,7 +996,7 @@ const camelCaseColumns = [
   'instructorNotes', 'fromRanking', 'toRanking', 'minClassAttendance', 'minTimeInRankDays',
   'requiredSkillCategories', 'passType', 'recipientEmail', 'submitButtonText',
   'successMessage', 'redirectUrl', 'formId', 'sourceUrl', 'ipAddress', 'userAgent',
-  'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB',
+  'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB', 'membershipId', 'membershipName',
   'pageUrl', 'trafficSplit', 'clickThroughRate', 'openRate', 'beltLevel',
   'visitorId', 'firstSeen', 'lastSeen', 'eventCount', 'pageCount',
   'pagePath', 'pageTitle', 'elementText'

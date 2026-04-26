@@ -146,6 +146,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
       memberStartDate,
       pricingPlanId,
       companyName,
+      membershipId,
+      membershipName,
     } = req.body;
 
     const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
@@ -160,15 +162,18 @@ router.put('/:id', async (req: AuthRequest, res) => {
         "membershipAge" = $8, ranking = $9, "leadSource" = $10, "dateOfBirth" = $11,
         "emergencyContact" = $12, "emergencyPhone" = $13, notes = $14, tags = $15,
         "locationId" = $16, "trialStartDate" = $17, "memberStartDate" = $18,
-        "pricingPlanId" = $19, "companyName" = $20, "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $21
+        "pricingPlanId" = $19, "companyName" = $20,
+        "membershipId" = $21, "membershipName" = $22,
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $23
       RETURNING *`,
       [
         firstName, lastName, email, phone, accountStatus, accountType || 'basic',
         programType, membershipAge, ranking, leadSource || null, dateOfBirth || null,
         emergencyContact || null, emergencyPhone || null, notes || null, tags || null,
         locationId || null, trialStartDate || null, memberStartDate || null,
-        pricingPlanId || null, companyName || null, id,
+        pricingPlanId || null, companyName || null,
+        membershipId || null, membershipName || null, id,
       ]
     );
 

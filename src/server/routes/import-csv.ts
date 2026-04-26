@@ -289,6 +289,23 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         }
       }
 
+      // Resolve membership from the Membership field in the CSV
+      const membershipRawField = row['Membership']?.trim() || '';
+      let membershipId: number | null = null;
+      let membershipName: string | null = null;
+      if (membershipRawField) {
+        const membershipMatch = await pool.query(
+          `SELECT id, name FROM memberships WHERE LOWER(name) = LOWER($1) AND "isActive" = true LIMIT 1`,
+          [membershipRawField]
+        );
+        if (membershipMatch.rows.length > 0) {
+          membershipId = membershipMatch.rows[0].id;
+          membershipName = membershipMatch.rows[0].name;
+        } else {
+          membershipName = membershipRawField;
+        }
+      }
+
       const totalAttendance = parseInt(row['Total Attendance Count'] || row['Attendance Count'] || '0') || 0;
       const lastAttendance = parseDate(row['Last Attendance'] || '');
 
@@ -298,8 +315,8 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
           "programType", "membershipAge", ranking, "leadSource", "dateOfBirth",
           notes, "locationId", "trialStartDate", "memberStartDate",
           "pricingPlanId", "totalClassesAttended", "lastCheckInAt",
-          "syncedFromMyStudio"
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+          "syncedFromMyStudio", "membershipId", "membershipName"
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
         ON CONFLICT (email) DO UPDATE SET
           "accountStatus" = EXCLUDED."accountStatus",
           "programType" = EXCLUDED."programType",
@@ -309,6 +326,8 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
           "trialStartDate" = COALESCE(EXCLUDED."trialStartDate", members."trialStartDate"),
           "memberStartDate" = COALESCE(EXCLUDED."memberStartDate", members."memberStartDate"),
           "totalClassesAttended" = GREATEST(COALESCE(members."totalClassesAttended", 0), COALESCE(EXCLUDED."totalClassesAttended", 0)),
+          "membershipId" = COALESCE(EXCLUDED."membershipId", members."membershipId"),
+          "membershipName" = COALESCE(EXCLUDED."membershipName", members."membershipName"),
           "syncedFromMyStudio" = true,
           "updatedAt" = CURRENT_TIMESTAMP`,
         [
@@ -316,7 +335,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
           programType, membershipAge, ranking, leadSource, dob,
           notes, locationId, trialStartDate, memberStartDate,
           pricingPlanId, totalAttendance || null, lastAttendance,
-          true,
+          true, membershipId, membershipName,
         ]
       );
 

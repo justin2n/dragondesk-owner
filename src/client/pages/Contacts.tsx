@@ -61,6 +61,8 @@ const Contacts = () => {
   const [memberInvoices, setMemberInvoices] = useState<Invoice[]>([]);
   const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
   const [allPricingPlans, setAllPricingPlans] = useState<PricingPlan[]>([]);
+  const [memberships, setMemberships] = useState<{ id: number; name: string; programs: { id: number; name: string }[] }[]>([]);
+  const [programs, setPrograms] = useState<{ id: number; name: string; membershipId: number | null }[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importProgram, setImportProgram] = useState('');
@@ -101,6 +103,8 @@ const Contacts = () => {
     memberStartDate: '',
     pricingPlanId: '' as string,
     companyName: '',
+    membershipId: '',
+    membershipName: '',
   });
 
   useEffect(() => {
@@ -109,6 +113,8 @@ const Contacts = () => {
 
   useEffect(() => {
     api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
+    api.get('/memberships').then(setMemberships).catch(() => {});
+    api.get('/programs').then(setPrograms).catch(() => {});
   }, []);
 
   const loadMembers = async () => {
@@ -155,6 +161,8 @@ const Contacts = () => {
         memberStartDate: member.memberStartDate || '',
         pricingPlanId: member.pricingPlanId?.toString() || '',
         companyName: member.companyName || '',
+        membershipId: (member as any).membershipId?.toString() || '',
+        membershipName: (member as any).membershipName || '',
       });
     } else {
       setEditingMember(null);
@@ -199,10 +207,13 @@ const Contacts = () => {
     }
 
     try {
+      const selectedMembership = memberships.find(m => m.id === parseInt(formData.membershipId));
       const dataToSubmit = {
         ...formData,
         locationId: formData.locationId ? parseInt(formData.locationId) : null,
         pricingPlanId: formData.pricingPlanId ? parseInt(formData.pricingPlanId) : null,
+        membershipId: formData.membershipId ? parseInt(formData.membershipId) : null,
+        membershipName: selectedMembership?.name || formData.membershipName || null,
       };
 
       if (editingMember) {
@@ -903,6 +914,22 @@ const Contacts = () => {
                 </div>
               </div>
 
+              {memberships.length > 0 && (
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Membership</label>
+                    <select
+                      value={formData.membershipId}
+                      onChange={(e) => setFormData({ ...formData, membershipId: e.target.value, programType: 'No Program Selected' })}
+                      className={styles.input}
+                    >
+                      <option value="">No membership</option>
+                      {memberships.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Program *</label>
@@ -920,20 +947,26 @@ const Contacts = () => {
                     required
                   >
                     <option value="No Program Selected">No Program Selected</option>
-                    <option value="Children's Martial Arts">Children's Martial Arts</option>
-                    <option value="Adult BJJ">Adult BJJ</option>
-                    <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                    <option value="DG Barbell">DG Barbell</option>
-                    <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                    <option value="The Ashtanga Club">The Ashtanga Club</option>
-                    <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                    <option value="Kids BJJ">Kids BJJ</option>
-                    <option value="Kids Muay Thai">Kids Muay Thai</option>
-                    <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                    <option value="DG Workspace">DG Workspace</option>
-                    <option value="Dragon Launch">Dragon Launch</option>
-                    <option value="Personal Training">Personal Training</option>
-                    <option value="DGMT Private Training">DGMT Private Training</option>
+                    {(formData.membershipId
+                      ? programs.filter(p => p.membershipId === parseInt(formData.membershipId))
+                      : programs
+                    ).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                    {programs.length === 0 && <>
+                      <option value="Children's Martial Arts">Children's Martial Arts</option>
+                      <option value="Adult BJJ">Adult BJJ</option>
+                      <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                      <option value="DG Barbell">DG Barbell</option>
+                      <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                      <option value="The Ashtanga Club">The Ashtanga Club</option>
+                      <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                      <option value="Kids BJJ">Kids BJJ</option>
+                      <option value="Kids Muay Thai">Kids Muay Thai</option>
+                      <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                      <option value="DG Workspace">DG Workspace</option>
+                      <option value="Dragon Launch">Dragon Launch</option>
+                      <option value="Personal Training">Personal Training</option>
+                      <option value="DGMT Private Training">DGMT Private Training</option>
+                    </>}
                   </select>
                 </div>
                 <div className={styles.formGroup}>
@@ -1305,6 +1338,13 @@ const Contacts = () => {
                     <label className={styles.viewLabel}>Subscription Type</label>
                     <div className={styles.viewValue}>{allPricingPlans.find(p => p.id === viewingMember.pricingPlanId)?.name || '—'}</div>
                   </div>
+
+                  {(viewingMember as any).membershipName && (
+                    <div className={styles.viewField}>
+                      <label className={styles.viewLabel}>Membership</label>
+                      <div className={styles.viewValue}>{(viewingMember as any).membershipName}</div>
+                    </div>
+                  )}
 
                   <div className={styles.viewField}>
                     <label className={styles.viewLabel}>Program</label>

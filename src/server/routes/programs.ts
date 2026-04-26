@@ -24,15 +24,15 @@ router.get('/active', authenticateToken, async (req: AuthRequest, res) => {
 
 router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, membershipId } = req.body;
     if (!name) return res.status(400).json({ error: 'Program name is required' });
 
     const existing = await pool.query('SELECT id FROM programs WHERE name = $1', [name]);
     if (existing.rows.length > 0) return res.status(409).json({ error: 'Program with this name already exists' });
 
     const result = await pool.query(
-      `INSERT INTO programs (name, description, "isActive") VALUES ($1, $2, true) RETURNING *`,
-      [name, description || null]
+      `INSERT INTO programs (name, description, "membershipId", "isActive") VALUES ($1, $2, $3, true) RETURNING *`,
+      [name, description || null, membershipId || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (error: any) {
@@ -43,7 +43,7 @@ router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res
 router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive } = req.body;
+    const { name, description, isActive, membershipId } = req.body;
 
     const existing = await pool.query('SELECT * FROM programs WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Program not found' });
@@ -58,9 +58,10 @@ router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, r
         name = COALESCE($1, name),
         description = COALESCE($2, description),
         "isActive" = COALESCE($3, "isActive"),
+        "membershipId" = $4,
         "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $4 RETURNING *`,
-      [name || null, description || null, isActive !== undefined ? isActive : null, id]
+      WHERE id = $5 RETURNING *`,
+      [name || null, description || null, isActive !== undefined ? isActive : null, membershipId || null, id]
     );
     res.json(result.rows[0]);
   } catch (error: any) {
