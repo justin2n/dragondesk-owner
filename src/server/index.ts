@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
 import { pool } from './models/database';
@@ -42,6 +43,7 @@ import assistantRoutes from './routes/assistant';
 import trackingRoutes from './routes/tracking';
 import importCsvRoutes from './routes/import-csv';
 import webhooksRoutes from './routes/webhooks';
+import { authenticateToken, authorizeAdmin } from './middleware/auth';
 
 dotenv.config();
 
@@ -100,7 +102,26 @@ pool.query(`
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false, // Disabled — React SPA uses inline scripts; enable with a nonce in a future pass
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS — restrict to known origins; public endpoints override per-route
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5000'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (server-to-server, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
 
 // Stripe webhooks need raw body for signature verification - must be before express.json()
 app.use('/api/stripe/webhooks', express.raw({ type: 'application/json' }));
@@ -190,7 +211,7 @@ app.options('/api/public/lead', (req, res) => {
 });
 
 // Temporary: assign pricing plans to members that don't have one
-app.post('/api/admin/assign-plans', async (req, res) => {
+app.post('/api/admin/assign-plans', authenticateToken, authorizeAdmin, async (req, res) => {
   try {
     const plans = await pool.query(`SELECT id, "programType", "membershipAge", name FROM pricing_plans WHERE "isActive" = true ORDER BY id ASC`);
     if (plans.rows.length === 0) {
@@ -223,7 +244,7 @@ app.post('/api/admin/assign-plans', async (req, res) => {
 });
 
 // Temporary: check member count
-app.get('/api/admin/member-count', async (req, res) => {
+app.get('/api/admin/member-count', authenticateToken, authorizeAdmin, async (req, res) => {
   try {
     const total = await pool.query('SELECT COUNT(*) as count, COUNT("locationId") as with_location FROM members');
     const byStatus = await pool.query('SELECT "accountStatus", COUNT(*) as count FROM members GROUP BY "accountStatus"');
