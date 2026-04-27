@@ -64,10 +64,11 @@ const Contacts = () => {
   const [memberships, setMemberships] = useState<{ id: number; name: string; programs: { id: number; name: string }[] }[]>([]);
   const [programs, setPrograms] = useState<{ id: number; name: string; membershipId: number | null }[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importProgram, setImportProgram] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<any>(null);
+  const [importResults, setImportResults] = useState<any[]>([]);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
@@ -262,31 +263,37 @@ const Contacts = () => {
   };
 
   const handleImport = async () => {
-    if (!importFile) return;
+    if (!importFiles.length) return;
     setImportLoading(true);
-    setImportResult(null);
-    try {
-      const formData = new FormData();
-      formData.append('file', importFile);
-      if (importProgram) formData.append('program', importProgram);
-      const locationId = isAllLocations ? '' : String(selectedLocation?.id || '');
-      if (locationId) formData.append('locationId', locationId);
+    setImportResults([]);
+    const locationId = isAllLocations ? '' : String(selectedLocation?.id || '');
+    const token = localStorage.getItem('token');
+    const results: any[] = [];
 
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/import-csv', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Import failed');
-      setImportResult(result);
-      loadMembers();
-    } catch (err: any) {
-      setImportResult({ error: err.message });
-    } finally {
-      setImportLoading(false);
+    for (let i = 0; i < importFiles.length; i++) {
+      setImportProgress({ current: i + 1, total: importFiles.length });
+      const file = importFiles[i];
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (importProgram) formData.append('program', importProgram);
+        if (locationId) formData.append('locationId', locationId);
+        const response = await fetch('/api/import-csv', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const result = await response.json();
+        results.push({ fileName: file.name, ...(response.ok ? result : { error: result.error || 'Import failed' }) });
+      } catch (err: any) {
+        results.push({ fileName: file.name, error: err.message });
+      }
     }
+
+    setImportResults(results);
+    setImportProgress(null);
+    setImportLoading(false);
+    loadMembers();
   };
 
   const handleDelete = async (id: number) => {
@@ -1127,24 +1134,85 @@ const Contacts = () => {
       {/* CSV Import Modal */}
       {showImportModal && (
         <div className={styles.modal}>
-          <div className={styles.modalContent} style={{ maxWidth: '520px' }}>
+          <div className={styles.modalContent} style={{ maxWidth: '600px' }}>
             <div className={styles.modalHeader}>
               <h2>Import from MyStudio CSV</h2>
               <button onClick={() => setShowImportModal(false)} className={styles.closeBtn}>&times;</button>
             </div>
-            {!importResult ? (
+
+            {importResults.length === 0 ? (
               <div className={styles.form}>
                 <p className={styles.importHint}>
-                  Supports Lead, Trial, and Member exports from MyStudio. Duplicate emails are skipped automatically.
+                  Select one or more CSV exports from MyStudio (Leads, Trials, or Members). Each file is processed in order — duplicates are upgraded automatically.
                 </p>
+
+                {/* Drop zone / file picker */}
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>CSV File</label>
-                  <input type="file" accept=".csv" className={styles.input} onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
+                  <label className={styles.formLabel}>CSV Files</label>
+                  <label className={styles.importDropZone}>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const picked = Array.from(e.target.files || []);
+                        setImportFiles(prev => {
+                          const existing = new Set(prev.map(f => f.name));
+                          return [...prev, ...picked.filter(f => !existing.has(f.name))];
+                        });
+                        e.target.value = '';
+                      }}
+                    />
+                    <span className={styles.importDropIcon}>📂</span>
+                    <span className={styles.importDropText}>Click to select files</span>
+                    <span className={styles.importDropHint}>Hold Ctrl/Cmd to select multiple at once</span>
+                  </label>
                 </div>
+
+                {/* File queue */}
+                {importFiles.length > 0 && (
+                  <div className={styles.importQueue}>
+                    {importFiles.map((file, i) => (
+                      <div key={i} className={styles.importQueueItem}>
+                        <span className={styles.importQueueIcon}>📄</span>
+                        <span className={styles.importQueueName}>{file.name}</span>
+                        <span className={styles.importQueueSize}>{(file.size / 1024).toFixed(1)} KB</span>
+                        {importLoading && importProgress && importProgress.current === i + 1 ? (
+                          <span className={styles.importQueueStatus}>⏳ Importing…</span>
+                        ) : importLoading && importProgress && importProgress.current > i + 1 ? (
+                          <span className={styles.importQueueStatusDone}>✓</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.importQueueRemove}
+                            onClick={() => setImportFiles(prev => prev.filter((_, idx) => idx !== i))}
+                          >✕</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                {importLoading && importProgress && (
+                  <div className={styles.importProgressWrap}>
+                    <div className={styles.importProgressBar}>
+                      <div
+                        className={styles.importProgressFill}
+                        style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    <span className={styles.importProgressLabel}>
+                      Processing file {importProgress.current} of {importProgress.total}…
+                    </span>
+                  </div>
+                )}
+
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Program Override</label>
+                  <label className={styles.formLabel}>Program Override <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)' }}>(optional — applies to all files)</span></label>
                   <select value={importProgram} onChange={(e) => setImportProgram(e.target.value)} className={styles.input}>
-                    <option value="">Auto-detect from file</option>
+                    <option value="">Auto-detect from each file</option>
                     <option value="Children's Martial Arts">Children's Martial Arts</option>
                     <option value="Adult BJJ">Adult BJJ</option>
                     <option value="Adult TKD & HKD">Adult TKD & HKD</option>
@@ -1161,63 +1229,87 @@ const Contacts = () => {
                     <option value="DGMT Private Training">DGMT Private Training</option>
                   </select>
                 </div>
+
                 <div className={styles.modalFooter}>
                   <button onClick={() => setShowImportModal(false)} className={styles.cancelBtn} type="button">Cancel</button>
-                  <button onClick={handleImport} className={styles.saveBtn} disabled={!importFile || importLoading} type="button">
-                    {importLoading ? 'Importing...' : 'Import'}
+                  <button onClick={handleImport} className={styles.saveBtn} disabled={!importFiles.length || importLoading} type="button">
+                    {importLoading
+                      ? `Importing ${importProgress?.current ?? 1} of ${importProgress?.total ?? importFiles.length}…`
+                      : `Import ${importFiles.length > 0 ? `${importFiles.length} File${importFiles.length > 1 ? 's' : ''}` : ''}`}
                   </button>
                 </div>
               </div>
-            ) : importResult.error ? (
-              <div className={styles.form}>
-                <div className={styles.importError}>{importResult.error}</div>
-                <div className={styles.modalFooter}>
-                  <button onClick={() => setImportResult(null)} className={styles.cancelBtn} type="button">Try Again</button>
-                  <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Close</button>
-                </div>
-              </div>
             ) : (
+              /* Results view */
               <div className={styles.form}>
-                <div className={styles.importResults}>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Type detected</span>
-                    <span className={styles.importResultValue}>{importResult.type}</span>
-                  </div>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Total rows</span>
-                    <span className={styles.importResultValue}>{importResult.total}</span>
-                  </div>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Imported</span>
-                    <span className={`${styles.importResultValue} ${styles.importSuccess}`}>{importResult.imported}</span>
-                  </div>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Skipped</span>
-                    <span className={styles.importResultValue}>{importResult.skipped}</span>
-                  </div>
-                  {importResult.errors > 0 && (
-                    <div className={styles.importResultRow}>
-                      <span className={styles.importResultLabel}>Errors</span>
-                      <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.errors}</span>
+                {/* Aggregate totals */}
+                {importResults.length > 1 && (() => {
+                  const totals = importResults.reduce((acc, r) => ({
+                    total: acc.total + (r.total || 0),
+                    imported: acc.imported + (r.imported || 0),
+                    skipped: acc.skipped + (r.skipped || 0),
+                    upgraded: acc.upgraded + (r.upgraded || 0),
+                    errors: acc.errors + (r.errors || 0),
+                  }), { total: 0, imported: 0, skipped: 0, upgraded: 0, errors: 0 });
+                  return (
+                    <div className={styles.importTotals}>
+                      <div className={styles.importTotalsTitle}>Total across {importResults.length} files</div>
+                      <div className={styles.importTotalsRow}>
+                        <div className={styles.importTotalStat}>
+                          <span className={styles.importTotalNum}>{totals.total}</span>
+                          <span className={styles.importTotalLbl}>Rows</span>
+                        </div>
+                        <div className={styles.importTotalStat}>
+                          <span className={`${styles.importTotalNum} ${styles.importSuccess}`}>{totals.imported}</span>
+                          <span className={styles.importTotalLbl}>Imported</span>
+                        </div>
+                        {totals.upgraded > 0 && (
+                          <div className={styles.importTotalStat}>
+                            <span className={`${styles.importTotalNum} ${styles.importUpgraded}`}>{totals.upgraded}</span>
+                            <span className={styles.importTotalLbl}>Upgraded</span>
+                          </div>
+                        )}
+                        <div className={styles.importTotalStat}>
+                          <span className={styles.importTotalNum}>{totals.skipped}</span>
+                          <span className={styles.importTotalLbl}>Skipped</span>
+                        </div>
+                        {totals.errors > 0 && (
+                          <div className={styles.importTotalStat}>
+                            <span className={`${styles.importTotalNum} ${styles.importFailed}`}>{totals.errors}</span>
+                            <span className={styles.importTotalLbl}>Errors</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
-                  {importResult.duplicateCount > 0 && (
-                    <div className={styles.importResultRow}>
-                      <span className={styles.importResultLabel}>Duplicates</span>
-                      <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.duplicateCount}</span>
+                  );
+                })()}
+
+                {/* Per-file results */}
+                <div className={styles.importFileResults}>
+                  {importResults.map((r, i) => (
+                    <div key={i} className={`${styles.importFileResult} ${r.error ? styles.importFileResultError : ''}`}>
+                      <div className={styles.importFileResultName}>
+                        <span>{r.error ? '✕' : '✓'}</span>
+                        <span>{r.fileName}</span>
+                        {r.type && <span className={styles.importTypeBadge}>{r.type}</span>}
+                      </div>
+                      {r.error ? (
+                        <div className={styles.importError}>{r.error}</div>
+                      ) : (
+                        <div className={styles.importFileResultStats}>
+                          <span>{r.total} rows</span>
+                          <span className={styles.importSuccess}>{r.imported} imported</span>
+                          {r.upgraded > 0 && <span className={styles.importUpgraded}>{r.upgraded} upgraded</span>}
+                          {r.skipped > 0 && <span>{r.skipped} skipped</span>}
+                          {r.errors > 0 && <span className={styles.importFailed}>{r.errors} errors</span>}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-                {importResult.duplicateList?.length > 0 && (
-                  <div className={styles.duplicateList}>
-                    <p className={styles.duplicateListTitle}>Duplicate records (already in system):</p>
-                    {importResult.duplicateList.map((d: string, i: number) => (
-                      <div key={i} className={styles.duplicateRow}>{d}</div>
-                    ))}
-                  </div>
-                )}
+
                 <div className={styles.modalFooter}>
-                  <button onClick={() => { setImportResult(null); setImportFile(null); }} className={styles.cancelBtn} type="button">Import Another</button>
+                  <button onClick={() => { setImportResults([]); setImportFiles([]); }} className={styles.cancelBtn} type="button">Import More</button>
                   <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>
                 </div>
               </div>
