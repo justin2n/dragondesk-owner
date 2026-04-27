@@ -108,16 +108,24 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS — restrict to known origins; public endpoints override per-route
-const allowedOrigins = process.env.ALLOWED_ORIGINS
+// CORS — allow any subdomain of dragondeskapp.com plus explicit overrides
+const extraOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5000'];
+
+const isAllowedOrigin = (origin: string): boolean => {
+  // Any subdomain of dragondeskapp.com over HTTPS
+  if (/^https:\/\/[a-z0-9-]+\.dragondeskapp\.com$/.test(origin)) return true;
+  // Explicit list (localhost in dev, or any additional domains)
+  if (extraOrigins.includes(origin)) return true;
+  return false;
+};
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (server-to-server, curl, Postman)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
