@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
@@ -9,7 +10,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
     const result = await pool.query('SELECT * FROM programs ORDER BY name ASC');
     res.json(result.rows);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -18,7 +19,7 @@ router.get('/active', authenticateToken, async (req: AuthRequest, res) => {
     const result = await pool.query(`SELECT * FROM programs WHERE "isActive" = true ORDER BY name ASC`);
     res.json(result.rows);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -36,7 +37,7 @@ router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res
     );
     res.status(201).json(result.rows[0]);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -65,7 +66,7 @@ router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, r
     );
     res.json(result.rows[0]);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -89,7 +90,7 @@ router.delete('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest
     await pool.query('DELETE FROM programs WHERE id = $1', [id]);
     res.json({ message: 'Program deleted successfully' });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

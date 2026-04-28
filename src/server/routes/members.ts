@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import { Router } from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -118,7 +119,7 @@ router.post('/', async (req: AuthRequest, res) => {
     res.status(201).json(insertResult.rows[0]);
   } catch (error: any) {
     console.error('Create member error:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    serverError(res, error);
   }
 });
 
@@ -180,7 +181,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     res.json(updateResult.rows[0]);
   } catch (error: any) {
     console.error('Update member error:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    serverError(res, error);
   }
 });
 

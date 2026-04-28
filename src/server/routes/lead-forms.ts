@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -132,7 +133,7 @@ router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching form config:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -210,7 +211,7 @@ router.get('/stats', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching form stats:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

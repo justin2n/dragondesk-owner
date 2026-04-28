@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
@@ -89,6 +89,15 @@ router.post('/login', loginLimiter, async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days, matches JWT expiry
+      path: '/',
+    });
+
     res.json({
       token,
       user: {
@@ -133,6 +142,27 @@ router.post('/refresh', async (req, res) => {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
+});
+
+// Restore session from HttpOnly cookie (called on page load)
+router.get('/me', async (req, res) => {
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).json({ error: 'No session' });
+
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    const user = await get('SELECT id, username, email, role, firstName, lastName FROM users WHERE id = ?', [decoded.id]);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    res.json({ token, user });
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired session' });
+  }
+});
+
+// Clear the session cookie
+router.post('/logout', (_req, res) => {
+  res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
+  res.json({ success: true });
 });
 
 router.post('/init-admin', async (req, res) => {

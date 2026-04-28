@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { query, run } from '../models/database';
 
@@ -22,7 +23,7 @@ router.post('/track', async (req, res) => {
     res.status(201).json({ success: true });
   } catch (error: any) {
     console.error('Error tracking event:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -90,7 +91,7 @@ router.get('/:testId', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -116,7 +117,7 @@ router.get('/:testId/events', async (req, res) => {
     res.json(events);
   } catch (error: any) {
     console.error('Error fetching events:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -161,7 +162,7 @@ router.get('/:testId/comparison', async (req, res) => {
     }
   } catch (error: any) {
     console.error('Error fetching comparison:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -138,7 +139,7 @@ router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -369,7 +370,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching program analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -562,7 +563,7 @@ router.get('/value', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching value analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -578,7 +579,7 @@ router.get('/web/overview', authenticateToken, async (req: AuthRequest, res) => 
     res.json({ configured: true, ...data });
   } catch (error: any) {
     console.error('GA overview error:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -591,7 +592,7 @@ router.get('/web/user/:clientId', authenticateToken, async (req: AuthRequest, re
     res.json({ configured: true, sessions });
   } catch (error: any) {
     console.error('GA user sessions error:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
@@ -27,7 +28,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
     const result = await pool.query(sql, params);
     res.json(result.rows);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -42,7 +43,7 @@ router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res
     );
     res.status(201).json({ ...result.rows[0], programs: [] });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -67,7 +68,7 @@ router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, r
     const programs = await pool.query(`SELECT * FROM programs WHERE "membershipId" = $1 ORDER BY name ASC`, [id]);
     res.json({ ...result.rows[0], programs: programs.rows });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -82,7 +83,7 @@ router.delete('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest
     await pool.query('DELETE FROM memberships WHERE id = $1', [id]);
     res.json({ message: 'Membership deleted successfully' });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { api } from '../utils/api';
 import { Campaign, Audience, EmailTemplate } from '../types';
 import EmailEditor from '../components/EmailEditor';
@@ -420,8 +421,10 @@ const DragonDeskEngage = () => {
                         <div
                           className={styles.previewBody}
                           dangerouslySetInnerHTML={{
-                            __html: campaign.content.body?.substring(0, 200) +
-                                   (campaign.content.body?.length > 200 ? '...' : '')
+                            __html: DOMPurify.sanitize(
+                              (campaign.content.body?.substring(0, 200) ?? '') +
+                              (campaign.content.body?.length > 200 ? '...' : '')
+                            )
                           }}
                         />
                       </div>
@@ -676,8 +679,10 @@ const DragonDeskEngage = () => {
                   <div
                     className={styles.previewBody}
                     dangerouslySetInnerHTML={{
-                      __html: template.body?.substring(0, 200) +
-                             (template.body?.length > 200 ? '...' : '')
+                      __html: DOMPurify.sanitize(
+                        (template.body?.substring(0, 200) ?? '') +
+                        (template.body?.length > 200 ? '...' : '')
+                      )
                     }}
                   />
                 </div>

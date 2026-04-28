@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import { Router, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { authenticateToken, AuthRequest } from '../middleware/auth';

@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import { Router, Request, Response } from 'express';
 
 const router = Router();

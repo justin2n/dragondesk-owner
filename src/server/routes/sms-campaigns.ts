@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
@@ -20,7 +21,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
     res.json(campaigns);
   } catch (error: any) {
     console.error('Error fetching SMS campaigns:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -59,7 +60,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res) => {
     res.json({ ...campaign, recipients });
   } catch (error: any) {
     console.error('Error fetching SMS campaign:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -143,7 +144,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
     res.status(201).json(newCampaign);
   } catch (error: any) {
     console.error('Error creating SMS campaign:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -179,7 +180,7 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res) => {
     res.json(updated);
   } catch (error: any) {
     console.error('Error updating SMS campaign:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -202,7 +203,7 @@ router.delete('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest
     res.json({ message: 'SMS campaign deleted successfully' });
   } catch (error: any) {
     console.error('Error deleting SMS campaign:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -256,7 +257,7 @@ router.post('/:id/send', authenticateToken, authorizeAdmin, async (req: AuthRequ
 
   } catch (error: any) {
     console.error('Error sending SMS campaign:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -290,7 +291,7 @@ router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching campaign stats:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

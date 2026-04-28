@@ -1,10 +1,22 @@
+import { serverError } from '../utils/errors';
 import { Router } from 'express';
 import multer from 'multer';
 import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const isCSV =
+      file.mimetype === 'text/csv' ||
+      file.mimetype === 'application/vnd.ms-excel' ||
+      file.originalname.toLowerCase().endsWith('.csv');
+    if (isCSV) return cb(null, true);
+    cb(new Error('Only CSV files are allowed'));
+  },
+});
 
 router.use(authenticateToken);
 

@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { useToast } from './Toast';
 import styles from './EmailEditor.module.css';
 
@@ -279,7 +280,7 @@ const EmailEditor: React.FC<EmailEditorProps> = ({ value, onChange }) => {
         <div className={styles.previewHeader}>Email Preview</div>
         <div
           className={styles.previewContent}
-          dangerouslySetInnerHTML={{ __html: value }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(value) }}
         />
       </div>
     </div>

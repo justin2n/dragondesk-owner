@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import path from 'path';
 import { pool } from './models/database';
@@ -44,6 +45,8 @@ import trackingRoutes from './routes/tracking';
 import importCsvRoutes from './routes/import-csv';
 import webhooksRoutes from './routes/webhooks';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
+import { serverError } from './utils/errors';
+import { createHash } from 'crypto';
 
 dotenv.config();
 
@@ -99,6 +102,22 @@ pool.query(`
   )
 `).catch(() => {});
 
+// Migrate existing plaintext API keys to SHA-256 hashes
+(async () => {
+  try {
+    const rows = await pool.query(
+      `SELECT id, api_key FROM webhook_api_keys WHERE api_key LIKE 'ddk_%'`
+    );
+    for (const row of rows.rows) {
+      const hash = createHash('sha256').update(row.api_key).digest('hex');
+      await pool.query(`UPDATE webhook_api_keys SET api_key = $1 WHERE id = $2`, [hash, row.id]);
+    }
+    if (rows.rows.length > 0) {
+      console.log(`Migrated ${rows.rows.length} webhook API key(s) to hashed storage.`);
+    }
+  } catch (_) {}
+})();
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -130,6 +149,8 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+app.use(cookieParser());
 
 // Stripe webhooks need raw body for signature verification - must be before express.json()
 app.use('/api/stripe/webhooks', express.raw({ type: 'application/json' }));
@@ -206,7 +227,7 @@ app.post('/api/public/lead', async (req, res) => {
     );
     res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -247,7 +268,7 @@ app.post('/api/admin/assign-plans', authenticateToken, authorizeAdmin, async (re
 
     res.json({ message: `Assigned plans to ${updated} members.`, updated });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -258,7 +279,7 @@ app.get('/api/admin/member-count', authenticateToken, authorizeAdmin, async (req
     const byStatus = await pool.query('SELECT "accountStatus", COUNT(*) as count FROM members GROUP BY "accountStatus"');
     res.json({ ...total.rows[0], byStatus: byStatus.rows });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

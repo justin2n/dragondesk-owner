@@ -1,13 +1,16 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 
 const router = express.Router();
 
+const hashApiKey = (key: string): string =>
+  createHash('sha256').update(key).digest('hex');
+
 // ── API key management (authenticated) ──────────────────────────────────────
 
-// List all webhook API keys for the tenant
 router.get('/keys', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const result = await pool.query(
@@ -16,45 +19,42 @@ router.get('/keys', authenticateToken, async (req: AuthRequest, res) => {
     );
     res.json(result.rows);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
-// Generate a new API key
 router.post('/keys', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { label } = req.body;
     const rawKey = `ddk_${randomBytes(24).toString('hex')}`;
     const prefix = rawKey.slice(0, 12);
+    const keyHash = hashApiKey(rawKey);
 
-    // Store the full key (in production you'd hash it — for now store plaintext for simplicity)
     const result = await pool.query(
       `INSERT INTO webhook_api_keys (label, api_key, key_prefix, created_by, is_active)
        VALUES ($1, $2, $3, $4, true) RETURNING id, label, key_prefix, created_at`,
-      [label || 'Zapier', rawKey, prefix, req.user?.id || null]
+      [label || 'Zapier', keyHash, prefix, req.user?.id || null]
     );
 
-    // Return the full key only once
+    // Return raw key exactly once — never stored in plain text
     res.json({ ...result.rows[0], api_key: rawKey, showOnce: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
-// Revoke a key
 router.delete('/keys/:id', authenticateToken, async (req: AuthRequest, res) => {
   try {
     await pool.query(`UPDATE webhook_api_keys SET is_active = false WHERE id = $1`, [req.params.id]);
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
 // ── Public Zapier webhook — no auth middleware, uses API key in header ───────
 
 router.post('/zapier/leads', async (req, res) => {
-  // Accept key from header or query param
   const apiKey = req.headers['x-api-key'] as string || req.query.api_key as string;
 
   if (!apiKey) {
@@ -62,22 +62,20 @@ router.post('/zapier/leads', async (req, res) => {
   }
 
   try {
-    // Validate key
+    const keyHash = hashApiKey(apiKey);
     const keyResult = await pool.query(
       `SELECT id FROM webhook_api_keys WHERE api_key = $1 AND is_active = true`,
-      [apiKey]
+      [keyHash]
     );
     if (keyResult.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid or revoked API key.' });
     }
 
-    // Update last used
     await pool.query(
       `UPDATE webhook_api_keys SET last_used_at = NOW() WHERE id = $1`,
       [keyResult.rows[0].id]
     );
 
-    // Map Zapier payload — be flexible with field names
     const body = req.body;
     const firstName = (body.firstName || body.first_name || body.FirstName || '').trim();
     const lastName  = (body.lastName  || body.last_name  || body.LastName  || '').trim();
@@ -92,7 +90,6 @@ router.post('/zapier/leads', async (req, res) => {
       return res.status(400).json({ error: 'firstName and email are required.' });
     }
 
-    // Get primary location
     const locResult = await pool.query(
       `SELECT id FROM locations WHERE "isPrimary" = true LIMIT 1`
     );
@@ -111,19 +108,13 @@ router.post('/zapier/leads', async (req, res) => {
         notes = COALESCE(EXCLUDED.notes, members.notes),
         "updatedAt" = NOW()
       RETURNING id, "firstName", "lastName", email, "accountStatus"`,
-      [
-        firstName, lastName, email, phone,
-        program || 'No Program Selected',
-        source,
-        company, notes, locationId
-      ]
+      [firstName, lastName, email, phone, program || 'No Program Selected', source, company, notes, locationId]
     );
 
-    const member = result.rows[0];
-    res.json({ success: true, member });
+    res.json({ success: true, member: result.rows[0] });
   } catch (err: any) {
     console.error('Zapier webhook error:', err);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 

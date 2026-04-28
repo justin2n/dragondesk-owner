@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { query, get } from '../models/database';
