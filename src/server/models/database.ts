@@ -7,9 +7,18 @@ if (!connectionString) {
   console.error('DATABASE_URL or DATABASE_PRIVATE_URL environment variable is not set');
 }
 
+// In production, verify the server certificate unless explicitly opted out.
+// Railway internal connections (DATABASE_PRIVATE_URL) use a self-signed cert,
+// so set DATABASE_SSL_REJECT_UNAUTHORIZED=false in that environment only.
+const sslConfig = (() => {
+  if (process.env.NODE_ENV !== 'production') return false;
+  const reject = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
+  return { rejectUnauthorized: reject };
+})();
+
 export const pool = new Pool({
   connectionString,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: sslConfig,
 });
 
 pool.on('connect', () => {

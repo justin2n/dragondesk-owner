@@ -1,4 +1,5 @@
 import { serverError } from '../utils/errors';
+import { auditLog } from '../utils/audit';
 import { Router } from 'express';
 import multer from 'multer';
 import { pool } from '../models/database';
@@ -357,6 +358,16 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       results.errorDetails.push(err.message);
     }
   }
+
+  await auditLog('member.import_csv', (req as AuthRequest).user?.id ?? null, req, {
+    fileName: req.file.originalname,
+    type,
+    total: rows.length,
+    imported: results.imported,
+    upgraded: results.upgraded,
+    skipped: results.skipped,
+    errors: results.errors,
+  });
 
   res.json({
     type,

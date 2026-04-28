@@ -1,4 +1,5 @@
 import { serverError } from '../utils/errors';
+import { auditLog } from '../utils/audit';
 import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -36,6 +37,12 @@ router.post('/keys', authenticateToken, async (req: AuthRequest, res) => {
       [label || 'Zapier', keyHash, prefix, req.user?.id || null]
     );
 
+    await auditLog('api_key.create', req.user?.id ?? null, req, {
+      keyId: result.rows[0].id,
+      label: label || 'Zapier',
+      prefix,
+    });
+
     // Return raw key exactly once — never stored in plain text
     res.json({ ...result.rows[0], api_key: rawKey, showOnce: true });
   } catch (err: any) {
@@ -46,6 +53,7 @@ router.post('/keys', authenticateToken, async (req: AuthRequest, res) => {
 router.delete('/keys/:id', authenticateToken, async (req: AuthRequest, res) => {
   try {
     await pool.query(`UPDATE webhook_api_keys SET is_active = false WHERE id = $1`, [req.params.id]);
+    await auditLog('api_key.revoke', req.user?.id ?? null, req, { keyId: req.params.id });
     res.json({ success: true });
   } catch (err: any) {
     serverError(res, err);

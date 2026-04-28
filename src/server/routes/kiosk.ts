@@ -141,7 +141,7 @@ router.get('/member/lookup', async (req, res) => {
     const searchTerm = `%${search}%`;
 
     const result = await pool.query(`
-      SELECT id, "firstName", "lastName", email, phone, "programType", ranking
+      SELECT id, "firstName", "lastName", "programType", ranking
       FROM members
       WHERE ("firstName" || ' ' || "lastName" ILIKE $1
              OR email ILIKE $1

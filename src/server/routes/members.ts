@@ -1,4 +1,5 @@
 import { serverError } from '../utils/errors';
+import { auditLog } from '../utils/audit';
 import { Router } from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -189,16 +190,28 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
+    const existing = await pool.query(
+      'SELECT id, "firstName", "lastName", email, "accountStatus" FROM members WHERE id = $1',
+      [id]
+    );
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found' });
     }
 
+    const member = existing.rows[0];
     await pool.query('DELETE FROM members WHERE id = $1', [id]);
+
+    await auditLog('member.delete', req.user?.id ?? null, req, {
+      memberId: id,
+      name: `${member.firstName} ${member.lastName}`,
+      email: member.email,
+      accountStatus: member.accountStatus,
+    });
+
     res.json({ message: 'Member deleted successfully' });
   } catch (error) {
     console.error('Delete member error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    serverError(res, error);
   }
 });
 

@@ -1,4 +1,5 @@
 import { serverError } from '../utils/errors';
+import { isValidEmail, normalizeEmail } from '../utils/validate';
 import express from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -26,14 +27,13 @@ router.post('/submit', async (req, res) => {
       return res.status(400).json({ error: 'First name, last name, and email are required' });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
+    const normalizedEmail = normalizeEmail(email);
 
     // Check if member already exists
-    const existing = await get('SELECT id, accountStatus FROM members WHERE email = ?', [email]);
+    const existing = await get('SELECT id, accountStatus FROM members WHERE email = ?', [normalizedEmail]);
 
     if (existing) {
       // Update existing member if they're still a lead
@@ -86,7 +86,7 @@ router.post('/submit', async (req, res) => {
       [
         firstName,
         lastName,
-        email,
+        normalizedEmail,
         phone || null,
         programType || 'Adult BJJ',
         membershipAge || 'Adult',

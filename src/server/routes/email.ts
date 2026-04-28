@@ -266,8 +266,8 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
         sent++;
       } catch (error: any) {
         failed++;
-        errors.push(`Failed to send to ${member.email}: ${error.message}`);
-        console.error(`Failed to send to ${member.email}:`, error);
+        errors.push(`Failed to send to member #${member.id}: ${error.message}`);
+        console.error(`Failed to send email to member #${member.id}:`, error.message);
       }
     }
 

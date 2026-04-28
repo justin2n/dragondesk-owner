@@ -47,6 +47,8 @@ import webhooksRoutes from './routes/webhooks';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
 import { serverError } from './utils/errors';
 import { createHash } from 'crypto';
+import rateLimit from 'express-rate-limit';
+import { isValidEmail, normalizeEmail } from './utils/validate';
 
 dotenv.config();
 
@@ -101,6 +103,19 @@ pool.query(`
     "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )
 `).catch(() => {});
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    action TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    ip_address TEXT,
+    details JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`).catch(() => {});
+pool.query(`CREATE INDEX IF NOT EXISTS audit_logs_action_idx ON audit_logs(action)`).catch(() => {});
+pool.query(`CREATE INDEX IF NOT EXISTS audit_logs_user_idx ON audit_logs(user_id)`).catch(() => {});
 
 // Migrate existing plaintext API keys to SHA-256 hashes
 (async () => {
@@ -204,12 +219,39 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
 });
 
+// Rate limiters for public / unauthenticated endpoints
+const publicLeadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many submissions. Please try again later.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+
+const kioskLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,             // 1 check-in per second on average — plenty for a kiosk
+  message: { error: 'Too many requests from this kiosk. Slow down.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+
+const trackingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'Rate limit exceeded.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+
+// Apply rate limiters before the route registrations
+app.use('/api/kiosk', kioskLimiter);
+app.use('/api/tracking', trackingLimiter);
+
 // Public lead capture — no auth required, for marketing site and lead forms
-app.post('/api/public/lead', async (req, res) => {
+app.post('/api/public/lead', publicLeadLimiter, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   try {
     const { firstName, lastName, email, phone, studio, message, program, gaClientId } = req.body;
     if (!firstName || !email) return res.status(400).json({ error: 'Name and email required' });
+    if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
 
     await pool.query(
       `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, "companyName", notes, "gaClientId")
@@ -218,7 +260,7 @@ app.post('/api/public/lead', async (req, res) => {
       [
         firstName.trim(),
         (lastName || '').trim(),
-        email.trim().toLowerCase(),
+        normalizeEmail(email),
         phone || null,
         studio || null,
         message || null,
