@@ -569,18 +569,16 @@ const Contacts = () => {
           <option value="cancelled">Cancelled</option>
         </select>
 
-        {programs.length > 0 && (
-          <select
-            value={filters.programType}
-            onChange={(e) => setFilters({ ...filters, programType: e.target.value })}
-            className={styles.select}
-          >
-            <option value="">All Programs</option>
-            {programs.map(p => (
-              <option key={p.id} value={p.name}>{p.name}</option>
-            ))}
-          </select>
-        )}
+        <select
+          value={filters.programType}
+          onChange={(e) => setFilters({ ...filters, programType: e.target.value })}
+          className={styles.select}
+        >
+          <option value="">All Programs</option>
+          {programs.map(p => (
+            <option key={p.id} value={p.name}>{p.name}</option>
+          ))}
+        </select>
 
         <select
           value={filters.membershipAge}
