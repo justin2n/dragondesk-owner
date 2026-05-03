@@ -569,27 +569,18 @@ const Contacts = () => {
           <option value="cancelled">Cancelled</option>
         </select>
 
-        <select
-          value={filters.programType}
-          onChange={(e) => setFilters({ ...filters, programType: e.target.value })}
-          className={styles.select}
-        >
-          <option value="">All Programs</option>
-          <option value="Children's Martial Arts">Children's Martial Arts</option>
-          <option value="Adult BJJ">Adult BJJ</option>
-          <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-          <option value="DG Barbell">DG Barbell</option>
-          <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-          <option value="The Ashtanga Club">The Ashtanga Club</option>
-          <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-          <option value="Kids BJJ">Kids BJJ</option>
-          <option value="Kids Muay Thai">Kids Muay Thai</option>
-          <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-          <option value="DG Workspace">DG Workspace</option>
-          <option value="Dragon Launch">Dragon Launch</option>
-          <option value="Personal Training">Personal Training</option>
-          <option value="DGMT Private Training">DGMT Private Training</option>
-        </select>
+        {programs.length > 0 && (
+          <select
+            value={filters.programType}
+            onChange={(e) => setFilters({ ...filters, programType: e.target.value })}
+            className={styles.select}
+          >
+            <option value="">All Programs</option>
+            {programs.map(p => (
+              <option key={p.id} value={p.name}>{p.name}</option>
+            ))}
+          </select>
+        )}
 
         <select
           value={filters.membershipAge}
