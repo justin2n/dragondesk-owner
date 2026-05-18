@@ -199,13 +199,23 @@ const POS: React.FC = () => {
 
   // ── Stripe Terminal ──────────────────────────────────────────────────────
 
+  const loadTerminalSDK = (): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const w = window as any;
+      if (w.StripeTerminal) { resolve(w.StripeTerminal); return; }
+      const script = document.createElement('script');
+      script.src = 'https://js.stripe.com/terminal/v1/';
+      script.onload = () => resolve(w.StripeTerminal);
+      script.onerror = () => reject(new Error('Failed to load Stripe Terminal SDK'));
+      document.head.appendChild(script);
+    });
+
   const initTerminal = async () => {
     if (terminalRef.current) return;
     setTerminalStatus('connecting');
     setTerminalError(null);
     try {
-      const { loadStripeTerminal } = await import('@stripe/terminal-js');
-      const StripeTerminal = await loadStripeTerminal();
+      const StripeTerminal = await loadTerminalSDK();
       terminalRef.current = StripeTerminal.create({
         onFetchConnectionToken: async () => {
           const r = await fetch('/api/pos/connection-token', {
