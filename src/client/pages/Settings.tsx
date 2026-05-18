@@ -269,10 +269,8 @@ const POSSettingsPanel: React.FC = () => {
 
       {/* Product Modal */}
       {showProductModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)',
-            borderRadius: '14px', padding: '1.5rem', width: '420px', maxWidth: '95vw' }}>
+        <div className={styles.modal}>
+          <div className={styles.modalContent} style={{ maxWidth: '440px', padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{editingProduct ? 'Edit Product' : 'Add Product'}</h3>
               <button onClick={() => setShowProductModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--color-text-secondary)' }}>✕</button>
