@@ -4,13 +4,10 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { get, run } from '../models/database';
 import { User } from '../types';
+import { authenticateToken, authorizeAdmin } from '../middleware/auth';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-key';
-
-if (JWT_SECRET === 'default-secret-key') {
-  console.warn('WARNING: JWT_SECRET is not set. Set a strong random value in your .env file.');
-}
+const JWT_SECRET = process.env.JWT_SECRET!;
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -20,7 +17,7 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-router.post('/register', async (req, res) => {
+router.post('/register', authenticateToken, authorizeAdmin, async (req, res) => {
   try {
     const { username, email, password, role, firstName, lastName } = req.body;
 
