@@ -44,6 +44,7 @@ import assistantRoutes from './routes/assistant';
 import trackingRoutes from './routes/tracking';
 import importCsvRoutes from './routes/import-csv';
 import webhooksRoutes from './routes/webhooks';
+import posRoutes from './routes/pos';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
 import { serverError } from './utils/errors';
 import { createHash } from 'crypto';
@@ -116,6 +117,52 @@ pool.query(`
 `).catch(() => {});
 pool.query(`CREATE INDEX IF NOT EXISTS audit_logs_action_idx ON audit_logs(action)`).catch(() => {});
 pool.query(`CREATE INDEX IF NOT EXISTS audit_logs_user_idx ON audit_logs(user_id)`).catch(() => {});
+
+// POS tables
+pool.query(`
+  CREATE TABLE IF NOT EXISTS pos_products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    price INTEGER NOT NULL,
+    sku TEXT,
+    category TEXT DEFAULT 'General',
+    "imageUrl" TEXT,
+    "isActive" BOOLEAN DEFAULT true,
+    inventory INTEGER,
+    "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    "createdAt" TIMESTAMP DEFAULT NOW(),
+    "updatedAt" TIMESTAMP DEFAULT NOW()
+  )
+`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS pos_transactions (
+    id SERIAL PRIMARY KEY,
+    "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    subtotal INTEGER NOT NULL,
+    tax INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL,
+    "paymentMethod" TEXT NOT NULL,
+    "stripePaymentIntentId" TEXT,
+    status TEXT NOT NULL DEFAULT 'completed',
+    "cashReceived" INTEGER,
+    "changeGiven" INTEGER,
+    notes TEXT,
+    "createdAt" TIMESTAMP DEFAULT NOW()
+  )
+`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS pos_transaction_items (
+    id SERIAL PRIMARY KEY,
+    "transactionId" INTEGER NOT NULL REFERENCES pos_transactions(id) ON DELETE CASCADE,
+    "productId" INTEGER REFERENCES pos_products(id) ON DELETE SET NULL,
+    "productName" TEXT NOT NULL,
+    "productPrice" INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    subtotal INTEGER NOT NULL
+  )
+`).catch(() => {});
 
 // Migrate existing plaintext API keys to SHA-256 hashes
 (async () => {
@@ -215,6 +262,7 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/wallet-passes', walletPassesRoutes);
 app.use('/api/import-csv', importCsvRoutes);
 app.use('/api/webhooks', webhooksRoutes);
+app.use('/api/pos', posRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });

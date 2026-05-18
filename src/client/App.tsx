@@ -19,6 +19,7 @@ import WorkforceManagement from './pages/WorkforceManagement';
 import LeadForm from './pages/LeadForm';
 import Billing from './pages/Billing';
 import Kiosk from './pages/Kiosk';
+import POS from './pages/POS';
 import AttendanceTracking from './pages/AttendanceTracking';
 import Layout from './components/Layout';
 
@@ -85,6 +86,10 @@ const AppRoutes = () => {
       {/* Public kiosk check-in - no authentication required */}
       <Route path="/kiosk" element={<Kiosk />} />
       <Route path="/kiosk/:locationId" element={<Kiosk />} />
+
+      {/* Public POS terminal - no authentication required */}
+      <Route path="/pos" element={<POS />} />
+      <Route path="/pos/:locationId" element={<POS />} />
 
       <Route
         path="/"

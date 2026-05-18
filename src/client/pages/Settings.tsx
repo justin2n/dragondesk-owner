@@ -69,6 +69,257 @@ interface Membership {
   updatedAt: string;
 }
 
+// ── POS Settings Panel ────────────────────────────────────────────────────────
+
+interface PosProduct {
+  id: number; name: string; description?: string; price: number;
+  sku?: string; category: string; isActive: boolean; inventory: number | null;
+}
+interface PosTransaction {
+  id: number; createdAt: string; total: number; paymentMethod: string;
+  status: string; memberName?: string;
+  items: { productName: string; quantity: number; subtotal: number }[];
+}
+
+const POSSettingsPanel: React.FC = () => {
+  const { toast } = useToast();
+  const [posTab, setPosTab] = useState<'products' | 'transactions'>('products');
+  const [products, setProducts] = useState<PosProduct[]>([]);
+  const [transactions, setTransactions] = useState<PosTransaction[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingTx, setLoadingTx] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<PosProduct | null>(null);
+  const [productForm, setProductForm] = useState({
+    name: '', description: '', price: '', sku: '', category: 'General',
+    inventory: '', isActive: true,
+  });
+
+  useEffect(() => { loadProducts(); }, []);
+
+  const loadProducts = async () => {
+    setLoadingProducts(true);
+    try {
+      const data = await api.get('/pos/products?activeOnly=false');
+      setProducts(data);
+    } finally { setLoadingProducts(false); }
+  };
+
+  const loadTransactions = async () => {
+    setLoadingTx(true);
+    try {
+      const data = await api.get('/pos/transactions?limit=100');
+      setTransactions(data);
+    } finally { setLoadingTx(false); }
+  };
+
+  const openProductModal = (product?: PosProduct) => {
+    if (product) {
+      setEditingProduct(product);
+      setProductForm({
+        name: product.name, description: product.description || '',
+        price: (product.price / 100).toFixed(2), sku: product.sku || '',
+        category: product.category, isActive: product.isActive,
+        inventory: product.inventory != null ? String(product.inventory) : '',
+      });
+    } else {
+      setEditingProduct(null);
+      setProductForm({ name: '', description: '', price: '', sku: '', category: 'General', inventory: '', isActive: true });
+    }
+    setShowProductModal(true);
+  };
+
+  const saveProduct = async () => {
+    if (!productForm.name || !productForm.price) { toast('Name and price are required.', 'error'); return; }
+    const body = {
+      name: productForm.name, description: productForm.description || null,
+      price: Math.round(parseFloat(productForm.price) * 100),
+      sku: productForm.sku || null, category: productForm.category || 'General',
+      isActive: productForm.isActive,
+      inventory: productForm.inventory !== '' ? parseInt(productForm.inventory) : null,
+    };
+    try {
+      if (editingProduct) await api.put(`/pos/products/${editingProduct.id}`, body);
+      else await api.post('/pos/products', body);
+      toast(editingProduct ? 'Product updated.' : 'Product created.', 'success');
+      setShowProductModal(false);
+      loadProducts();
+    } catch (err: any) { toast(err.message || 'Failed to save product.', 'error'); }
+  };
+
+  const deleteProduct = async (id: number) => {
+    try {
+      await api.delete(`/pos/products/${id}`);
+      toast('Product deactivated.', 'success');
+      loadProducts();
+    } catch (err: any) { toast(err.message || 'Failed to delete product.', 'error'); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+        <div>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Point of Sale</h2>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginTop: '0.25rem' }}>
+            Manage products and view sales — open the register at <strong>/pos</strong>
+          </p>
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.75rem' }}>
+        {(['products', 'transactions'] as const).map(t => (
+          <button key={t} onClick={() => { setPosTab(t); if (t === 'transactions') loadTransactions(); }}
+            style={{ padding: '0.4rem 1rem', borderRadius: '6px', border: '1px solid var(--color-border)',
+              background: posTab === t ? 'var(--color-accent)' : 'transparent',
+              color: posTab === t ? '#fff' : 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.875rem' }}>
+            {t === 'products' ? 'Products' : 'Transactions'}
+          </button>
+        ))}
+      </div>
+
+      {/* Products Tab */}
+      {posTab === 'products' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+            <button onClick={() => openProductModal()} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
+              padding: '0.5rem 1rem', borderRadius: '8px', border: 'none',
+              background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>
+              <AddIcon size={15} /> Add Product
+            </button>
+          </div>
+          {loadingProducts ? <p>Loading…</p> : products.length === 0 ? (
+            <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: '2rem' }}>
+              No products yet. Add your first product to get started.
+            </p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+              {products.map(p => (
+                <div key={p.id} style={{ padding: '1rem', background: 'var(--color-bg-secondary)', borderRadius: '10px',
+                  border: '1px solid var(--color-border)', opacity: p.isActive ? 1 : 0.5 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{p.name}</div>
+                      <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>{p.category}{p.sku ? ` · ${p.sku}` : ''}</div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: 'var(--color-accent)' }}>${(p.price / 100).toFixed(2)}</div>
+                  </div>
+                  {p.inventory != null && (
+                    <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: p.inventory <= 3 ? '#f59e0b' : 'var(--color-text-secondary)' }}>
+                      Stock: {p.inventory}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <button onClick={() => openProductModal(p)} style={{ flex: 1, padding: '0.4rem', borderRadius: '6px',
+                      border: '1px solid var(--color-border)', background: 'transparent',
+                      color: 'var(--color-text-primary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => deleteProduct(p.id)} style={{ padding: '0.4rem 0.75rem', borderRadius: '6px',
+                      border: '1px solid var(--color-border)', background: 'transparent',
+                      color: '#ef4444', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      Deactivate
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Transactions Tab */}
+      {posTab === 'transactions' && (
+        <>
+          {loadingTx ? <p>Loading…</p> : transactions.length === 0 ? (
+            <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: '2rem' }}>No transactions yet.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  {['Date', 'Member', 'Items', 'Total', 'Method', 'Status'].map(h => (
+                    <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: 'left', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map(tx => (
+                  <tr key={tx.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>{new Date(tx.createdAt).toLocaleString()}</td>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>{tx.memberName || '—'}</td>
+                    <td style={{ padding: '0.6rem 0.75rem', color: 'var(--color-text-secondary)' }}>
+                      {tx.items?.map((i: any) => `${i.quantity}× ${i.productName}`).join(', ')}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>${(tx.total / 100).toFixed(2)}</td>
+                    <td style={{ padding: '0.6rem 0.75rem', textTransform: 'capitalize' }}>{tx.paymentMethod}</td>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>
+                      <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem',
+                        background: tx.status === 'completed' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                        color: tx.status === 'completed' ? '#22c55e' : '#ef4444' }}>
+                        {tx.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {/* Product Modal */}
+      {showProductModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+          <div style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)',
+            borderRadius: '14px', padding: '1.5rem', width: '420px', maxWidth: '95vw' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{editingProduct ? 'Edit Product' : 'Add Product'}</h3>
+              <button onClick={() => setShowProductModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--color-text-secondary)' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { label: 'Name *', key: 'name', type: 'text', placeholder: 'Dragon Gym T-Shirt' },
+                { label: 'Price * ($)', key: 'price', type: 'number', placeholder: '29.99' },
+                { label: 'Category', key: 'category', type: 'text', placeholder: 'Apparel' },
+                { label: 'SKU', key: 'sku', type: 'text', placeholder: 'DG-SHIRT-M' },
+                { label: 'Inventory (leave blank for unlimited)', key: 'inventory', type: 'number', placeholder: '50' },
+                { label: 'Description', key: 'description', type: 'text', placeholder: 'Optional description' },
+              ].map(({ label, key, type, placeholder }) => (
+                <div key={key}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '0.25rem' }}>{label}</label>
+                  <input type={type} placeholder={placeholder}
+                    value={(productForm as any)[key]}
+                    onChange={e => setProductForm(f => ({ ...f, [key]: e.target.value }))}
+                    style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: '8px',
+                      border: '1px solid var(--color-border)', background: 'var(--color-bg-primary)',
+                      color: 'var(--color-text-primary)', fontSize: '0.875rem', boxSizing: 'border-box' as const }} />
+                </div>
+              ))}
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={productForm.isActive}
+                  onChange={e => setProductForm(f => ({ ...f, isActive: e.target.checked }))} />
+                Active (visible in POS)
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button onClick={() => setShowProductModal(false)} style={{ flex: 1, padding: '0.6rem', borderRadius: '8px',
+                border: '1px solid var(--color-border)', background: 'transparent',
+                color: 'var(--color-text-secondary)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={saveProduct} style={{ flex: 2, padding: '0.6rem', borderRadius: '8px', border: 'none',
+                background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+                {editingProduct ? 'Save Changes' : 'Add Product'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const Settings = () => {
   const { user } = useAuth();
   const { branding, updateBranding } = useBranding();
@@ -1023,6 +1274,7 @@ const Settings = () => {
       tabs: [
         { id: 'stripe', label: 'Stripe Payments' },
         { id: 'pricing', label: 'Pricing Plans' },
+        { id: 'pos', label: 'Point of Sale' },
       ]
     },
     {
@@ -3456,6 +3708,11 @@ const Settings = () => {
                 </form>
               </div>
             </div>
+          )}
+
+          {/* POS Section */}
+          {activeTab === 'pos' && (
+            <POSSettingsPanel />
           )}
 
           {/* Lead Forms Section */}
