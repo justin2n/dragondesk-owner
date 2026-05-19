@@ -77,7 +77,9 @@ const Contacts = () => {
     accountStatus: '',
     programType: '',
     membershipAge: '',
+    search: '',
   });
+  const [searchInput, setSearchInput] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkField, setBulkField] = useState('');
   const [bulkValue, setBulkValue] = useState('');
@@ -113,6 +115,11 @@ const Contacts = () => {
   }, [filters, selectedLocation, isAllLocations]);
 
   useEffect(() => {
+    const t = setTimeout(() => setFilters({ ...filters, search: searchInput }), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
     api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
     api.get('/memberships').then(setMemberships).catch(() => {});
     api.get('/programs').then(setPrograms).catch(() => {});
@@ -127,6 +134,7 @@ const Contacts = () => {
       if (filters.accountStatus) params.append('accountStatus', filters.accountStatus);
       if (filters.programType) params.append('programType', filters.programType);
       if (filters.membershipAge) params.append('membershipAge', filters.membershipAge);
+      if (filters.search) params.append('search', filters.search);
 
       const queryString = params.toString();
       const data = await api.get(`/members${queryString ? `?${queryString}` : ''}`);
@@ -557,6 +565,14 @@ const Contacts = () => {
       </div>
 
       <div className={styles.filters}>
+        <input
+          type="text"
+          placeholder="Search by name, email, or phone…"
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          className={styles.select}
+        />
+
         <select
           value={filters.accountStatus}
           onChange={(e) => setFilters({ ...filters, accountStatus: e.target.value })}

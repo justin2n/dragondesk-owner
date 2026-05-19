@@ -10,7 +10,7 @@ router.use(authenticateToken);
 
 router.get('/', async (req: AuthRequest, res) => {
   try {
-    const { accountStatus, programType, membershipAge, accountType, locationId } = req.query;
+    const { accountStatus, programType, membershipAge, accountType, locationId, search } = req.query;
 
     const params: any[] = [];
     let idx = 1;
@@ -40,6 +40,12 @@ router.get('/', async (req: AuthRequest, res) => {
     if (accountType) {
       sql += ` AND "accountType" = $${idx++}`;
       params.push(accountType);
+    }
+
+    if (search) {
+      const term = `%${search}%`;
+      sql += ` AND ("firstName" ILIKE $${idx} OR "lastName" ILIKE $${idx} OR email ILIKE $${idx} OR phone ILIKE $${idx} OR ("firstName" || ' ' || "lastName") ILIKE $${idx})`;
+      params.push(term); idx++;
     }
 
     sql += ' ORDER BY "createdAt" DESC';
