@@ -541,6 +541,13 @@ const Contacts = () => {
           <p className={styles.subtitle}>Manage leads, trialers, and members</p>
         </div>
         <div className={styles.headerActions}>
+          <input
+            type="text"
+            placeholder="Search by name, email, or phone…"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            className={styles.searchInput}
+          />
           <div className={styles.viewToggle}>
             <button
               onClick={() => setViewMode('card')}
@@ -567,14 +574,6 @@ const Contacts = () => {
       </div>
 
       <div className={styles.filters}>
-        <input
-          type="text"
-          placeholder="Search by name, email, or phone…"
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          className={styles.select}
-        />
-
         <select
           value={filters.accountStatus}
           onChange={(e) => setFilters({ ...filters, accountStatus: e.target.value })}

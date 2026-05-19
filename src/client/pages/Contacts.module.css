@@ -17,6 +17,15 @@
   align-items: center;
 }
 
+.searchInput {
+  padding: 0.75rem 1rem;
+  background-color: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  width: 260px;
+}
+
 .viewToggle {
   display: flex;
   gap: 0.25rem;
