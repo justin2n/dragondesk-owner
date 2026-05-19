@@ -10,7 +10,7 @@ router.use(authenticateToken);
 
 router.get('/', async (req: AuthRequest, res) => {
   try {
-    const { accountStatus, programType, membershipAge, accountType, locationId, search } = req.query;
+    const { accountStatus, programType, membershipAge, accountType, locationId, search, sort } = req.query;
 
     const params: any[] = [];
     let idx = 1;
@@ -48,7 +48,15 @@ router.get('/', async (req: AuthRequest, res) => {
       params.push(term); idx++;
     }
 
-    sql += ' ORDER BY "createdAt" DESC';
+    const orderMap: Record<string, string> = {
+      newest: '"createdAt" DESC',
+      oldest: '"createdAt" ASC',
+      name_az: '"lastName" ASC, "firstName" ASC',
+      name_za: '"lastName" DESC, "firstName" DESC',
+      status: '"accountStatus" ASC, "lastName" ASC',
+    };
+    const order = orderMap[sort as string] ?? '"createdAt" DESC';
+    sql += ` ORDER BY ${order}`;
 
     const result = await pool.query(sql, params);
     res.json(result.rows);

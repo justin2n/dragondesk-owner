@@ -78,6 +78,7 @@ const Contacts = () => {
     programType: '',
     membershipAge: '',
     search: '',
+    sort: 'newest',
   });
   const [searchInput, setSearchInput] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -135,6 +136,7 @@ const Contacts = () => {
       if (filters.programType) params.append('programType', filters.programType);
       if (filters.membershipAge) params.append('membershipAge', filters.membershipAge);
       if (filters.search) params.append('search', filters.search);
+      if (filters.sort) params.append('sort', filters.sort);
 
       const queryString = params.toString();
       const data = await api.get(`/members${queryString ? `?${queryString}` : ''}`);
@@ -604,6 +606,18 @@ const Contacts = () => {
           <option value="">All Ages</option>
           <option value="Adult">Adult</option>
           <option value="Kids">Kids</option>
+        </select>
+
+        <select
+          value={filters.sort}
+          onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
+          className={styles.select}
+        >
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="name_az">Name A–Z</option>
+          <option value="name_za">Name Z–A</option>
+          <option value="status">Status</option>
         </select>
       </div>
 
