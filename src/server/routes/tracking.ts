@@ -57,8 +57,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
     if(!queue.length)return;
     var payload=JSON.stringify({token:TOKEN,vid:vid,sid:sid,events:queue.splice(0)});
     try{
-      if(navigator.sendBeacon){navigator.sendBeacon(EP+'/collect',new Blob([payload],{type:'application/json'}));}
-      else{fetch(EP+'/collect',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true});}
+      fetch(EP+'/collect',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true,credentials:'omit'});
     }catch(e){}
   }
 
@@ -108,7 +107,8 @@ function buildTrackingScript(token: string, endpoint: string): string {
   fetch(EP+'/personalize',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({token:TOKEN,vid:vid,url:location.href,path:location.pathname})
+    body:JSON.stringify({token:TOKEN,vid:vid,url:location.href,path:location.pathname}),
+    credentials:'omit'
   }).then(function(r){return r.json();}).then(function(data){
     if(data&&data.changes&&data.changes.length){applyChanges(data.changes);}
   }).catch(function(){});

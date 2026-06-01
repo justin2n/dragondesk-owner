@@ -243,7 +243,9 @@ app.use(cors({
     // Allow requests with no origin (server-to-server, curl, Postman)
     if (!origin) return callback(null, true);
     if (isAllowedOrigin(origin)) return callback(null, true);
-    callback(new Error('Not allowed by CORS'));
+    // Return false (not an Error) — don't set the header but don't 500 either.
+    // Public tracking endpoints have already set their own CORS headers above.
+    callback(null, false);
   },
   credentials: true,
 }));
