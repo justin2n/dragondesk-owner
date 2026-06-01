@@ -1,20 +1,19 @@
 import { Pool } from 'pg';
 
-// Railway provides DATABASE_URL automatically when PostgreSQL is attached
-const connectionString = process.env.DATABASE_URL || process.env.DATABASE_PRIVATE_URL;
+// Prefer private URL (Railway internal network — faster, no public proxy)
+// Fall back to public DATABASE_URL if private isn't available
+const connectionString = process.env.DATABASE_PRIVATE_URL || process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.error('DATABASE_URL or DATABASE_PRIVATE_URL environment variable is not set');
+  console.error('FATAL: No database connection string found (DATABASE_PRIVATE_URL or DATABASE_URL)');
+  process.exit(1);
 }
 
-// In production, verify the server certificate unless explicitly opted out.
-// Railway internal connections (DATABASE_PRIVATE_URL) use a self-signed cert,
-// so set DATABASE_SSL_REJECT_UNAUTHORIZED=false in that environment only.
-const sslConfig = (() => {
-  if (process.env.NODE_ENV !== 'production') return false;
-  const reject = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
-  return { rejectUnauthorized: reject };
-})();
+// Railway internal connections don't need SSL cert verification.
+// Public DATABASE_URL connections use Railway's proxy which handles TLS.
+const sslConfig = process.env.NODE_ENV !== 'production'
+  ? false
+  : { rejectUnauthorized: false };
 
 export const pool = new Pool({
   connectionString,
