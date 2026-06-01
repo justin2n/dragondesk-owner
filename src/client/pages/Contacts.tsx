@@ -564,7 +564,7 @@ const Contacts = () => {
               <TableViewIcon size={20} />
             </button>
           </div>
-          <button onClick={() => { setShowImportModal(true); setImportResult(null); setImportFile(null); }} className={styles.importBtn}>
+          <button onClick={() => { setShowImportModal(true); setImportResults([]); setImportFiles([]); }} className={styles.importBtn}>
             Import CSV
           </button>
           <button onClick={() => handleOpenModal()} className={styles.addBtn}>
