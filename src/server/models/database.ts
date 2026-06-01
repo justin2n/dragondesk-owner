@@ -967,6 +967,67 @@ async function initializeDatabase() {
     `);
 
 
+    // Fix createdBy / instructorId foreign keys so users can be deleted.
+    // Default PostgreSQL FK behavior is RESTRICT — blocks deletion if any row
+    // references the user. We change them all to ON DELETE SET NULL.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE audiences DROP CONSTRAINT IF EXISTS audiences_createdby_fkey;
+        ALTER TABLE audiences ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE audiences ADD CONSTRAINT audiences_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_createdby_fkey;
+        ALTER TABLE campaigns ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE campaigns ADD CONSTRAINT campaigns_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE ab_tests DROP CONSTRAINT IF EXISTS ab_tests_createdby_fkey;
+        ALTER TABLE ab_tests ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE ab_tests ADD CONSTRAINT ab_tests_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS events_createdby_fkey;
+        ALTER TABLE events ADD CONSTRAINT events_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS events_instructorid_fkey;
+        ALTER TABLE events ADD CONSTRAINT events_instructorid_fkey
+          FOREIGN KEY ("instructorId") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE email_templates DROP CONSTRAINT IF EXISTS email_templates_createdby_fkey;
+        ALTER TABLE email_templates ADD CONSTRAINT email_templates_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE email_images DROP CONSTRAINT IF EXISTS email_images_uploadedby_fkey;
+        ALTER TABLE email_images ADD CONSTRAINT email_images_uploadedby_fkey
+          FOREIGN KEY ("uploadedBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE social_campaigns DROP CONSTRAINT IF EXISTS social_campaigns_createdby_fkey;
+        ALTER TABLE social_campaigns ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE social_campaigns ADD CONSTRAINT social_campaigns_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE sms_campaigns DROP CONSTRAINT IF EXISTS sms_campaigns_createdby_fkey;
+        ALTER TABLE sms_campaigns ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE sms_campaigns ADD CONSTRAINT sms_campaigns_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE lead_forms DROP CONSTRAINT IF EXISTS lead_forms_createdby_fkey;
+        ALTER TABLE lead_forms ADD CONSTRAINT lead_forms_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE tracking_site_config DROP CONSTRAINT IF EXISTS tracking_site_config_createdby_fkey;
+        ALTER TABLE tracking_site_config ADD CONSTRAINT tracking_site_config_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE social_comment_replies DROP CONSTRAINT IF EXISTS social_comment_replies_sentby_fkey;
+        ALTER TABLE social_comment_replies ADD CONSTRAINT social_comment_replies_sentby_fkey
+          FOREIGN KEY ("sentBy") REFERENCES users(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
+
     // Seed admin user if none exists
     await seedAdminUser(client);
 
