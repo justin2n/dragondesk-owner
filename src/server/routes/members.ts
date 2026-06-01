@@ -6,6 +6,41 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+const TRACKED_FIELDS = [
+  'firstName', 'lastName', 'email', 'phone',
+  'accountStatus', 'accountType', 'programType', 'membershipAge',
+  'ranking', 'leadSource', 'notes', 'locationId',
+  'pricingPlanId', 'membershipId', 'membershipName',
+  'trialStartDate', 'memberStartDate', 'companyName',
+] as const;
+
+async function logHistory(
+  memberId: number,
+  action: string,
+  changes: Record<string, { from: any; to: any }> | null,
+  user: { id: number; firstName: string; lastName: string } | null | undefined,
+  userName?: string,
+) {
+  const name = userName ?? (user ? `${user.firstName} ${user.lastName}`.trim() : 'System');
+  await pool.query(
+    `INSERT INTO member_history ("memberId", "userId", "userName", action, changes)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [memberId, user?.id ?? null, name, action, changes ? JSON.stringify(changes) : null],
+  );
+}
+
+function diffMember(oldRow: any, newValues: Record<string, any>) {
+  const changes: Record<string, { from: any; to: any }> = {};
+  for (const field of TRACKED_FIELDS) {
+    const oldVal = oldRow[field] ?? null;
+    const newVal = newValues[field] ?? null;
+    const oldStr = oldVal === null ? null : String(oldVal);
+    const newStr = newVal === null ? null : String(newVal);
+    if (oldStr !== newStr) changes[field] = { from: oldVal, to: newVal };
+  }
+  return Object.keys(changes).length ? changes : null;
+}
+
 router.use(authenticateToken);
 
 router.get('/', async (req: AuthRequest, res) => {
@@ -131,7 +166,9 @@ router.post('/', async (req: AuthRequest, res) => {
       ]
     );
 
-    res.status(201).json(insertResult.rows[0]);
+    const created = insertResult.rows[0];
+    await logHistory(created.id, 'created', null, req.user).catch(() => {});
+    res.status(201).json(created);
   } catch (error: any) {
     console.error('Create member error:', error);
     serverError(res, error);
@@ -166,10 +203,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
       membershipName,
     } = req.body;
 
-    const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
+    const existing = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found' });
     }
+    const oldRow = existing.rows[0];
 
     const updateResult = await pool.query(
       `UPDATE members SET
@@ -193,10 +231,38 @@ router.put('/:id', async (req: AuthRequest, res) => {
       ]
     );
 
-    res.json(updateResult.rows[0]);
+    const updated = updateResult.rows[0];
+    const changes = diffMember(oldRow, {
+      firstName, lastName, email, phone, accountStatus, accountType,
+      programType, membershipAge, ranking, leadSource, notes, locationId,
+      pricingPlanId, companyName, membershipId, membershipName,
+      trialStartDate, memberStartDate,
+    });
+    if (changes) {
+      const action = changes.accountStatus ? 'status_changed' : 'updated';
+      await logHistory(updated.id, action, changes, req.user).catch(() => {});
+    }
+    res.json(updated);
   } catch (error: any) {
     console.error('Update member error:', error);
     serverError(res, error);
+  }
+});
+
+router.get('/:id/history', async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, action, changes, "userName", "createdAt"
+       FROM member_history
+       WHERE "memberId" = $1
+       ORDER BY "createdAt" DESC
+       LIMIT 100`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get member history error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

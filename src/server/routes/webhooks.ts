@@ -119,7 +119,16 @@ router.post('/zapier/leads', async (req, res) => {
       [firstName, lastName, email, phone, program || 'No Program Selected', source, company, notes, locationId]
     );
 
-    res.json({ success: true, member: result.rows[0] });
+    const member = result.rows[0];
+    // Only log history for genuinely new contacts (INSERT, not UPDATE)
+    if (result.rowCount === 1 && member.accountStatus === 'lead') {
+      await pool.query(
+        `INSERT INTO member_history ("memberId", "userId", "userName", action, changes)
+         VALUES ($1, NULL, 'Zapier webhook', 'created', NULL)`,
+        [member.id]
+      ).catch(() => {});
+    }
+    res.json({ success: true, member });
   } catch (err: any) {
     console.error('Zapier webhook error:', err);
     serverError(res, err);

@@ -1378,3 +1378,81 @@
   font-size: 0.8125rem;
   color: var(--color-text-secondary);
 }
+
+/* ── History tab ───────────────────────────────────────────────────────────── */
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.historyEntry {
+  padding: 0.875rem 1rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.historyMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.875rem;
+}
+
+.historyAction {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.historyBy {
+  color: var(--color-text-secondary);
+}
+
+.historyTime {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.historyChanges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.historyChange {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.historyField {
+  color: var(--color-text-secondary);
+  min-width: 130px;
+  font-weight: 500;
+}
+
+.historyFrom {
+  color: #f87171;
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.historyArrow {
+  color: var(--color-text-secondary);
+}
+
+.historyTo {
+  color: #4ade80;
+  font-weight: 500;
+}

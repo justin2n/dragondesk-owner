@@ -54,6 +54,18 @@ import { isValidEmail, normalizeEmail } from './utils/validate';
 dotenv.config();
 
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN DEFAULT false`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS member_history (
+    id SERIAL PRIMARY KEY,
+    "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    "userName" TEXT,
+    action TEXT NOT NULL,
+    changes JSONB,
+    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch(() => {});
+pool.query(`CREATE INDEX IF NOT EXISTS idx_member_history_member ON member_history("memberId")`).catch(() => {});
 
 // Unconditionally fix schema on every boot — independent of migration chain
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_accountstatus_check`).catch(() => {});

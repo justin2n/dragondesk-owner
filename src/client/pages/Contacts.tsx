@@ -52,7 +52,9 @@ const Contacts = () => {
   const [memberToCancel, setMemberToCancel] = useState<Member | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [viewingMember, setViewingMember] = useState<Member | null>(null);
-  const [viewTab, setViewTab] = useState<'details' | 'billing' | 'attendance'>('details');
+  const [viewTab, setViewTab] = useState<'details' | 'billing' | 'attendance' | 'history'>('details');
+  const [memberHistory, setMemberHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [memberQRCode, setMemberQRCode] = useState<{ qrCode: string; qrCodeData: string } | null>(null);
   const [memberCheckIns, setMemberCheckIns] = useState<any[]>([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
@@ -397,11 +399,24 @@ const Contacts = () => {
     }
   };
 
+  const loadMemberHistory = async (memberId: number) => {
+    setHistoryLoading(true);
+    try {
+      const data = await api.get(`/members/${memberId}/history`);
+      setMemberHistory(data);
+    } catch {
+      setMemberHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const handleViewMember = (member: Member) => {
     setViewingMember(member);
     setViewTab('details');
     loadMemberBillingData(member.id);
     loadMemberAttendanceData(member.id);
+    loadMemberHistory(member.id);
   };
 
   const handleCloseViewModal = () => {
@@ -1419,6 +1434,12 @@ const Contacts = () => {
               >
                 Attendance
               </button>
+              <button
+                className={`${styles.viewTab} ${viewTab === 'history' ? styles.active : ''}`}
+                onClick={() => setViewTab('history')}
+              >
+                History
+              </button>
             </div>
 
             <div className={styles.viewContent}>
@@ -1733,6 +1754,49 @@ const Contacts = () => {
                       </div>
                     </>
                   )}
+                </div>
+              )}
+
+              {viewTab === 'history' && (
+                <div className={styles.viewSection}>
+                  <div className={styles.billingBlock}>
+                    <h4 className={styles.billingTitle}>Change History</h4>
+                    {historyLoading ? (
+                      <div className={styles.billingLoading}>Loading history...</div>
+                    ) : memberHistory.length === 0 ? (
+                      <p className={styles.billingEmpty}>No history recorded yet.</p>
+                    ) : (
+                      <div className={styles.historyList}>
+                        {memberHistory.map((entry) => (
+                          <div key={entry.id} className={styles.historyEntry}>
+                            <div className={styles.historyMeta}>
+                              <span className={styles.historyAction}>
+                                {entry.action === 'created' ? 'Contact created' :
+                                 entry.action === 'status_changed' ? 'Status changed' :
+                                 'Updated'}
+                              </span>
+                              <span className={styles.historyBy}>by {entry.userName || 'System'}</span>
+                              <span className={styles.historyTime}>
+                                {new Date(entry.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            {entry.changes && (
+                              <div className={styles.historyChanges}>
+                                {Object.entries(entry.changes as Record<string, { from: any; to: any }>).map(([field, { from, to }]) => (
+                                  <div key={field} className={styles.historyChange}>
+                                    <span className={styles.historyField}>{field}</span>
+                                    <span className={styles.historyFrom}>{from ?? '—'}</span>
+                                    <span className={styles.historyArrow}>→</span>
+                                    <span className={styles.historyTo}>{to ?? '—'}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
