@@ -588,7 +588,16 @@ router.get('/web/overview', authenticateToken, async (req: AuthRequest, res) => 
       return res.json({ configured: false });
     }
     const days = parseInt(String(req.query.days || '30'));
-    const data = await getWebOverview(days);
+    let data: any;
+    try {
+      data = await getWebOverview(days);
+    } catch (gaErr: any) {
+      console.error('[GA] getWebOverview failed:', gaErr);
+      return res.json({ configured: true, error: gaErr?.message || 'GA API request failed' });
+    }
+    if (!data) {
+      return res.json({ configured: true, error: 'Could not initialise GA client — verify GA_SERVICE_ACCOUNT_JSON is valid JSON and GA_PROPERTY_ID uses the format properties/XXXXXXXXX.' });
+    }
     res.json({ configured: true, ...data });
   } catch (error: any) {
     console.error('GA overview error:', error);

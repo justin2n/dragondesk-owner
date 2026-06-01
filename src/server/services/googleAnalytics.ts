@@ -3,15 +3,22 @@ import { BetaAnalyticsDataClient } from '@google-analytics/data';
 const propertyId = process.env.GA_PROPERTY_ID; // e.g. "properties/123456789"
 
 function getClient(): BetaAnalyticsDataClient | null {
-  if (!propertyId) return null;
+  if (!propertyId) {
+    console.warn('[GA] GA_PROPERTY_ID is not set');
+    return null;
+  }
 
   const credJson = process.env.GA_SERVICE_ACCOUNT_JSON;
-  if (!credJson) return null;
+  if (!credJson) {
+    console.warn('[GA] GA_SERVICE_ACCOUNT_JSON is not set');
+    return null;
+  }
 
   try {
     const credentials = JSON.parse(credJson);
     return new BetaAnalyticsDataClient({ credentials });
-  } catch {
+  } catch (err) {
+    console.error('[GA] Failed to parse GA_SERVICE_ACCOUNT_JSON — check it is valid JSON:', err);
     return null;
   }
 }

@@ -170,8 +170,9 @@ const DragonDeskAnalytics = () => {
         setWebLoading(true);
         const response = await api.get(`/analytics/web/overview?days=${webDays}`);
         setWebData(response);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to load web analytics:', error);
+        setWebData({ configured: true, error: error?.message || 'Failed to reach analytics server.' });
       } finally {
         setWebLoading(false);
       }
@@ -494,6 +495,24 @@ const DragonDeskAnalytics = () => {
             <p className={styles.webEnvNote}>
               Create a service account in Google Cloud Console, grant it <strong>Viewer</strong> access
               to your GA4 property, and paste the JSON key as the env var value.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (webData.error) {
+      return (
+        <div className={styles.sectionContent}>
+          <div className={styles.webNotConfigured}>
+            <MdLanguage size={48} style={{ opacity: 0.3 }} />
+            <h3>Google Analytics Error</h3>
+            <p>{webData.error}</p>
+            <p className={styles.webEnvNote}>
+              Common causes: <strong>GA_PROPERTY_ID</strong> must use the format <code>properties/123456789</code>.
+              The service account JSON must be the full JSON key file content (not base64-encoded).
+              The service account must have <strong>Viewer</strong> role on your GA4 property.
+              Check Railway deploy logs for <code>[GA]</code> entries for the exact error.
             </p>
           </div>
         </div>
