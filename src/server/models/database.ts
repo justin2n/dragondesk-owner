@@ -31,8 +31,23 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
 
-// Initialize database on startup
-initializeDatabase();
+// Initialize database on startup — retry up to 10 times so a slow-starting
+// Railway Postgres doesn't crash the app before it's ready.
+(async () => {
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      await initializeDatabase();
+      return;
+    } catch (err) {
+      console.error(`DB init attempt ${attempt}/10 failed:`, err);
+      if (attempt === 10) {
+        console.error('Could not connect to database after 10 attempts. Exiting.');
+        process.exit(1);
+      }
+      await new Promise(r => setTimeout(r, attempt * 3000)); // 3s, 6s, 9s…
+    }
+  }
+})();
 
 async function initializeDatabase() {
   const client = await pool.connect();
