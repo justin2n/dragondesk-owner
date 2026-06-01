@@ -19,6 +19,9 @@ const sslConfig = (() => {
 export const pool = new Pool({
   connectionString,
   ssl: sslConfig,
+  max: 4,                    // Stay under Railway free plan's 5-connection limit
+  idleTimeoutMillis: 30000,  // Release idle connections after 30s
+  connectionTimeoutMillis: 5000,
 });
 
 pool.on('connect', () => {
@@ -84,7 +87,7 @@ async function initializeDatabase() {
         "lastName" TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         phone TEXT,
-        "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member')),
+        "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member', 'cancelled')),
         "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
         "programType" TEXT,
         "membershipAge" TEXT NOT NULL CHECK("membershipAge" IN ('Adult', 'Kids')),

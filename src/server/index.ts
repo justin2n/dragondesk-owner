@@ -54,6 +54,9 @@ import { isValidEmail, normalizeEmail } from './utils/validate';
 dotenv.config();
 
 // Unconditionally fix schema on every boot — independent of migration chain
+pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_accountstatus_check`).catch(() => {});
+pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_accountStatus_check"`).catch(() => {});
+pool.query(`ALTER TABLE members ADD CONSTRAINT members_accountstatus_check CHECK("accountStatus" IN ('lead', 'trialer', 'member', 'cancelled'))`).catch(() => {});
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`).catch(() => {});
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_programType_check"`).catch(() => {});
 pool.query(`ALTER TABLE members ALTER COLUMN "programType" DROP NOT NULL`).catch(() => {});
