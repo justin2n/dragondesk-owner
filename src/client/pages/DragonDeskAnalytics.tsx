@@ -79,6 +79,7 @@ interface AnalyticsData {
     };
   };
   programDistribution: { name: string; value: number }[];
+  leadSources: { source: string; count: number }[];
 }
 
 const PROGRAM_COLORS: Record<string, string> = {
@@ -326,8 +327,8 @@ const DragonDeskAnalytics = () => {
       <div className={styles.sectionContent}>
         <div className={styles.chartContainer}>
           <div className={styles.chartHeader}>
-            <h3>Lead Volume by Month</h3>
-            <p>New leads acquired per program</p>
+            <h3>Lead Acquisition by Month</h3>
+            <p>New contacts created per program (includes converted leads)</p>
           </div>
           {renderChart(data.leadsData, leadKeys, chartTypes.leads)}
         </div>
@@ -348,9 +349,39 @@ const DragonDeskAnalytics = () => {
             <div className={styles.statIndicator} style={{ backgroundColor: PROGRAM_COLORS.total }} />
             <h4>Total</h4>
             <div className={styles.statValue}>{data.summary.totals.currentLeads}</div>
-            <div className={styles.statLabel}>All Programs</div>
+            <div className={styles.statLabel}>Current Leads</div>
           </div>
         </div>
+
+        {data.leadSources && data.leadSources.length > 0 && (
+          <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
+            <div className={styles.chartHeader}>
+              <h3>Lead Sources</h3>
+              <p>All contacts by acquisition channel</p>
+            </div>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th style={{ textAlign: 'right' }}>Contacts</th>
+                  <th style={{ textAlign: 'right' }}>Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.leadSources.map(({ source, count }) => {
+                  const total = data.leadSources.reduce((s, r) => s + r.count, 0);
+                  return (
+                    <tr key={source}>
+                      <td style={{ textTransform: 'capitalize' }}>{source.replace(/_/g, ' ')}</td>
+                      <td style={{ textAlign: 'right' }}>{count}</td>
+                      <td style={{ textAlign: 'right' }}>{total > 0 ? ((count / total) * 100).toFixed(1) : 0}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   };

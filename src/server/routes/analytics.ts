@@ -156,6 +156,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         m."accountStatus",
         m."programType",
         m."locationId",
+        m."leadSource",
         m."trialStartDate",
         m."memberStartDate",
         m."createdAt",
@@ -244,7 +245,9 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
-    // Calculate leads data by program and month
+    // Calculate leads data by program and month.
+    // Count ALL new contacts created in the period regardless of current status —
+    // a lead that quickly converted to trialer/member is still a lead acquisition.
     const leadsData = periods.map(period => {
       const dataPoint: any = { month: period.label };
 
@@ -252,7 +255,6 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         const newLeads = allMembers.filter(m => {
           const createdAt = new Date(m.createdAt);
           return m.programType === program &&
-            m.accountStatus === 'lead' &&
             createdAt >= period.start && createdAt <= period.end;
         }).length;
 
@@ -264,6 +266,16 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
 
       return dataPoint;
     });
+
+    // Lead source breakdown — shows how many contacts came in from each source
+    const leadSourceCounts: Record<string, number> = {};
+    for (const m of allMembers) {
+      const src = m.leadSource || 'unknown';
+      leadSourceCounts[src] = (leadSourceCounts[src] || 0) + 1;
+    }
+    const leadSources = Object.entries(leadSourceCounts)
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count);
 
     // Calculate members data (active members and churn) by program and month
     const membersData = periods.map(period => {
@@ -367,6 +379,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       membersData,
       summary,
       programDistribution,
+      leadSources,
     });
   } catch (error: any) {
     console.error('Error fetching program analytics:', error);
