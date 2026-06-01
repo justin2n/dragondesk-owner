@@ -1,19 +1,25 @@
 import { Pool } from 'pg';
 
-// Prefer private URL (Railway internal network — faster, no public proxy)
-// Fall back to public DATABASE_URL if private isn't available
-const connectionString = process.env.DATABASE_PRIVATE_URL || process.env.DATABASE_URL;
+// Railway provides two URLs:
+//   DATABASE_PRIVATE_URL — internal network (no SSL, faster, preferred)
+//   DATABASE_URL          — public proxy (SSL required)
+const privateUrl = process.env.DATABASE_PRIVATE_URL;
+const publicUrl  = process.env.DATABASE_URL;
+const connectionString = privateUrl || publicUrl;
 
 if (!connectionString) {
   console.error('FATAL: No database connection string found (DATABASE_PRIVATE_URL or DATABASE_URL)');
   process.exit(1);
 }
 
-// Railway internal connections don't need SSL cert verification.
-// Public DATABASE_URL connections use Railway's proxy which handles TLS.
+// Private URL: internal Railway network, no SSL needed.
+// Public URL: goes through Railway proxy, needs SSL but skip cert verification
+//             because Railway uses a self-signed cert on the proxy.
 const sslConfig = process.env.NODE_ENV !== 'production'
   ? false
-  : { rejectUnauthorized: false };
+  : privateUrl
+    ? false                          // internal — no SSL
+    : { rejectUnauthorized: false }; // public proxy — SSL, skip cert check
 
 export const pool = new Pool({
   connectionString,
