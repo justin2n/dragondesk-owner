@@ -30,6 +30,7 @@ router.get('/script.js', async (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.send(script);
 });
 
@@ -134,6 +135,7 @@ router.post('/collect', async (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
   const { token, vid, sid, events } = req.body;
 
@@ -206,6 +208,7 @@ router.options('/collect', (_req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.status(204).end();
 });
 
@@ -214,6 +217,7 @@ router.options('/collect', (_req, res) => {
 // POST /api/tracking/personalize
 router.post('/personalize', async (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
   const { token, vid, path } = req.body;
   if (!token || !vid) { res.json({ changes: [] }); return; }
