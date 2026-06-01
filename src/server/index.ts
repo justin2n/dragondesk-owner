@@ -210,6 +210,21 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
+// Public CORS for tracking endpoints — external websites (e.g. dragongym.com)
+// must be able to call /collect and /personalize. This middleware runs before
+// the restrictive global cors() so it wins the preflight race.
+app.use('/api/tracking', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // CORS — allow any subdomain of dragondeskapp.com plus explicit overrides
 const extraOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
