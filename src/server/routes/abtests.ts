@@ -35,14 +35,19 @@ router.post('/', async (req: AuthRequest, res) => {
   try {
     const { name, audienceId, pageUrl, trafficSplit, variantA, variantB, status } = req.body;
 
-    if (!name || !audienceId || !variantA || !variantB || !status) {
+    if (!name || !variantA || !variantB || !status) {
       return res.status(400).json({ error: 'Required fields are missing' });
     }
 
-    const audience = await get('SELECT * FROM audiences WHERE id = ?', [audienceId]);
+    if (audienceId && status !== 'draft') {
+      const audience = await get('SELECT * FROM audiences WHERE id = ?', [audienceId]);
+      if (!audience) {
+        return res.status(404).json({ error: 'Audience not found' });
+      }
+    }
 
-    if (!audience) {
-      return res.status(404).json({ error: 'Audience not found' });
+    if (!audienceId && status !== 'draft') {
+      return res.status(400).json({ error: 'An audience is required to publish a test.' });
     }
 
     const variantAJson = JSON.stringify(variantA);
@@ -50,7 +55,7 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const result = await run(
       'INSERT INTO ab_tests (name, audienceId, pageUrl, trafficSplit, variantA, variantB, status, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, audienceId, pageUrl || null, trafficSplit || 50, variantAJson, variantBJson, status, req.user!.id]
+      [name, audienceId || null, pageUrl || null, trafficSplit || 50, variantAJson, variantBJson, status, req.user!.id]
     );
 
     const newABTest = await get('SELECT * FROM ab_tests WHERE id = ?', [result.id]);

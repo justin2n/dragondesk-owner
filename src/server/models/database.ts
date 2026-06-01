@@ -987,6 +987,11 @@ async function initializeDatabase() {
         ALTER TABLE ab_tests ADD CONSTRAINT ab_tests_createdby_fkey
           FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
 
+        ALTER TABLE ab_tests DROP CONSTRAINT IF EXISTS ab_tests_audienceid_fkey;
+        ALTER TABLE ab_tests ALTER COLUMN "audienceId" DROP NOT NULL;
+        ALTER TABLE ab_tests ADD CONSTRAINT ab_tests_audienceid_fkey
+          FOREIGN KEY ("audienceId") REFERENCES audiences(id) ON DELETE SET NULL;
+
         ALTER TABLE events DROP CONSTRAINT IF EXISTS events_createdby_fkey;
         ALTER TABLE events ADD CONSTRAINT events_createdby_fkey
           FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;

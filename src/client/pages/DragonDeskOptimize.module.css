@@ -99,6 +99,12 @@
   border-color: var(--color-red);
 }
 
+.editorActions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .saveBtn {
   width: 100%;
   padding: 1rem;
@@ -115,6 +121,25 @@
 .saveBtn:hover {
   background: var(--color-red-hover);
   box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+.saveDraftBtn {
+  width: 100%;
+  padding: 0.85rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.95rem;
+}
+
+.saveDraftBtn:hover {
+  background: var(--color-grey);
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-primary);
 }
 
 /* Grid Layout */

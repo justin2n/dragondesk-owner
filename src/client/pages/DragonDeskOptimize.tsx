@@ -124,6 +124,10 @@ const DragonDeskOptimize = () => {
 
   const handleSubmitTest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.audienceId) {
+      toast('Please select a target audience before publishing.', 'error');
+      return;
+    }
     try {
       const payload = {
         ...formData,
@@ -140,6 +144,32 @@ const DragonDeskOptimize = () => {
       loadData();
     } catch (error: any) {
       toast(error.message || 'Failed to save A/B test', 'error');
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!formData.name) {
+      toast('Please enter a test name before saving.', 'error');
+      return;
+    }
+    try {
+      const payload = {
+        ...formData,
+        status: 'draft',
+        audienceId: formData.audienceId ? parseInt(formData.audienceId) : null,
+      };
+
+      if (editingTest) {
+        await api.put(`/abtests/${editingTest.id}`, payload);
+      } else {
+        await api.post('/abtests', payload);
+      }
+
+      toast('Draft saved.', 'success');
+      setViewMode('list');
+      loadData();
+    } catch (error: any) {
+      toast(error.message || 'Failed to save draft', 'error');
     }
   };
 
@@ -356,12 +386,11 @@ const DragonDeskOptimize = () => {
           </div>
 
           <div className={styles.formGroup}>
-            <label>Target Audience *</label>
+            <label>Target Audience</label>
             <select
               value={formData.audienceId}
               onChange={(e) => setFormData({ ...formData, audienceId: e.target.value })}
               className={styles.input}
-              required
             >
               <option value="">Select an audience</option>
               {audiences.map((audience) => (
@@ -370,6 +399,9 @@ const DragonDeskOptimize = () => {
                 </option>
               ))}
             </select>
+            {!formData.audienceId && (
+              <p className={styles.fieldHelp}>Required to publish — save as draft first if you haven't created an audience yet.</p>
+            )}
           </div>
 
           <div className={styles.formGroup}>
@@ -415,9 +447,14 @@ const DragonDeskOptimize = () => {
             </select>
           </div>
 
-          <button type="submit" className={styles.saveBtn}>
-            {editingTest ? 'Update Test' : 'Create Test'}
-          </button>
+          <div className={styles.editorActions}>
+            <button type="button" onClick={handleSaveDraft} className={styles.saveDraftBtn}>
+              Save Draft
+            </button>
+            <button type="submit" className={styles.saveBtn}>
+              {editingTest ? 'Update Test' : 'Create Test'}
+            </button>
+          </div>
         </div>
 
         <div className={styles.editorMain}>
