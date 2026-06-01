@@ -23,7 +23,8 @@ router.get('/script.js', async (req: Request, res: Response) => {
     return;
   }
 
-  const endpoint = `${req.protocol}://${req.get('host')}/api/tracking`;
+  const proto = req.get('x-forwarded-proto') || req.protocol;
+  const endpoint = `${proto}://${req.get('host')}/api/tracking`;
 
   const script = buildTrackingScript(token, endpoint);
 

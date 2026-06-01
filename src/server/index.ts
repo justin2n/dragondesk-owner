@@ -200,6 +200,10 @@ pool.query(`
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust Railway / any reverse-proxy's X-Forwarded-* headers so req.protocol
+// returns 'https' correctly (without this, it always returns 'http').
+app.set('trust proxy', true);
+
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: false, // Disabled — React SPA uses inline scripts; enable with a nonce in a future pass
