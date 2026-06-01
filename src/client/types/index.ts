@@ -54,6 +54,7 @@ export interface User {
   certifications?: string;
   specialties?: string;
   locationId?: number;
+  mustChangePassword?: boolean;
 }
 
 export interface Member {

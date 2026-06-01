@@ -91,7 +91,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       httpOnly: true,
       secure: isProduction,
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days, matches JWT expiry
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
 
@@ -104,6 +104,7 @@ router.post('/login', loginLimiter, async (req, res) => {
         role: user.role,
         firstName: user.firstName,
         lastName: user.lastName,
+        mustChangePassword: !!(user as any).mustChangePassword,
       },
     });
   } catch (error) {
@@ -148,11 +149,39 @@ router.get('/me', async (req, res) => {
 
   try {
     const decoded: any = jwt.verify(token, JWT_SECRET);
-    const user = await get('SELECT id, username, email, role, firstName, lastName FROM users WHERE id = ?', [decoded.id]);
+    const user = await get('SELECT id, username, email, role, "firstName", "lastName", "mustChangePassword" FROM users WHERE id = ?', [decoded.id]);
     if (!user) return res.status(401).json({ error: 'User not found' });
-    res.json({ token, user });
+    res.json({ token, user: { ...user, mustChangePassword: !!user.mustChangePassword } });
   } catch {
     res.status(401).json({ error: 'Invalid or expired session' });
+  }
+});
+
+router.post('/change-password', authenticateToken, async (req: any, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password are required' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+
+    const user: any = await get('SELECT * FROM users WHERE id = ?', [req.user!.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const isValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isValid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await run('UPDATE users SET password = ?, "mustChangePassword" = false, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?', [hashed, req.user!.id]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

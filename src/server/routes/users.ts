@@ -100,11 +100,11 @@ router.post('/', authorizeAdmin, async (req: AuthRequest, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
+    // Create user — mustChangePassword=true forces a password reset on first login
     const result = await run(
       `INSERT INTO users
-       (username, email, password, role, firstName, lastName, locationId, isInstructor, certifications, specialties)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (username, email, password, role, "firstName", "lastName", "locationId", "isInstructor", certifications, specialties, "mustChangePassword")
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)`,
       [
         username,
         email,

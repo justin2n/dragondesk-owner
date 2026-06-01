@@ -53,6 +53,8 @@ import { isValidEmail, normalizeEmail } from './utils/validate';
 
 dotenv.config();
 
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN DEFAULT false`).catch(() => {});
+
 // Unconditionally fix schema on every boot — independent of migration chain
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_accountstatus_check`).catch(() => {});
 pool.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS "members_accountStatus_check"`).catch(() => {});

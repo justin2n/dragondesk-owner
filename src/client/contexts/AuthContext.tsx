@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
+import ForcePasswordChange from '../components/ForcePasswordChange';
 
 interface AuthContextType {
   user: User | null;
@@ -57,9 +58,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
+  const handlePasswordChanged = () => {
+    setUser(u => u ? { ...u, mustChangePassword: false } : u);
+  };
+
   return (
     <AuthContext.Provider value={{ user, token, login, logout, isLoading }}>
       {children}
+      {user?.mustChangePassword && (
+        <ForcePasswordChange onComplete={handlePasswordChanged} />
+      )}
     </AuthContext.Provider>
   );
 };
