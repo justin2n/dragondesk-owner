@@ -54,6 +54,32 @@ import { isValidEmail, normalizeEmail } from './utils/validate';
 dotenv.config();
 
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN DEFAULT false`).catch(() => {});
+pool.query(`ALTER TABLE tracking_visitors ADD COLUMN IF NOT EXISTS "ipAddress" TEXT`).catch(() => {});
+pool.query(`ALTER TABLE tracking_visitors ADD COLUMN IF NOT EXISTS country TEXT`).catch(() => {});
+pool.query(`ALTER TABLE tracking_visitors ADD COLUMN IF NOT EXISTS city TEXT`).catch(() => {});
+pool.query(`ALTER TABLE tracking_visitors ADD COLUMN IF NOT EXISTS "geoResolved" BOOLEAN DEFAULT false`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS visitor_identities (
+    id SERIAL PRIMARY KEY,
+    "visitorId" TEXT NOT NULL,
+    token TEXT NOT NULL,
+    type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    confidence TEXT DEFAULT 'high',
+    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE("visitorId", token, type)
+  )
+`).catch(() => {});
+pool.query(`CREATE INDEX IF NOT EXISTS idx_visitor_identities_vid ON visitor_identities("visitorId", token)`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS identity_settings (
+    id SERIAL PRIMARY KEY,
+    priority JSONB NOT NULL DEFAULT '["email","phone","name"]',
+    "autoResolve" BOOLEAN DEFAULT true,
+    "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch(() => {});
 pool.query(`
   CREATE TABLE IF NOT EXISTS member_history (
     id SERIAL PRIMARY KEY,

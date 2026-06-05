@@ -20,7 +20,7 @@ const DragonDeskOptimize = () => {
 
   // Behavior tracking state
   const [trackingToken, setTrackingToken] = useState('');
-  const [trackingTab, setTrackingTab] = useState<'install' | 'events' | 'pages' | 'audiences'>('install');
+  const [trackingTab, setTrackingTab] = useState<'install' | 'events' | 'pages' | 'audiences' | 'identity'>('install');
   const [trackingSummary, setTrackingSummary] = useState<any>(null);
   const [trackingEvents, setTrackingEvents] = useState<any[]>([]);
   const [topElements, setTopElements] = useState<any[]>([]);
@@ -30,6 +30,11 @@ const DragonDeskOptimize = () => {
   const [audienceOperator, setAudienceOperator] = useState<'any' | 'all'>('any');
   const [eventsFilter, setEventsFilter] = useState('');
   const [showEmbedCode, setShowEmbedCode] = useState(false);
+  const [selectedVisitorId, setSelectedVisitorId] = useState<string | null>(null);
+  const [visitorDetail, setVisitorDetail] = useState<any | null>(null);
+  const [visitorDetailLoading, setVisitorDetailLoading] = useState(false);
+  const [identitySettings, setIdentitySettings] = useState<{ priority: string[]; autoResolve: boolean } | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -559,6 +564,45 @@ const DragonDeskOptimize = () => {
     } catch (e) { console.error(e); }
   };
 
+  const loadEvents = async () => {
+    try {
+      const events = await api.get(`/tracking/events?limit=50${eventsFilter ? `&type=${eventsFilter}` : ''}`);
+      setTrackingEvents(events);
+    } catch (e) { console.error(e); }
+  };
+
+  const loadVisitorDetail = async (visitorId: string) => {
+    setSelectedVisitorId(visitorId);
+    setVisitorDetailLoading(true);
+    setVisitorDetail(null);
+    try {
+      const data = await api.get(`/tracking/visitor/${visitorId}`);
+      setVisitorDetail(data);
+    } catch (e) { console.error(e); }
+    finally { setVisitorDetailLoading(false); }
+  };
+
+  const loadIdentitySettings = async () => {
+    try {
+      const data = await api.get('/tracking/identity-settings');
+      setIdentitySettings(data);
+    } catch (e) { console.error(e); }
+  };
+
+  // Auto-refresh events every 10 seconds when on events tab
+  useEffect(() => {
+    if (trackingTab !== 'events' || !autoRefresh) return;
+    const interval = setInterval(() => { loadEvents(); }, 10000);
+    return () => clearInterval(interval);
+  }, [trackingTab, autoRefresh, eventsFilter]);
+
+  // Load identity settings when switching to identity tab
+  useEffect(() => {
+    if (trackingTab === 'identity' && identitySettings === null) {
+      loadIdentitySettings();
+    }
+  }, [trackingTab]);
+
   const handleCreateBehaviorAudience = async () => {
     if (!audienceName || behaviorRules.length === 0) {
       toast('Please enter a name and add at least one rule.', 'error');
@@ -608,10 +652,13 @@ const DragonDeskOptimize = () => {
         )}
 
         <div className={styles.trackingTabs}>
-          {(['install', 'events', 'pages', 'audiences'] as const).map(tab => (
+          {(['install', 'events', 'pages', 'audiences', 'identity'] as const).map(tab => (
             <button key={tab} className={`${styles.trackingTab} ${trackingTab === tab ? styles.trackingTabActive : ''}`}
-              onClick={() => setTrackingTab(tab)}>
-              {tab === 'install' ? 'Install' : tab === 'events' ? 'Event Feed' : tab === 'pages' ? 'Top Pages & Elements' : 'Audience Builder'}
+              onClick={() => {
+                setTrackingTab(tab);
+                if (tab === 'identity' && identitySettings === null) loadIdentitySettings();
+              }}>
+              {tab === 'install' ? 'Install' : tab === 'events' ? 'Event Feed' : tab === 'pages' ? 'Top Pages & Elements' : tab === 'audiences' ? 'Audience Builder' : 'Identity Settings'}
             </button>
           ))}
         </div>
@@ -658,18 +705,26 @@ const DragonDeskOptimize = () => {
                   <option value="scroll_depth">Scroll depth</option>
                 </select>
                 <button onClick={loadTrackingData} className={styles.refreshBtn}>Refresh</button>
+                <button
+                  onClick={() => setAutoRefresh(v => !v)}
+                  className={autoRefresh ? styles.autoRefreshOn : styles.refreshBtn}
+                  title={autoRefresh ? 'Auto-refresh on (every 10s)' : 'Auto-refresh off'}
+                >
+                  {autoRefresh ? '⟳ Live' : '⟳ Paused'}
+                </button>
               </div>
             </div>
             <table className={styles.eventsTable}>
-              <thead><tr><th>Type</th><th>Visitor</th><th>Page</th><th>Selector / Detail</th><th>Time</th></tr></thead>
+              <thead><tr><th>Type</th><th>Visitor</th><th>Identity</th><th>Page</th><th>Selector / Detail</th><th>Time</th></tr></thead>
               <tbody>
                 {trackingEvents.length === 0 && (
-                  <tr><td colSpan={5} className={styles.emptyRow}>No events yet — install the tracking script on your website to start collecting data.</td></tr>
+                  <tr><td colSpan={6} className={styles.emptyRow}>No events yet — install the tracking script on your website to start collecting data.</td></tr>
                 )}
                 {trackingEvents.map(evt => (
-                  <tr key={evt.id}>
+                  <tr key={evt.id} onClick={() => loadVisitorDetail(evt.visitorId)} style={{ cursor: 'pointer' }}>
                     <td><span className={`${styles.eventBadge} ${styles[`evt_${evt.eventType}`]}`}>{evt.eventType}</span></td>
                     <td className={styles.visitorCell}>{evt.visitorId?.slice(0, 8)}…</td>
+                    <td></td>
                     <td className={styles.pathCell}>{evt.pagePath || '—'}</td>
                     <td className={styles.selectorCell}>{evt.selector || evt.elementText || evt.pageTitle || '—'}</td>
                     <td className={styles.timeCell}>{new Date(evt.createdAt).toLocaleTimeString()}</td>
@@ -773,6 +828,181 @@ const DragonDeskOptimize = () => {
                 disabled={!audienceName || behaviorRules.length === 0}>
                 Create Audience
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* IDENTITY SETTINGS TAB */}
+        {trackingTab === 'identity' && !identitySettings && (
+          <div className={styles.trackingPanel}>
+            <div className={styles.drawerLoading}>Loading...</div>
+          </div>
+        )}
+
+        {trackingTab === 'identity' && identitySettings && (
+          <div className={styles.trackingPanel}>
+            <h3 className={styles.trackingPanelTitle}>Identity Resolution Settings</h3>
+            <p className={styles.trackingPanelDesc}>
+              Configure how anonymous visitor IDs are matched to known contacts. When a visitor submits a form with their email,
+              they are automatically resolved to a contact if one exists.
+            </p>
+
+            {/* Auto-resolve toggle */}
+            <div className={styles.identitySettingRow}>
+              <div>
+                <div className={styles.identitySettingLabel}>Auto-resolve identities</div>
+                <div className={styles.identitySettingDesc}>Automatically link visitors to contacts when email is captured from form submissions</div>
+              </div>
+              <button
+                className={identitySettings.autoResolve ? styles.toggleOn : styles.toggleOff}
+                onClick={async () => {
+                  const updated = { ...identitySettings, autoResolve: !identitySettings.autoResolve };
+                  setIdentitySettings(updated);
+                  await api.put('/tracking/identity-settings', updated);
+                }}
+              >
+                {identitySettings.autoResolve ? 'On' : 'Off'}
+              </button>
+            </div>
+
+            {/* Priority order */}
+            <div className={styles.identitySettingRow} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.75rem' }}>
+              <div className={styles.identitySettingLabel}>Identity signal priority</div>
+              <div className={styles.identitySettingDesc}>Order in which identity signals are used for matching. Use arrows to reorder.</div>
+              <div className={styles.priorityList}>
+                {identitySettings.priority.map((signal: string, idx: number) => (
+                  <div key={signal} className={styles.priorityItem}>
+                    <span className={styles.priorityRank}>{idx + 1}</span>
+                    <span className={styles.prioritySignal}>{signal}</span>
+                    <div className={styles.priorityActions}>
+                      <button
+                        disabled={idx === 0}
+                        onClick={async () => {
+                          const newPriority = [...identitySettings.priority];
+                          [newPriority[idx-1], newPriority[idx]] = [newPriority[idx], newPriority[idx-1]];
+                          const updated = { ...identitySettings, priority: newPriority };
+                          setIdentitySettings(updated);
+                          await api.put('/tracking/identity-settings', updated);
+                        }}
+                        className={styles.priorityBtn}
+                      >↑</button>
+                      <button
+                        disabled={idx === identitySettings.priority.length - 1}
+                        onClick={async () => {
+                          const newPriority = [...identitySettings.priority];
+                          [newPriority[idx], newPriority[idx+1]] = [newPriority[idx+1], newPriority[idx]];
+                          const updated = { ...identitySettings, priority: newPriority };
+                          setIdentitySettings(updated);
+                          await api.put('/tracking/identity-settings', updated);
+                        }}
+                        className={styles.priorityBtn}
+                      >↓</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* How it works */}
+            <div className={styles.identityHowItWorks}>
+              <h4>How identity resolution works</h4>
+              <ol>
+                <li>Visitor arrives on your site — assigned anonymous ID stored in a 1-year cookie</li>
+                <li>Script captures email address when visitor submits any form containing an email field</li>
+                <li>Email is matched against Contacts — if found, the visitor is linked to that contact</li>
+                <li>All past and future events from that anonymous ID are attributed to the matched contact</li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {/* VISITOR DETAIL DRAWER */}
+        {selectedVisitorId && (
+          <div className={styles.drawerOverlay} onClick={() => setSelectedVisitorId(null)}>
+            <div className={styles.drawer} onClick={e => e.stopPropagation()}>
+              <div className={styles.drawerHeader}>
+                <h3>Visitor Profile</h3>
+                <button onClick={() => setSelectedVisitorId(null)} className={styles.drawerClose}>✕</button>
+              </div>
+
+              {visitorDetailLoading ? (
+                <div className={styles.drawerLoading}>Loading...</div>
+              ) : visitorDetail ? (
+                <div className={styles.drawerBody}>
+                  {/* Anonymous ID */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Anonymous ID</div>
+                    <code className={styles.visitorIdFull}>{visitorDetail.visitor?.visitorId}</code>
+                  </div>
+
+                  {/* Location */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Location</div>
+                    <div>{visitorDetail.visitor?.city && visitorDetail.visitor?.country
+                      ? `${visitorDetail.visitor.city}, ${visitorDetail.visitor.country}`
+                      : visitorDetail.visitor?.country || 'Unknown'}</div>
+                  </div>
+
+                  {/* Identity / Matched Contact */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Identity</div>
+                    {visitorDetail.matchedMember ? (
+                      <div className={styles.matchedContact}>
+                        <div className={styles.matchedContactName}>
+                          {visitorDetail.matchedMember.firstName} {visitorDetail.matchedMember.lastName}
+                        </div>
+                        <div className={styles.matchedContactEmail}>{visitorDetail.matchedMember.email}</div>
+                        <div className={styles.matchedContactMeta}>
+                          <span className={styles.statusBadge}>{visitorDetail.matchedMember.accountStatus}</span>
+                          {visitorDetail.matchedMember.programType && (
+                            <span className={styles.programBadge}>{visitorDetail.matchedMember.programType}</span>
+                          )}
+                        </div>
+                        <a href={`/contacts?id=${visitorDetail.matchedMember.id}`} className={styles.viewContactLink} target="_blank" rel="noreferrer">
+                          View in Contacts →
+                        </a>
+                      </div>
+                    ) : visitorDetail.identities?.length > 0 ? (
+                      <div>
+                        {visitorDetail.identities.map((id: any) => (
+                          <div key={id.id} className={styles.identityChip}>
+                            <span className={styles.identityType}>{id.type}</span>
+                            <span>{id.value}</span>
+                          </div>
+                        ))}
+                        <div className={styles.noMatch}>No contact match found</div>
+                      </div>
+                    ) : (
+                      <div className={styles.anonymous}>Anonymous visitor — no identity signals captured yet</div>
+                    )}
+                  </div>
+
+                  {/* Stats */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Activity</div>
+                    <div className={styles.visitorStats}>
+                      <div><strong>{visitorDetail.visitor?.eventCount || 0}</strong> events</div>
+                      <div><strong>{visitorDetail.visitor?.pageCount || 0}</strong> page views</div>
+                      <div>First seen: {visitorDetail.visitor?.firstSeen ? new Date(visitorDetail.visitor.firstSeen).toLocaleDateString() : '—'}</div>
+                      <div>Last seen: {visitorDetail.visitor?.lastSeen ? new Date(visitorDetail.visitor.lastSeen).toLocaleString() : '—'}</div>
+                    </div>
+                  </div>
+
+                  {/* Recent events timeline */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Recent Events</div>
+                    <div className={styles.eventTimeline}>
+                      {(visitorDetail.events || []).slice(0, 20).map((evt: any) => (
+                        <div key={evt.id} className={styles.timelineEvent}>
+                          <span className={`${styles.eventBadge} ${styles[`evt_${evt.eventType}`]}`}>{evt.eventType}</span>
+                          <span className={styles.timelinePath}>{evt.pagePath || '—'}</span>
+                          <span className={styles.timelineTime}>{new Date(evt.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

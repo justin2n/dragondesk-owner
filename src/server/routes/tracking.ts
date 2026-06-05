@@ -88,7 +88,9 @@ function buildTrackingScript(token: string, endpoint: string): string {
 
   d.addEventListener('submit',function(e){
     var f=e.target;
-    push({type:'form_submit',formId:f.id||'',formName:f.name||'',selector:getSelector(f)});
+    var emailEl=f.querySelector('input[type="email"],input[name="email"],input[name="Email"],input[id="email"]');
+    var email=emailEl?emailEl.value.trim():'';
+    push({type:'form_submit',formId:f.id||'',formName:f.name||'',selector:getSelector(f),email:email});
   },true);
 
   /* Scroll depth — fire at 25/50/75/100% */
@@ -152,23 +154,28 @@ router.post('/collect', async (req: Request, res: Response) => {
     return;
   }
 
+  // Extract requester IP
+  const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
+
   try {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Upsert visitor
+      // Upsert visitor (include ipAddress on first insert)
       await client.query(`
-        INSERT INTO tracking_visitors ("visitorId", token, "firstSeen", "lastSeen", "eventCount", "pageCount")
-        VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3, $4)
+        INSERT INTO tracking_visitors ("visitorId", token, "firstSeen", "lastSeen", "eventCount", "pageCount", "ipAddress")
+        VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3, $4, $5)
         ON CONFLICT ("visitorId", token) DO UPDATE SET
           "lastSeen" = CURRENT_TIMESTAMP,
           "eventCount" = tracking_visitors."eventCount" + $3,
-          "pageCount" = tracking_visitors."pageCount" + $4
+          "pageCount" = tracking_visitors."pageCount" + $4,
+          "ipAddress" = COALESCE(tracking_visitors."ipAddress", $5)
       `, [
         vid, token,
         events.length,
         events.filter((e: any) => e.type === 'pageview').length,
+        ipAddress,
       ]);
 
       // Insert events
@@ -185,7 +192,7 @@ router.post('/collect', async (req: Request, res: Response) => {
           evt.title || null,
           evt.selector || null,
           evt.text || null,
-          JSON.stringify({ tag: evt.tag, depth: evt.depth, formId: evt.formId }),
+          JSON.stringify({ tag: evt.tag, depth: evt.depth, formId: evt.formId, email: evt.email || undefined }),
           evt.ts || Date.now(),
         ]);
       }
@@ -196,6 +203,34 @@ router.post('/collect', async (req: Request, res: Response) => {
       throw err;
     } finally {
       client.release();
+    }
+
+    // After transaction: process identity signals from form_submit events (outside main tx)
+    const formSubmits = events.filter((e: any) => e.type === 'form_submit' && e.email && e.email.length > 0);
+    for (const evt of formSubmits) {
+      const emailVal = evt.email.toLowerCase();
+      try {
+        await pool.query(`
+          INSERT INTO visitor_identities ("visitorId", token, type, value)
+          VALUES ($1, $2, 'email', $3)
+          ON CONFLICT ("visitorId", token, type) DO UPDATE SET value = EXCLUDED.value
+        `, [vid, token, emailVal]);
+
+        // Try to match to a member
+        const memberResult = await pool.query(
+          `SELECT id FROM members WHERE email = $1 LIMIT 1`,
+          [emailVal]
+        );
+        if (memberResult.rows.length > 0) {
+          const memberId = memberResult.rows[0].id;
+          await pool.query(
+            `UPDATE visitor_identities SET "memberId" = $1 WHERE "visitorId" = $2 AND token = $3 AND type = 'email'`,
+            [memberId, vid, token]
+          );
+        }
+      } catch (identityErr) {
+        console.error('Identity upsert error:', identityErr);
+      }
     }
   } catch (err) {
     console.error('Tracking collect error:', err);
@@ -411,6 +446,142 @@ router.get('/top-pages', authenticateToken, async (req: AuthRequest, res: Respon
   `, [token]);
 
   res.json(result.rows);
+});
+
+// GET /api/tracking/visitor/:visitorId — full visitor profile with geo + identity
+router.get('/visitor/:visitorId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { visitorId } = req.params;
+    const configResult = await pool.query('SELECT token FROM tracking_site_config LIMIT 1');
+    if (configResult.rows.length === 0) { res.status(404).json({ error: 'No config' }); return; }
+    const token = configResult.rows[0].token;
+
+    const [visitorResult, eventsResult, identitiesResult] = await Promise.all([
+      pool.query(`SELECT * FROM tracking_visitors WHERE "visitorId" = $1 AND token = $2 LIMIT 1`, [visitorId, token]),
+      pool.query(`SELECT * FROM tracking_events WHERE "visitorId" = $1 AND token = $2 ORDER BY "createdAt" DESC LIMIT 50`, [visitorId, token]),
+      pool.query(`SELECT * FROM visitor_identities WHERE "visitorId" = $1 AND token = $2`, [visitorId, token]),
+    ]);
+
+    const visitor = visitorResult.rows[0] || null;
+    const events = eventsResult.rows;
+    const identities = identitiesResult.rows;
+
+    // Geo-resolve if needed
+    if (visitor && visitor.ipAddress && !visitor.geoResolved) {
+      const ip = visitor.ipAddress;
+      const isLocal = ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.');
+      if (!isLocal) {
+        try {
+          const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=country,city,status`);
+          const geoData = await geoRes.json() as any;
+          if (geoData.status === 'success') {
+            await pool.query(
+              `UPDATE tracking_visitors SET country = $1, city = $2, "geoResolved" = true WHERE "visitorId" = $3 AND token = $4`,
+              [geoData.country || null, geoData.city || null, visitorId, token]
+            );
+            visitor.country = geoData.country || null;
+            visitor.city = geoData.city || null;
+            visitor.geoResolved = true;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Find matched member from email identity
+    let matchedMember = null;
+    const emailIdentity = identities.find((i: any) => i.type === 'email');
+    if (emailIdentity) {
+      const memberRes = await pool.query(
+        `SELECT id, email, "firstName", "lastName", "accountStatus", "programType", phone FROM members WHERE email = $1 LIMIT 1`,
+        [emailIdentity.value]
+      );
+      if (memberRes.rows.length > 0) {
+        matchedMember = memberRes.rows[0];
+      }
+    }
+
+    res.json({ visitor, events, identities, matchedMember });
+  } catch (err) {
+    console.error('Visitor profile error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/tracking/visitors — list of unique visitors with identity info
+router.get('/visitors', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const configResult = await pool.query('SELECT token FROM tracking_site_config LIMIT 1');
+    if (configResult.rows.length === 0) { res.json([]); return; }
+    const token = configResult.rows[0].token;
+
+    const result = await pool.query(`
+      SELECT tv.*, vi.type as "identityType", vi.value as "identityValue", vi."memberId",
+             m."firstName", m."lastName", m."accountStatus"
+      FROM tracking_visitors tv
+      LEFT JOIN visitor_identities vi ON vi."visitorId" = tv."visitorId" AND vi.token = tv.token AND vi.type = 'email'
+      LEFT JOIN members m ON m.id = vi."memberId"
+      WHERE tv.token = $1
+      ORDER BY tv."lastSeen" DESC LIMIT 100
+    `, [token]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Visitors list error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/tracking/identity-settings
+router.get('/identity-settings', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    let result = await pool.query('SELECT * FROM identity_settings LIMIT 1');
+    if (result.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO identity_settings (priority, "autoResolve") VALUES ($1, $2)`,
+        [JSON.stringify(['email', 'phone', 'name']), true]
+      );
+      result = await pool.query('SELECT * FROM identity_settings LIMIT 1');
+    }
+    const row = result.rows[0];
+    res.json({
+      id: row.id,
+      priority: typeof row.priority === 'string' ? JSON.parse(row.priority) : row.priority,
+      autoResolve: row.autoResolve,
+    });
+  } catch (err) {
+    console.error('Identity settings GET error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PUT /api/tracking/identity-settings
+router.put('/identity-settings', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { priority, autoResolve } = req.body;
+    const existing = await pool.query('SELECT id FROM identity_settings LIMIT 1');
+    let row;
+    if (existing.rows.length > 0) {
+      const updated = await pool.query(
+        `UPDATE identity_settings SET priority = $1, "autoResolve" = $2, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *`,
+        [JSON.stringify(priority), autoResolve, existing.rows[0].id]
+      );
+      row = updated.rows[0];
+    } else {
+      const inserted = await pool.query(
+        `INSERT INTO identity_settings (priority, "autoResolve") VALUES ($1, $2) RETURNING *`,
+        [JSON.stringify(priority), autoResolve]
+      );
+      row = inserted.rows[0];
+    }
+    res.json({
+      id: row.id,
+      priority: typeof row.priority === 'string' ? JSON.parse(row.priority) : row.priority,
+      autoResolve: row.autoResolve,
+    });
+  } catch (err) {
+    console.error('Identity settings PUT error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // POST /api/tracking/audiences — create a behavior-based audience
