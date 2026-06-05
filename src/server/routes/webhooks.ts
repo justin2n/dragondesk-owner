@@ -128,6 +128,15 @@ router.post('/zapier/leads', async (req, res) => {
         [member.id]
       ).catch(() => {});
     }
+
+    // Retroactive identity resolution: back-fill any unlinked visitor_identities
+    // that captured this email before the contact existed in DragonDesk
+    await pool.query(
+      `UPDATE visitor_identities SET "memberId" = $1
+       WHERE type = 'email' AND value = $2 AND "memberId" IS NULL`,
+      [member.id, email]
+    ).catch(() => {});
+
     res.json({ success: true, member });
   } catch (err: any) {
     console.error('Zapier webhook error:', err);

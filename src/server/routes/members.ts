@@ -168,6 +168,15 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const created = insertResult.rows[0];
     await logHistory(created.id, 'created', null, req.user).catch(() => {});
+
+    // Retroactive identity resolution: link any anonymous visitor who
+    // submitted a site form with this email before the contact existed
+    await pool.query(
+      `UPDATE visitor_identities SET "memberId" = $1
+       WHERE type = 'email' AND value = $2 AND "memberId" IS NULL`,
+      [created.id, created.email]
+    ).catch(() => {});
+
     res.status(201).json(created);
   } catch (error: any) {
     console.error('Create member error:', error);
