@@ -49,6 +49,9 @@ function buildTrackingScript(token: string, endpoint: string): string {
   var vid=getCookie('_dd_vid');if(!vid){vid=uuid();setCookie('_dd_vid',vid,365);}
   var sid;try{sid=sessionStorage.getItem('_dd_sid')||uuid();sessionStorage.setItem('_dd_sid',sid);}catch(e){sid=uuid();}
 
+  /* ── Expose IDs for lead form identity stitching ── */
+  w.__ddVid=vid;w.__ddToken=TOKEN;w.__ddEP=EP;
+
   /* ── Event queue ── */
   var queue=[];
   function push(evt){queue.push(Object.assign({ts:Date.now(),url:location.href,path:location.pathname,title:d.title},evt));}

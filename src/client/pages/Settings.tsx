@@ -3754,16 +3754,17 @@ const Settings = () => {
               </div>
 
               <div className={styles.formGroup}>
-                <label className={styles.label}>Embed Code (iframe)</label>
+                <label className={styles.label}>Embed Code (with Identity Stitching)</label>
                 <textarea
-                  value={`<iframe src="${window.location.origin}/lead-form" width="100%" height="800" frameborder="0" style="border: none; border-radius: 8px;"></iframe>`}
+                  value={`<script>\n(function(){\n  var base='${window.location.origin}/lead-form';\n  var vid=window.__ddVid||'';\n  var token=window.__ddToken||'';\n  var qs=(vid?'vid='+encodeURIComponent(vid):'')+(token?'&token='+encodeURIComponent(token):'');\n  var f=document.createElement('iframe');\n  f.src=base+(qs?'?'+qs:'');\n  f.width='100%';f.height='800';f.frameBorder='0';\n  f.style.cssText='border:none;border-radius:8px;';\n  document.currentScript.parentNode.insertBefore(f,document.currentScript);\n})();\n<\/script>`}
                   readOnly
                   className={styles.dnsTextarea}
-                  rows={4}
+                  rows={8}
                 />
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`<iframe src="${window.location.origin}/lead-form" width="100%" height="800" frameborder="0" style="border: none; border-radius: 8px;"></iframe>`);
+                    const code = `<script>\n(function(){\n  var base='${window.location.origin}/lead-form';\n  var vid=window.__ddVid||'';\n  var token=window.__ddToken||'';\n  var qs=(vid?'vid='+encodeURIComponent(vid):'')+(token?'&token='+encodeURIComponent(token):'');\n  var f=document.createElement('iframe');\n  f.src=base+(qs?'?'+qs:'');\n  f.width='100%';f.height='800';f.frameBorder='0';\n  f.style.cssText='border:none;border-radius:8px;';\n  document.currentScript.parentNode.insertBefore(f,document.currentScript);\n})();\n<\/script>`;
+                    navigator.clipboard.writeText(code);
                     showSaveMessage('Embed code copied to clipboard!');
                   }}
                   className={styles.copyBtn}
@@ -3771,7 +3772,7 @@ const Settings = () => {
                   Copy Embed Code
                 </button>
                 <span className={styles.helpText}>
-                  Paste this code into your website's HTML to embed the lead form.
+                  Paste this into your website's HTML. If the DragonDesk tracking script is also installed, anonymous visitor IDs will automatically be linked to leads when they submit this form.
                 </span>
               </div>
 

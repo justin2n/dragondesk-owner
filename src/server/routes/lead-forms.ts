@@ -19,7 +19,9 @@ router.post('/submit', async (req, res) => {
       membershipAge,
       notes,
       locationId,
-      source
+      source,
+      visitorId,
+      token: trackingToken,
     } = req.body;
 
     // Validate required fields
@@ -35,8 +37,10 @@ router.post('/submit', async (req, res) => {
     // Check if member already exists
     const existing = await get('SELECT id, accountStatus FROM members WHERE email = ?', [normalizedEmail]);
 
+    let memberId: number;
+
     if (existing) {
-      // Update existing member if they're still a lead
+      memberId = existing.id;
       if (existing.accountStatus === 'lead') {
         await run(
           `UPDATE members SET
@@ -51,55 +55,58 @@ router.post('/submit', async (req, res) => {
           WHERE id = ?`,
           [firstName, lastName, phone, programType, membershipAge, notes, locationId, existing.id]
         );
+      }
+    } else {
+      // Create new lead
+      const result = await run(
+        `INSERT INTO members (
+          firstName, lastName, email, phone,
+          accountStatus, accountType, programType, membershipAge,
+          ranking, notes, locationId, tags
+        ) VALUES (?, ?, ?, ?, 'lead', 'basic', ?, ?, 'White Belt', ?, ?, ?)`,
+        [
+          firstName, lastName, normalizedEmail, phone || null,
+          programType || 'Adult BJJ', membershipAge || 'Adult',
+          notes || null, locationId || null,
+          source ? JSON.stringify([source]) : JSON.stringify(['Web Form']),
+        ]
+      );
+      memberId = result.id;
+    }
 
-        return res.status(200).json({
-          success: true,
-          message: 'Lead information updated successfully',
-          leadId: existing.id
-        });
-      } else {
-        // Member already exists and is not a lead
-        return res.status(200).json({
-          success: true,
-          message: 'Thank you! We already have your information.',
-          leadId: existing.id
-        });
+    // Identity resolution: link anonymous visitor to this contact
+    if (visitorId && trackingToken) {
+      const { pool } = await import('../models/database.js');
+      try {
+        // Link by email
+        await pool.query(`
+          INSERT INTO visitor_identities ("visitorId", token, type, value, "memberId")
+          VALUES ($1, $2, 'email', $3, $4)
+          ON CONFLICT ("visitorId", token, type) DO UPDATE SET value = EXCLUDED.value, "memberId" = EXCLUDED."memberId"
+        `, [visitorId, trackingToken, normalizedEmail, memberId]);
+
+        // Link by phone if provided
+        if (phone) {
+          await pool.query(`
+            INSERT INTO visitor_identities ("visitorId", token, type, value, "memberId")
+            VALUES ($1, $2, 'phone', $3, $4)
+            ON CONFLICT ("visitorId", token, type) DO UPDATE SET value = EXCLUDED.value, "memberId" = EXCLUDED."memberId"
+          `, [visitorId, trackingToken, phone, memberId]);
+        }
+      } catch (idErr) {
+        console.error('Identity link error (non-fatal):', idErr);
       }
     }
 
-    // Create new lead
-    const result = await run(
-      `INSERT INTO members (
-        firstName,
-        lastName,
-        email,
-        phone,
-        accountStatus,
-        accountType,
-        programType,
-        membershipAge,
-        ranking,
-        notes,
-        locationId,
-        tags
-      ) VALUES (?, ?, ?, ?, 'lead', 'basic', ?, ?, 'White Belt', ?, ?, ?)`,
-      [
-        firstName,
-        lastName,
-        normalizedEmail,
-        phone || null,
-        programType || 'Adult BJJ',
-        membershipAge || 'Adult',
-        notes || null,
-        locationId || null,
-        source ? JSON.stringify([source]) : JSON.stringify(['Web Form'])
-      ]
-    );
-
-    res.status(201).json({
+    const isNew = !existing;
+    res.status(isNew ? 201 : 200).json({
       success: true,
-      message: 'Lead submitted successfully! We will contact you soon.',
-      leadId: result.id
+      message: isNew
+        ? 'Lead submitted successfully! We will contact you soon.'
+        : existing?.accountStatus === 'lead'
+          ? 'Lead information updated successfully'
+          : 'Thank you! We already have your information.',
+      leadId: memberId,
     });
 
   } catch (error: any) {

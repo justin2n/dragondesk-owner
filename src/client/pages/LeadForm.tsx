@@ -27,6 +27,8 @@ const LeadForm = () => {
   const urlParams = new URLSearchParams(window.location.search);
   const apiUrl = urlParams.get('api') || 'http://localhost:5000';
   const theme = urlParams.get('theme') || 'dark';
+  const ddVid = urlParams.get('vid') || '';
+  const ddToken = urlParams.get('token') || '';
   const bgColor = urlParams.get('bg') || '';
   const textColor = urlParams.get('text') || '';
   const accentColor = urlParams.get('accent') || '';
@@ -97,7 +99,9 @@ const LeadForm = () => {
         body: JSON.stringify({
           ...formData,
           locationId: formData.locationId ? parseInt(formData.locationId) : null,
-          source: 'Web Form'
+          source: 'Web Form',
+          ...(ddVid && { visitorId: ddVid }),
+          ...(ddToken && { token: ddToken }),
         })
       });
 
