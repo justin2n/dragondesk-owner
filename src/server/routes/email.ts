@@ -141,9 +141,16 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
       return res.status(400).json({ error: 'Missing required fields: to, subject, body' });
     }
 
+    const resolvedHost = emailSettings?.host || process.env.SMTP_HOST || '';
+    if (resolvedHost.includes('ethereal')) {
+      return res.status(400).json({
+        error: 'Ethereal (test) SMTP detected — emails will not be delivered.',
+        details: 'Your SMTP_HOST is set to smtp.ethereal.email, which is a development-only fake inbox. Replace SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables with a real email provider (e.g. SendGrid, Postmark, or Gmail SMTP).',
+      });
+    }
+
     const transporter = await createTransporter(emailSettings);
 
-    // Build the "from" field: explicit settings > env vars > default
     const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
     const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
     const fromField = fromEmail
@@ -162,7 +169,6 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
     res.json({
       message: 'Test email sent successfully',
       messageId: info.messageId,
-      previewUrl: nodemailer.getTestMessageUrl(info) || undefined,
     });
   } catch (error: any) {
     console.error('Error sending test email:', error);

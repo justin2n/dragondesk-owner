@@ -295,4 +295,53 @@ router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
+// Send a test SMS via Twilio REST API
+router.post('/send-test', authenticateToken, async (req: AuthRequest, res) => {
+  const { to, message } = req.body;
+
+  if (!to || !message) {
+    return res.status(400).json({ error: 'to and message are required' });
+  }
+
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken  = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return res.status(400).json({
+      error: 'Twilio is not configured.',
+      details: 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in your Railway environment variables.',
+    });
+  }
+
+  // Normalise to E.164
+  let toNumber = to.replace(/[\s\-\(\)]/g, '');
+  if (!toNumber.startsWith('+')) toNumber = '+1' + toNumber;
+
+  try {
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+    const body = new URLSearchParams({ To: toNumber, From: fromNumber, Body: message });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+
+    const data: any = await response.json();
+
+    if (!response.ok) {
+      return res.status(400).json({ error: data.message || 'Twilio error', details: data });
+    }
+
+    res.json({ success: true, messageId: data.sid, to: toNumber });
+  } catch (error: any) {
+    console.error('SMS send-test error:', error);
+    serverError(res, error);
+  }
+});
+
 export default router;

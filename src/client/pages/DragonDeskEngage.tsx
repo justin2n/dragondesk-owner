@@ -263,11 +263,7 @@ const DragonDeskEngage = () => {
         } : null,
       });
 
-      if (result.previewUrl) {
-        toast(`Test email sent to ${testEmail}! Preview: ${result.previewUrl}`, 'success');
-      } else {
-        toast(`Test email sent successfully to ${testEmail}!`, 'success');
-      }
+      toast(`Test email sent to ${testEmail}!`, 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to send test email', 'error');
     }
@@ -365,7 +361,11 @@ const DragonDeskEngage = () => {
     }
 
     try {
-      toast(`Test SMS would be sent to ${testPhone} (simulated in development)`, 'info');
+      await api.post('/sms-campaigns/send-test', {
+        to: testPhone,
+        message: smsFormData.message,
+      });
+      toast(`Test SMS sent to ${testPhone}!`, 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to send test SMS', 'error');
     }
