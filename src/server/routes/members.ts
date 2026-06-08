@@ -84,7 +84,7 @@ router.get('/', async (req: AuthRequest, res) => {
 
     if (search) {
       const term = `%${search}%`;
-      sql += ` AND ("firstName" ILIKE $${idx} OR "lastName" ILIKE $${idx} OR email ILIKE $${idx} OR phone ILIKE $${idx} OR ("firstName" || ' ' || "lastName") ILIKE $${idx})`;
+      sql += ` AND ("firstName" ILIKE $${idx} OR "lastName" ILIKE $${idx} OR email ILIKE $${idx} OR phone ILIKE $${idx} OR ("firstName" || ' ' || "lastName") ILIKE $${idx} OR tags ILIKE $${idx})`;
       params.push(term); idx++;
     }
 
