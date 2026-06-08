@@ -45,6 +45,7 @@ import trackingRoutes from './routes/tracking';
 import importCsvRoutes from './routes/import-csv';
 import webhooksRoutes from './routes/webhooks';
 import posRoutes from './routes/pos';
+import adminEmailsRoutes from './routes/admin-emails';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
 import { serverError } from './utils/errors';
 import { createHash } from 'crypto';
@@ -327,6 +328,7 @@ app.use('/api/wallet-passes', walletPassesRoutes);
 app.use('/api/import-csv', importCsvRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/pos', posRoutes);
+app.use('/api/admin-emails', adminEmailsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });

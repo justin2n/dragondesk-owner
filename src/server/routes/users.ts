@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, run, get } from '../models/database';
 import { authenticateToken, authorizeAdmin, requireRole, AuthRequest } from '../middleware/auth';
+import { sendAdminEmail, isSendgridConfigured, welcomeEmailHtml } from '../services/sendgrid';
 
 const router = Router();
 
@@ -98,6 +99,7 @@ router.post('/', authorizeAdmin, async (req: AuthRequest, res) => {
     }
 
     // Hash password
+    const plainPassword = password;
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user — mustChangePassword=true forces a password reset on first login
@@ -125,6 +127,24 @@ router.post('/', authorizeAdmin, async (req: AuthRequest, res) => {
        FROM users WHERE id = ?`,
       [result.id]
     );
+
+    // Send welcome email with credentials if SendGrid is configured
+    if (isSendgridConfigured() && newUser?.email) {
+      const loginUrl = process.env.APP_URL
+        || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'https://dragondeskapp.com');
+      sendAdminEmail({
+        to: newUser.email,
+        subject: 'Welcome to DragonDesk — Your Login Credentials',
+        html: welcomeEmailHtml({
+          firstName: newUser.firstName,
+          username: newUser.username,
+          password: plainPassword,
+          loginUrl,
+          role: newUser.role,
+        }),
+        text: `Hi ${newUser.firstName},\n\nYour DragonDesk account is ready.\nUsername: ${newUser.username}\nTemporary Password: ${plainPassword}\n\nLog in at: ${loginUrl}\n\nYou will be prompted to change your password on first login.`,
+      }).catch(err => console.error('[SendGrid] Welcome email failed:', err.message));
+    }
 
     res.status(201).json(newUser);
   } catch (error) {

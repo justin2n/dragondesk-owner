@@ -379,6 +379,15 @@ const Settings = () => {
   const [smtpTestStatus, setSmtpTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [smtpTestMessage, setSmtpTestMessage] = useState('');
 
+  // SendGrid Admin Email Settings
+  const [sgStatus, setSgStatus] = useState<any>(null);
+  const [sgTestStatus, setSgTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [sgTestMessage, setSgTestMessage] = useState('');
+  const [sgTestEmail, setSgTestEmail] = useState('');
+  const [sgAlert, setSgAlert] = useState({ to: '', subject: '', message: '' });
+  const [sgAlertStatus, setSgAlertStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [sgAlertMessage, setSgAlertMessage] = useState('');
+
   // Social Media Accounts
   const [socialAccounts, setSocialAccounts] = useState<any[]>([]);
   const [showSocialModal, setShowSocialModal] = useState(false);
@@ -634,6 +643,8 @@ const Settings = () => {
 
     // Load server-side SMTP config status
     api.get('/email/config-status').then(setSmtpStatus).catch(() => {});
+    // Load SendGrid admin email config status
+    api.get('/admin-emails/config-status').then(setSgStatus).catch(() => {});
   };
 
   const handleThemeChange = (newTheme: 'light' | 'dark') => {
@@ -742,6 +753,41 @@ const Settings = () => {
       setSmtpTestStatus('idle');
       setSmtpTestMessage('');
     }, 5000);
+  };
+
+  const handleSendgridTest = async () => {
+    setSgTestStatus('testing');
+    setSgTestMessage('Sending test email...');
+    try {
+      const to = sgTestEmail || (user as any)?.email || '';
+      const response = await api.post('/admin-emails/send-test', { to });
+      setSgTestStatus('success');
+      setSgTestMessage(response.message || 'Test email sent successfully.');
+    } catch (err: any) {
+      setSgTestStatus('error');
+      setSgTestMessage(`Failed: ${err.message || 'Could not send test email'}`);
+    }
+    setTimeout(() => { setSgTestStatus('idle'); setSgTestMessage(''); }, 6000);
+  };
+
+  const handleSendgridAlert = async () => {
+    if (!sgAlert.to || !sgAlert.subject || !sgAlert.message) {
+      setSgAlertStatus('error');
+      setSgAlertMessage('All fields are required.');
+      return;
+    }
+    setSgAlertStatus('sending');
+    setSgAlertMessage('Sending alert...');
+    try {
+      await api.post('/admin-emails/send-alert', sgAlert);
+      setSgAlertStatus('success');
+      setSgAlertMessage('Alert sent successfully.');
+      setSgAlert({ to: '', subject: '', message: '' });
+    } catch (err: any) {
+      setSgAlertStatus('error');
+      setSgAlertMessage(`Failed: ${err.message || 'Could not send alert'}`);
+    }
+    setTimeout(() => { setSgAlertStatus('idle'); setSgAlertMessage(''); }, 6000);
   };
 
   // Billing/Stripe Settings Functions
@@ -1261,6 +1307,7 @@ const Settings = () => {
       tabs: [
         { id: 'mystudio', label: 'MyStudio API' },
         { id: 'email', label: 'Email Settings' },
+        { id: 'admin-email', label: 'Admin Email' },
         { id: 'dkim', label: 'DKIM Authentication' },
         { id: 'social', label: 'Social Settings' },
         { id: 'integrations', label: 'API Integrations' },
@@ -2131,6 +2178,117 @@ const Settings = () => {
                 <div className={styles.warning}>
                   <WarningIcon size={20} />
                   <span>SMTP is not fully configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables.</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SendGrid Admin Email */}
+          {activeTab === 'admin-email' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>SendGrid Admin Emails</h2>
+              <p className={styles.sectionDesc}>
+                Used for platform alerts and welcome emails with login credentials when you create a new user.
+                Configured via Railway environment variables — your SendGrid API key never touches the browser.
+              </p>
+
+              <div className={styles.envVarTable}>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SENDGRID_API_KEY</div>
+                  <div className={styles.envVarValue}>
+                    {sgStatus?.apiKeySet
+                      ? <span className={styles.configured}>configured</span>
+                      : <span className={styles.notSet}>not set</span>}
+                  </div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SENDGRID_FROM_EMAIL</div>
+                  <div className={styles.envVarValue}>{sgStatus?.fromEmail || <span className={styles.notSet}>not set</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SENDGRID_FROM_NAME</div>
+                  <div className={styles.envVarValue}>{sgStatus?.fromName || <span className={styles.notSet}>DragonDesk (default)</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>APP_URL</div>
+                  <div className={styles.envVarValue}><span className={styles.notSet}>used in welcome email login link</span></div>
+                </div>
+              </div>
+
+              {!sgStatus?.configured && (
+                <div className={styles.warning} style={{ marginTop: 16 }}>
+                  <WarningIcon size={20} />
+                  <span>SendGrid is not configured. Add SENDGRID_API_KEY and SENDGRID_FROM_EMAIL to your Railway environment variables.</span>
+                </div>
+              )}
+
+              <h3 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600, marginTop: 28, marginBottom: 12 }}>Send Test Email</h3>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', maxWidth: 480 }}>
+                <input
+                  type="email"
+                  placeholder="Recipient email address"
+                  value={sgTestEmail}
+                  onChange={e => setSgTestEmail(e.target.value)}
+                  className={styles.input}
+                  style={{ flex: 1 }}
+                  disabled={!sgStatus?.configured}
+                />
+                <button
+                  onClick={handleSendgridTest}
+                  className={styles.testBtn}
+                  disabled={sgTestStatus === 'testing' || !sgStatus?.configured}
+                >
+                  {sgTestStatus === 'testing' ? 'Sending...' : 'Send Test'}
+                </button>
+              </div>
+              {sgTestMessage && (
+                <div className={sgTestStatus === 'success' ? styles.successMessage : sgTestStatus === 'error' ? styles.errorMessage : styles.infoMessage} style={{ marginTop: 10 }}>
+                  {sgTestMessage}
+                </div>
+              )}
+
+              <h3 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600, marginTop: 32, marginBottom: 12 }}>Send Platform Alert</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: 14 }}>
+                Send a one-off admin notification to any address — useful for urgent platform alerts.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+                <input
+                  type="email"
+                  placeholder="Recipient email"
+                  value={sgAlert.to}
+                  onChange={e => setSgAlert(a => ({ ...a, to: e.target.value }))}
+                  className={styles.input}
+                  disabled={!sgStatus?.configured}
+                />
+                <input
+                  type="text"
+                  placeholder="Subject"
+                  value={sgAlert.subject}
+                  onChange={e => setSgAlert(a => ({ ...a, subject: e.target.value }))}
+                  className={styles.input}
+                  disabled={!sgStatus?.configured}
+                />
+                <textarea
+                  placeholder="Message body"
+                  value={sgAlert.message}
+                  onChange={e => setSgAlert(a => ({ ...a, message: e.target.value }))}
+                  className={styles.input}
+                  rows={4}
+                  style={{ resize: 'vertical' }}
+                  disabled={!sgStatus?.configured}
+                />
+                <button
+                  onClick={handleSendgridAlert}
+                  className={styles.saveBtn}
+                  disabled={sgAlertStatus === 'sending' || !sgStatus?.configured}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {sgAlertStatus === 'sending' ? 'Sending...' : 'Send Alert'}
+                </button>
+              </div>
+              {sgAlertMessage && (
+                <div className={sgAlertStatus === 'success' ? styles.successMessage : sgAlertStatus === 'error' ? styles.errorMessage : styles.infoMessage} style={{ marginTop: 10 }}>
+                  {sgAlertMessage}
                 </div>
               )}
             </div>
