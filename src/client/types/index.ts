@@ -61,7 +61,7 @@ export interface Member {
   id: number;
   firstName: string;
   lastName: string;
-  email: string;
+  email: string | null;
   phone: string;
   accountStatus: AccountStatus;
   accountType: AccountType;
@@ -79,8 +79,28 @@ export interface Member {
   memberStartDate?: string;
   pricingPlanId?: number;
   companyName?: string | null;
+  memberType?: 'account_holder' | 'participant';
+  accountHolderId?: number | null;
+  participants?: ParticipantSummary[];
+  accountHolder?: { id: number; firstName: string; lastName: string; email: string | null } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ParticipantSummary {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string;
+  programType: ProgramType | null;
+  membershipAge: MembershipAge;
+  ranking: string;
+  accountStatus: AccountStatus;
+  memberType: 'participant';
+  trialStartDate?: string;
+  memberStartDate?: string;
+  createdAt: string;
 }
 
 export interface Audience {
@@ -104,6 +124,7 @@ export interface AudienceFilter {
   locationIds?: number[];
   eventIds?: number[];
   eventAttendanceStatus?: ('registered' | 'attended' | 'no-show' | 'cancelled')[];
+  memberType?: ('account_holder' | 'participant')[];
 }
 
 export interface ChurnMetric {

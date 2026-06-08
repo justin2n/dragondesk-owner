@@ -45,7 +45,7 @@ router.use(authenticateToken);
 
 router.get('/', async (req: AuthRequest, res) => {
   try {
-    const { accountStatus, programType, membershipAge, accountType, locationId, search, sort } = req.query;
+    const { accountStatus, programType, membershipAge, accountType, locationId, search, sort, memberType } = req.query;
 
     const params: any[] = [];
     let idx = 1;
@@ -75,6 +75,11 @@ router.get('/', async (req: AuthRequest, res) => {
     if (accountType) {
       sql += ` AND "accountType" = $${idx++}`;
       params.push(accountType);
+    }
+
+    if (memberType) {
+      sql += ` AND COALESCE("memberType", 'account_holder') = $${idx++}`;
+      params.push(memberType);
     }
 
     if (search) {
@@ -109,7 +114,29 @@ router.get('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Member not found' });
     }
 
-    res.json(result.rows[0]);
+    const member = result.rows[0];
+
+    // Include participants if this is an account holder
+    if (!member.accountHolderId) {
+      const participantsResult = await pool.query(
+        `SELECT id, "firstName", "lastName", email, phone, "programType", "membershipAge", ranking,
+                "accountStatus", "trialStartDate", "memberStartDate", "memberType", "createdAt"
+         FROM members WHERE "accountHolderId" = $1 ORDER BY "firstName" ASC`,
+        [member.id]
+      );
+      member.participants = participantsResult.rows;
+    }
+
+    // Include account holder info if this is a participant
+    if (member.accountHolderId) {
+      const ahResult = await pool.query(
+        `SELECT id, "firstName", "lastName", email, phone FROM members WHERE id = $1`,
+        [member.accountHolderId]
+      );
+      member.accountHolder = ahResult.rows[0] || null;
+    }
+
+    res.json(member);
   } catch (error) {
     console.error('Get member error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -139,30 +166,43 @@ router.post('/', async (req: AuthRequest, res) => {
       memberStartDate,
       pricingPlanId,
       companyName,
+      memberType,
+      accountHolderId,
     } = req.body;
 
-    if (!firstName || !lastName || !email || !accountStatus) {
+    const resolvedMemberType = memberType || 'account_holder';
+
+    if (!firstName || !lastName || !accountStatus) {
       return res.status(400).json({ error: 'Required fields are missing' });
     }
+    // Account holders require an email; participants may omit it
+    if (resolvedMemberType === 'account_holder' && !email) {
+      return res.status(400).json({ error: 'Email is required for account holders' });
+    }
 
-    const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'Member with this email already exists' });
+    if (email) {
+      const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ error: 'Member with this email already exists' });
+      }
     }
 
     const insertResult = await pool.query(
       `INSERT INTO members (
         "firstName", "lastName", email, phone, "accountStatus", "accountType",
         "programType", "membershipAge", ranking, "leadSource", "dateOfBirth", "emergencyContact",
-        "emergencyPhone", notes, tags, "locationId", "trialStartDate", "memberStartDate", "pricingPlanId", "companyName"
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        "emergencyPhone", notes, tags, "locationId", "trialStartDate", "memberStartDate",
+        "pricingPlanId", "companyName", "memberType", "accountHolderId"
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
       RETURNING *`,
       [
-        firstName, lastName, email, phone || null, accountStatus, accountType || 'basic',
+        firstName, lastName, email || null, phone || null, accountStatus, accountType || 'basic',
         programType || 'No Program Selected', membershipAge || 'Adult', ranking || 'White',
         leadSource || null, dateOfBirth || null, emergencyContact || null,
-        emergencyPhone || null, notes || null, tags || null, locationId || null, trialStartDate || null, memberStartDate || null,
+        emergencyPhone || null, notes || null, tags || null, locationId || null,
+        trialStartDate || null, memberStartDate || null,
         pricingPlanId || null, companyName || null,
+        resolvedMemberType, accountHolderId ? parseInt(accountHolderId) : null,
       ]
     );
 
@@ -210,6 +250,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
       companyName,
       membershipId,
       membershipName,
+      memberType,
+      accountHolderId,
     } = req.body;
 
     const existing = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
@@ -227,16 +269,20 @@ router.put('/:id', async (req: AuthRequest, res) => {
         "locationId" = $16, "trialStartDate" = $17, "memberStartDate" = $18,
         "pricingPlanId" = $19, "companyName" = $20,
         "membershipId" = $21, "membershipName" = $22,
+        "memberType" = $23, "accountHolderId" = $24,
         "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $23
+      WHERE id = $25
       RETURNING *`,
       [
-        firstName, lastName, email, phone, accountStatus, accountType || 'basic',
+        firstName, lastName, email || null, phone, accountStatus, accountType || 'basic',
         programType, membershipAge, ranking, leadSource || null, dateOfBirth || null,
         emergencyContact || null, emergencyPhone || null, notes || null, tags || null,
         locationId || null, trialStartDate || null, memberStartDate || null,
         pricingPlanId || null, companyName || null,
-        membershipId || null, membershipName || null, id,
+        membershipId || null, membershipName || null,
+        memberType || oldRow.memberType || 'account_holder',
+        accountHolderId !== undefined ? (accountHolderId ? parseInt(accountHolderId) : null) : oldRow.accountHolderId,
+        id,
       ]
     );
 

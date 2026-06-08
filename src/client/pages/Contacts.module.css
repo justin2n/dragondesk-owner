@@ -1456,3 +1456,216 @@
   color: #4ade80;
   font-weight: 500;
 }
+
+/* ── Account Holder / Participant split ─────────────────────────────────── */
+
+.typeTabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.typeTab {
+  padding: 7px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.typeTab:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.typeTabActive {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.memberTypeChip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.participantCard {
+  border-left: 3px solid rgba(168, 85, 247, 0.5);
+}
+
+/* Member type toggle in modal */
+.memberTypeToggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.memberTypeToggleBtn {
+  flex: 1;
+  padding: 10px 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.memberTypeToggleBtn:hover {
+  background: var(--color-surface-hover);
+}
+
+.memberTypeToggleBtnActive {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+/* Account holder banner in detail view */
+.accountHolderBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  border-radius: 8px;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+
+.accountHolderBannerLabel {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.accountHolderBannerName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.accountHolderBannerEmail {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.accountHolderBannerLink {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Participants section in detail view */
+.participantsSection {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border);
+}
+
+.participantsSectionTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.participantCount {
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.participantsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.participantRow {
+  padding: 10px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.participantRow:hover {
+  border-color: var(--color-accent);
+  background: var(--color-surface-hover);
+}
+
+.participantRowName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.participantRowMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.participantRankBadge {
+  background: rgba(108, 99, 255, 0.12);
+  color: #6c63ff;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.noParticipants {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin: 0 0 12px;
+}
+
+.addParticipantBtn {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  color: var(--color-accent);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  width: 100%;
+}
+
+.addParticipantBtn:hover {
+  border-color: var(--color-accent);
+  background: rgba(108, 99, 255, 0.05);
+}

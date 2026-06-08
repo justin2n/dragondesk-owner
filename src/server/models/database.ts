@@ -1033,6 +1033,27 @@ async function initializeDatabase() {
       END $$;
     `);
 
+    // ── Account Holder / Participant split ─────────────────────────────────────
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "memberType" TEXT
+          DEFAULT 'account_holder'
+          CHECK("memberType" IN ('account_holder', 'participant'));
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "accountHolderId" INTEGER
+          REFERENCES members(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    // Make email nullable so participants (kids) don't need their own email
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ALTER COLUMN email DROP NOT NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
     // Seed admin user if none exists
     await seedAdminUser(client);
 
@@ -1097,7 +1118,8 @@ const camelCaseColumns = [
   'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB', 'membershipId', 'membershipName',
   'pageUrl', 'trafficSplit', 'clickThroughRate', 'openRate', 'beltLevel',
   'visitorId', 'firstSeen', 'lastSeen', 'eventCount', 'pageCount',
-  'pagePath', 'pageTitle', 'elementText'
+  'pagePath', 'pageTitle', 'elementText',
+  'memberType', 'accountHolderId'
 ];
 
 // Function to quote camelCase identifiers for PostgreSQL

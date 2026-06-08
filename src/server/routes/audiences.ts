@@ -93,6 +93,11 @@ router.get('/:id/members', async (req: AuthRequest, res) => {
       params.push(...filters.tags.map(tag => `%${tag}%`));
     }
 
+    if (filters.memberType && filters.memberType.length > 0) {
+      sql += ` AND COALESCE(memberType, 'account_holder') IN (${filters.memberType.map(() => '?').join(',')})`;
+      params.push(...filters.memberType);
+    }
+
     const members = await query(sql, params);
     res.json(members);
   } catch (error) {

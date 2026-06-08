@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../utils/api';
-import { Member, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
+import { Member, ParticipantSummary, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
 import { CardViewIcon, TableViewIcon, AddIcon, CheckIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import { useLocation } from '../contexts/LocationContext';
@@ -75,6 +75,8 @@ const Contacts = () => {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [contactType, setContactType] = useState<'all' | 'account_holders' | 'participants'>('all');
+  const [accountHolders, setAccountHolders] = useState<Member[]>([]);
   const [filters, setFilters] = useState({
     accountStatus: '',
     programType: '',
@@ -111,11 +113,13 @@ const Contacts = () => {
     companyName: '',
     membershipId: '',
     membershipName: '',
+    memberType: 'account_holder' as 'account_holder' | 'participant',
+    accountHolderId: '' as string,
   });
 
   useEffect(() => {
     loadMembers();
-  }, [filters, selectedLocation, isAllLocations]);
+  }, [filters, selectedLocation, isAllLocations, contactType]);
 
   useEffect(() => {
     const t = setTimeout(() => setFilters({ ...filters, search: searchInput }), 300);
@@ -126,6 +130,7 @@ const Contacts = () => {
     api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
     api.get('/memberships').then(setMemberships).catch(() => {});
     api.get('/programs').then(setPrograms).catch(() => {});
+    api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
   }, []);
 
   const loadMembers = async () => {
@@ -139,6 +144,8 @@ const Contacts = () => {
       if (filters.membershipAge) params.append('membershipAge', filters.membershipAge);
       if (filters.search) params.append('search', filters.search);
       if (filters.sort) params.append('sort', filters.sort);
+      if (contactType === 'account_holders') params.append('memberType', 'account_holder');
+      if (contactType === 'participants') params.append('memberType', 'participant');
 
       const queryString = params.toString();
       const data = await api.get(`/members${queryString ? `?${queryString}` : ''}`);
@@ -176,6 +183,8 @@ const Contacts = () => {
         companyName: member.companyName || '',
         membershipId: (member as any).membershipId?.toString() || '',
         membershipName: (member as any).membershipName || '',
+        memberType: (member.memberType as 'account_holder' | 'participant') || 'account_holder',
+        accountHolderId: member.accountHolderId?.toString() || '',
       });
     } else {
       setEditingMember(null);
@@ -199,6 +208,11 @@ const Contacts = () => {
         trialStartDate: '',
         memberStartDate: '',
         pricingPlanId: '',
+        companyName: '',
+        membershipId: '',
+        membershipName: '',
+        memberType: contactType === 'participants' ? 'participant' : 'account_holder',
+        accountHolderId: '',
       });
     }
     setIsModalOpen(true);
@@ -236,6 +250,7 @@ const Contacts = () => {
       }
       handleCloseModal();
       loadMembers();
+      api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
       toast(editingMember ? 'Contact updated successfully.' : 'Contact added successfully.', 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to save contact.', 'error');
@@ -548,6 +563,9 @@ const Contacts = () => {
     return location ? location.name : 'N/A';
   };
 
+  const typeLabel = contactType === 'account_holders' ? 'Account Holders'
+    : contactType === 'participants' ? 'Participants' : 'All Contacts';
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -586,6 +604,18 @@ const Contacts = () => {
             + Add Contact
           </button>
         </div>
+      </div>
+
+      <div className={styles.typeTabs}>
+        {(['all', 'account_holders', 'participants'] as const).map(t => (
+          <button
+            key={t}
+            className={`${styles.typeTab} ${contactType === t ? styles.typeTabActive : ''}`}
+            onClick={() => setContactType(t)}
+          >
+            {t === 'all' ? 'All' : t === 'account_holders' ? 'Account Holders' : 'Participants'}
+          </button>
+        ))}
       </div>
 
       <div className={styles.filters}>
@@ -645,15 +675,20 @@ const Contacts = () => {
       ) : viewMode === 'card' ? (
         <div className={styles.grid}>
           {members.map((member) => (
-            <div key={member.id} className={styles.card}>
+            <div key={member.id} className={`${styles.card} ${member.memberType === 'participant' ? styles.participantCard : ''}`}>
               <div
                 className={styles.cardHeader}
                 onClick={() => handleViewMember(member)}
                 style={{ cursor: 'pointer' }}
               >
-                <h3 className={styles.cardTitle}>
-                  {member.firstName} {member.lastName}
-                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <h3 className={styles.cardTitle}>
+                    {member.firstName} {member.lastName}
+                  </h3>
+                  {member.memberType === 'participant' && (
+                    <span className={styles.memberTypeChip}>Participant</span>
+                  )}
+                </div>
                 <span className={`${styles.badge} ${styles[member.accountStatus]}`}>
                   {member.accountStatus}
                 </span>
@@ -663,26 +698,42 @@ const Contacts = () => {
                 onClick={() => handleViewMember(member)}
                 style={{ cursor: 'pointer' }}
               >
-                <div className={styles.info}>
-                  <span className={styles.label}>Email:</span>
-                  <span>{member.email}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Phone:</span>
-                  <span>{member.phone}</span>
-                </div>
+                {member.memberType !== 'participant' && member.email && (
+                  <div className={styles.info}>
+                    <span className={styles.label}>Email:</span>
+                    <span>{member.email}</span>
+                  </div>
+                )}
+                {member.memberType !== 'participant' && (
+                  <div className={styles.info}>
+                    <span className={styles.label}>Phone:</span>
+                    <span>{member.phone || '—'}</span>
+                  </div>
+                )}
+                {member.memberType === 'participant' && (
+                  <div className={styles.info}>
+                    <span className={styles.label}>Account Holder:</span>
+                    <span>{
+                      accountHolders.find(ah => ah.id === member.accountHolderId)
+                        ? `${accountHolders.find(ah => ah.id === member.accountHolderId)!.firstName} ${accountHolders.find(ah => ah.id === member.accountHolderId)!.lastName}`
+                        : '—'
+                    }</span>
+                  </div>
+                )}
                 <div className={styles.info}>
                   <span className={styles.label}>Program:</span>
-                  <span>{member.programType}</span>
+                  <span>{member.programType || '—'}</span>
                 </div>
                 <div className={styles.info}>
                   <span className={styles.label}>Ranking:</span>
                   <span>{member.ranking}</span>
                 </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Plan:</span>
-                  <span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span>
-                </div>
+                {member.memberType !== 'participant' && (
+                  <div className={styles.info}>
+                    <span className={styles.label}>Plan:</span>
+                    <span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span>
+                  </div>
+                )}
                 <div className={styles.info}>
                   <span className={styles.label}>Age Group:</span>
                   <span>{member.membershipAge}</span>
@@ -846,6 +897,46 @@ const Contacts = () => {
               </button>
             </div>
             <form onSubmit={handleSubmit} className={styles.form}>
+
+              {/* Member type toggle */}
+              {!editingMember && (
+                <div className={styles.memberTypeToggle}>
+                  <button
+                    type="button"
+                    className={`${styles.memberTypeToggleBtn} ${formData.memberType === 'account_holder' ? styles.memberTypeToggleBtnActive : ''}`}
+                    onClick={() => setFormData({ ...formData, memberType: 'account_holder', accountHolderId: '' })}
+                  >
+                    Account Holder
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.memberTypeToggleBtn} ${formData.memberType === 'participant' ? styles.memberTypeToggleBtnActive : ''}`}
+                    onClick={() => setFormData({ ...formData, memberType: 'participant' })}
+                  >
+                    Participant
+                  </button>
+                </div>
+              )}
+
+              {/* Account Holder picker — shown only for participants */}
+              {formData.memberType === 'participant' && (
+                <div className={styles.formGroup} style={{ marginBottom: 16 }}>
+                  <label className={styles.formLabel}>Account Holder</label>
+                  <select
+                    value={formData.accountHolderId}
+                    onChange={(e) => setFormData({ ...formData, accountHolderId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">— Select account holder —</option>
+                    {accountHolders.map(ah => (
+                      <option key={ah.id} value={ah.id}>
+                        {ah.firstName} {ah.lastName}{ah.email ? ` (${ah.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>First Name *</label>
@@ -884,13 +975,16 @@ const Contacts = () => {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Email *</label>
+                  <label className={styles.formLabel}>
+                    Email {formData.memberType !== 'participant' ? '*' : ''}
+                    {formData.memberType === 'participant' && <span style={{ color: 'var(--text-secondary)', fontSize: '0.8em', marginLeft: 4 }}>(optional for participants)</span>}
+                  </label>
                   <input
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className={styles.input}
-                    required
+                    required={formData.memberType !== 'participant'}
                   />
                 </div>
                 <div className={styles.formGroup}>
@@ -1408,11 +1502,38 @@ const Contacts = () => {
         <div className={styles.modal}>
           <div className={styles.modalContent} style={{ maxWidth: '800px' }}>
             <div className={styles.modalHeader}>
-              <h2>{viewingMember.firstName} {viewingMember.lastName}</h2>
+              <div>
+                <h2>{viewingMember.firstName} {viewingMember.lastName}</h2>
+                {viewingMember.memberType === 'participant' && (
+                  <span className={styles.memberTypeChip} style={{ marginTop: 4 }}>Participant</span>
+                )}
+              </div>
               <button onClick={handleCloseViewModal} className={styles.closeBtn}>
                 ✕
               </button>
             </div>
+
+            {/* Account Holder info banner for participants */}
+            {viewingMember.memberType === 'participant' && viewingMember.accountHolder && (
+              <div className={styles.accountHolderBanner}>
+                <span className={styles.accountHolderBannerLabel}>Account Holder:</span>
+                <span className={styles.accountHolderBannerName}>
+                  {viewingMember.accountHolder.firstName} {viewingMember.accountHolder.lastName}
+                </span>
+                {viewingMember.accountHolder.email && (
+                  <span className={styles.accountHolderBannerEmail}>{viewingMember.accountHolder.email}</span>
+                )}
+                <button
+                  className={styles.accountHolderBannerLink}
+                  onClick={() => {
+                    const ah = members.find(m => m.id === viewingMember.accountHolderId);
+                    if (ah) { handleCloseViewModal(); setTimeout(() => handleViewMember(ah), 50); }
+                  }}
+                >
+                  View →
+                </button>
+              </div>
+            )}
 
             {/* Tabs */}
             <div className={styles.viewTabs}>
@@ -1422,12 +1543,14 @@ const Contacts = () => {
               >
                 Details
               </button>
-              <button
-                className={`${styles.viewTab} ${viewTab === 'billing' ? styles.active : ''}`}
-                onClick={() => setViewTab('billing')}
-              >
-                Billing
-              </button>
+              {viewingMember.memberType !== 'participant' && (
+                <button
+                  className={`${styles.viewTab} ${viewTab === 'billing' ? styles.active : ''}`}
+                  onClick={() => setViewTab('billing')}
+                >
+                  Billing
+                </button>
+              )}
               <button
                 className={`${styles.viewTab} ${viewTab === 'attendance' ? styles.active : ''}`}
                 onClick={() => setViewTab('attendance')}
@@ -1549,6 +1672,65 @@ const Contacts = () => {
                     <div className={styles.viewValue}>{formatDate(viewingMember.updatedAt)}</div>
                   </div>
                 </div>
+
+                {/* Participants section (account holders only) */}
+                {viewingMember.memberType !== 'participant' && (
+                  <div className={styles.participantsSection}>
+                    <h4 className={styles.participantsSectionTitle}>
+                      Participants
+                      {viewingMember.participants && viewingMember.participants.length > 0 && (
+                        <span className={styles.participantCount}>{viewingMember.participants.length}</span>
+                      )}
+                    </h4>
+                    {viewingMember.participants && viewingMember.participants.length > 0 ? (
+                      <div className={styles.participantsList}>
+                        {viewingMember.participants.map((p: ParticipantSummary) => (
+                          <div
+                            key={p.id}
+                            className={styles.participantRow}
+                            onClick={() => {
+                              const full = members.find(m => m.id === p.id);
+                              if (full) { handleCloseViewModal(); setTimeout(() => handleViewMember(full), 50); }
+                              else {
+                                api.get(`/members/${p.id}`).then(data => {
+                                  handleCloseViewModal();
+                                  setTimeout(() => handleViewMember(data), 50);
+                                }).catch(() => {});
+                              }
+                            }}
+                          >
+                            <div className={styles.participantRowName}>
+                              {p.firstName} {p.lastName}
+                              <span className={`${styles.badge} ${styles[p.accountStatus]}`} style={{ marginLeft: 8, fontSize: '0.7rem' }}>
+                                {p.accountStatus}
+                              </span>
+                            </div>
+                            <div className={styles.participantRowMeta}>
+                              <span>{p.programType || 'No Program'}</span>
+                              <span className={styles.participantRankBadge}>{p.ranking}</span>
+                              <span>{p.membershipAge}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={styles.noParticipants}>No participants linked yet.</p>
+                    )}
+                    <button
+                      className={styles.addParticipantBtn}
+                      onClick={() => {
+                        handleCloseViewModal();
+                        setTimeout(() => {
+                          setFormData(fd => ({ ...fd, memberType: 'participant', accountHolderId: viewingMember.id.toString() }));
+                          setEditingMember(null);
+                          setIsModalOpen(true);
+                        }, 50);
+                      }}
+                    >
+                      + Add Participant
+                    </button>
+                  </div>
+                )}
               </div>
               )}
 
