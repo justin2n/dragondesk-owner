@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { serverError } from '../utils/errors';
 
 const router = Router();
 
@@ -91,12 +92,14 @@ router.post('/', async (req: AuthRequest, res) => {
       startDateTime,
       endDateTime,
       location,
+      locationId,
       maxAttendees,
       price,
       requiresRegistration,
       isRecurring,
       recurrencePattern,
       instructor,
+      instructorId,
       tags,
       imageUrl,
     } = req.body;
@@ -108,9 +111,9 @@ router.post('/', async (req: AuthRequest, res) => {
     const result = await run(
       `INSERT INTO events (
         name, description, eventType, programType, startDateTime, endDateTime,
-        location, maxAttendees, price, requiresRegistration, isRecurring,
-        recurrencePattern, instructor, tags, imageUrl, createdBy
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        location, locationId, maxAttendees, price, requiresRegistration, isRecurring,
+        recurrencePattern, instructor, instructorId, tags, imageUrl, createdBy
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -119,12 +122,14 @@ router.post('/', async (req: AuthRequest, res) => {
         startDateTime,
         endDateTime,
         location || null,
-        maxAttendees || null,
-        price || 0,
-        requiresRegistration ? 1 : 0,
-        isRecurring ? 1 : 0,
+        locationId ? parseInt(locationId) : null,
+        maxAttendees ? parseInt(maxAttendees) : null,
+        price ? parseFloat(price) : 0,
+        Boolean(requiresRegistration),
+        Boolean(isRecurring),
         recurrencePattern || null,
         instructor || null,
+        instructorId ? parseInt(instructorId) : null,
         tags || null,
         imageUrl || null,
         req.user!.id,
@@ -133,9 +138,9 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const newEvent = await get('SELECT * FROM events WHERE id = ?', [result.id]);
     res.status(201).json(newEvent);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create event error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    serverError(res, error);
   }
 });
 
@@ -186,8 +191,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
         location !== undefined ? location : event.location,
         maxAttendees !== undefined ? maxAttendees : event.maxAttendees,
         price !== undefined ? price : event.price,
-        requiresRegistration !== undefined ? (requiresRegistration ? 1 : 0) : event.requiresRegistration,
-        isRecurring !== undefined ? (isRecurring ? 1 : 0) : event.isRecurring,
+        requiresRegistration !== undefined ? Boolean(requiresRegistration) : Boolean(event.requiresRegistration),
+        isRecurring !== undefined ? Boolean(isRecurring) : Boolean(event.isRecurring),
         recurrencePattern !== undefined ? recurrencePattern : event.recurrencePattern,
         instructor !== undefined ? instructor : event.instructor,
         tags !== undefined ? tags : event.tags,
@@ -199,9 +204,9 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
     const updatedEvent = await get('SELECT * FROM events WHERE id = ?', [id]);
     res.json(updatedEvent);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update event error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    serverError(res, error);
   }
 });
 
