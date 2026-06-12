@@ -765,3 +765,55 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+.seriesBanner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.seriesBannerLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.seriesScopeToggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.seriesScopeBtn {
+  padding: 0.375rem 0.875rem;
+  background: none;
+  border: none;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.seriesScopeBtn:hover {
+  background-color: var(--color-grey);
+  color: var(--color-text-primary);
+}
+
+.seriesScopeBtnActive {
+  background-color: var(--color-red);
+  color: #fff;
+  font-weight: 600;
+}
+
+.seriesScopeBtnActive:hover {
+  background-color: var(--color-red-hover);
+}

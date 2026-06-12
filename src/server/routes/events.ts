@@ -247,57 +247,91 @@ router.post('/schedule', async (req: AuthRequest, res) => {
   }
 });
 
-// Update event
+// Update all events in a recurring series (shared fields only, not date/time)
+router.put('/series/:groupId', async (req: AuthRequest, res) => {
+  try {
+    const { groupId } = req.params;
+    const {
+      name, description, eventType, programType,
+      location, locationId, instructor, instructorId,
+      maxAttendees, price, requiresRegistration, tags, status,
+    } = req.body;
+
+    const likePattern = `%"groupId":"${groupId}"%`;
+    const result = await pool.query(
+      `UPDATE events SET
+        name = $1, description = $2, "eventType" = $3, "programType" = $4,
+        location = $5, "locationId" = $6, "maxAttendees" = $7, price = $8,
+        "requiresRegistration" = $9, instructor = $10, "instructorId" = $11,
+        tags = $12, status = COALESCE($13, status),
+        "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "recurrencePattern" LIKE $14`,
+      [
+        name, description || null, eventType,
+        programType && programType !== 'All' ? programType : null,
+        location || null, locationId ? parseInt(locationId) : null,
+        maxAttendees ? parseInt(maxAttendees) : null, price ? parseFloat(price) : 0,
+        Boolean(requiresRegistration), instructor || null,
+        instructorId ? parseInt(instructorId) : null,
+        tags || null, status || null,
+        likePattern,
+      ]
+    );
+
+    res.json({ updated: result.rowCount });
+  } catch (error: any) {
+    console.error('Update series error:', error);
+    res.status(500).json({ error: error?.message || 'Internal server error' });
+  }
+});
+
+// Update single event
 router.put('/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const event = await get('SELECT * FROM events WHERE id = ?', [id]);
+    const existing = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
 
-    if (!event) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
+    const event = existing.rows[0];
 
     const {
-      name,
-      description,
-      eventType,
-      programType,
-      startDateTime,
-      endDateTime,
-      location,
-      maxAttendees,
-      price,
-      requiresRegistration,
-      isRecurring,
-      recurrencePattern,
-      instructor,
-      tags,
-      imageUrl,
-      status,
+      name, description, eventType, programType,
+      startDateTime, endDateTime, location, locationId,
+      maxAttendees, price, requiresRegistration, isRecurring,
+      recurrencePattern, instructor, instructorId, tags, imageUrl, status,
     } = req.body;
 
-    await run(
+    const resolvedProgramType = programType !== undefined
+      ? (programType && programType !== 'All' ? programType : null)
+      : event.programType;
+
+    await pool.query(
       `UPDATE events SET
-        name = ?, description = ?, eventType = ?, programType = ?,
-        startDateTime = ?, endDateTime = ?, location = ?, maxAttendees = ?,
-        price = ?, requiresRegistration = ?, isRecurring = ?, recurrencePattern = ?,
-        instructor = ?, tags = ?, imageUrl = ?, status = ?,
-        updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+        name = $1, description = $2, "eventType" = $3, "programType" = $4,
+        "startDateTime" = $5, "endDateTime" = $6, location = $7, "locationId" = $8,
+        "maxAttendees" = $9, price = $10, "requiresRegistration" = $11,
+        "isRecurring" = $12, "recurrencePattern" = $13,
+        instructor = $14, "instructorId" = $15, tags = $16, "imageUrl" = $17,
+        status = $18, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $19`,
       [
         name || event.name,
         description !== undefined ? description : event.description,
         eventType || event.eventType,
-        programType !== undefined ? programType : event.programType,
+        resolvedProgramType,
         startDateTime || event.startDateTime,
         endDateTime || event.endDateTime,
         location !== undefined ? location : event.location,
-        maxAttendees !== undefined ? maxAttendees : event.maxAttendees,
-        price !== undefined ? price : event.price,
+        locationId !== undefined ? (locationId ? parseInt(locationId) : null) : event.locationId,
+        maxAttendees !== undefined ? (maxAttendees ? parseInt(maxAttendees) : null) : event.maxAttendees,
+        price !== undefined ? parseFloat(price) : event.price,
         requiresRegistration !== undefined ? Boolean(requiresRegistration) : Boolean(event.requiresRegistration),
         isRecurring !== undefined ? Boolean(isRecurring) : Boolean(event.isRecurring),
         recurrencePattern !== undefined ? recurrencePattern : event.recurrencePattern,
         instructor !== undefined ? instructor : event.instructor,
+        instructorId !== undefined ? (instructorId ? parseInt(instructorId) : null) : event.instructorId,
         tags !== undefined ? tags : event.tags,
         imageUrl !== undefined ? imageUrl : event.imageUrl,
         status || event.status,
@@ -305,11 +339,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
       ]
     );
 
-    const updatedEvent = await get('SELECT * FROM events WHERE id = ?', [id]);
-    res.json(updatedEvent);
+    const updated = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+    res.json(updated.rows[0]);
   } catch (error: any) {
     console.error('Update event error:', error);
-    serverError(res, error);
+    res.status(500).json({ error: error?.message || 'Internal server error' });
   }
 });
 

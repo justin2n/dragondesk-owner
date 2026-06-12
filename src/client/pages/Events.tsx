@@ -67,6 +67,8 @@ const Events = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
+  const [editAllInSeries, setEditAllInSeries] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [calendarPopupEventId, setCalendarPopupEventId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
@@ -224,11 +226,16 @@ const Events = () => {
 
     let recurrencePattern = '';
     let recurrenceEndDate = '';
+    let groupId: string | null = null;
     if (event.recurrencePattern) {
       try {
         const parsed = JSON.parse(event.recurrencePattern);
-        recurrencePattern = parsed.frequency || '';
-        recurrenceEndDate = parsed.endDate || '';
+        if (parsed.type === 'schedule_builder' && parsed.groupId) {
+          groupId = parsed.groupId;
+        } else {
+          recurrencePattern = parsed.frequency || '';
+          recurrenceEndDate = parsed.endDate || '';
+        }
       } catch {}
     }
 
@@ -251,6 +258,8 @@ const Events = () => {
       instructorId: event.instructorId ? String(event.instructorId) : '',
     });
     setEditingEvent(event);
+    setEditingGroupId(groupId);
+    setEditAllInSeries(false);
     setShowEditModal(true);
   };
 
@@ -258,41 +267,56 @@ const Events = () => {
     e.preventDefault();
     if (!editingEvent) return;
     try {
-      const startDateTime = `${formData.startDate}T${formData.startTime}`;
-      const endDateTime = `${formData.endDate}T${formData.endTime}`;
-
       const selectedLocation = locations.find(l => l.id === Number(formData.locationId));
       const locationName = selectedLocation ? selectedLocation.name : '';
-
       const selectedInstructor = instructors.find(i => i.id === Number(formData.instructorId));
       const instructorName = selectedInstructor
-        ? `${selectedInstructor.firstName} ${selectedInstructor.lastName}`
-        : '';
+        ? `${selectedInstructor.firstName} ${selectedInstructor.lastName}` : '';
 
-      const eventData = {
-        name: formData.name,
-        description: formData.description,
-        eventType: formData.eventType,
-        programType: formData.programType,
-        startDateTime,
-        endDateTime,
-        location: locationName,
-        locationId: formData.locationId || null,
-        maxAttendees: formData.maxAttendees,
-        price: formData.price,
-        requiresRegistration: formData.requiresRegistration,
-        isRecurring: formData.isRecurring,
-        recurrencePattern: formData.isRecurring ? JSON.stringify({
-          frequency: formData.recurrencePattern,
-          endDate: formData.recurrenceEndDate || null,
-        }) : null,
-        instructor: instructorName,
-        instructorId: formData.instructorId || null,
-      };
+      if (editAllInSeries && editingGroupId) {
+        await api.put(`/events/series/${editingGroupId}`, {
+          name: formData.name,
+          description: formData.description,
+          eventType: formData.eventType,
+          programType: formData.programType,
+          location: locationName,
+          locationId: formData.locationId || null,
+          maxAttendees: formData.maxAttendees,
+          price: formData.price,
+          requiresRegistration: formData.requiresRegistration,
+          instructor: instructorName,
+          instructorId: formData.instructorId || null,
+        });
+        toast('All sessions in this series updated', 'success');
+      } else {
+        const startDateTime = `${formData.startDate}T${formData.startTime}`;
+        const endDateTime = `${formData.endDate}T${formData.endTime}`;
+        await api.put(`/events/${editingEvent.id}`, {
+          name: formData.name,
+          description: formData.description,
+          eventType: formData.eventType,
+          programType: formData.programType,
+          startDateTime,
+          endDateTime,
+          location: locationName,
+          locationId: formData.locationId || null,
+          maxAttendees: formData.maxAttendees,
+          price: formData.price,
+          requiresRegistration: formData.requiresRegistration,
+          isRecurring: formData.isRecurring,
+          recurrencePattern: formData.isRecurring && !editingGroupId ? JSON.stringify({
+            frequency: formData.recurrencePattern,
+            endDate: formData.recurrenceEndDate || null,
+          }) : editingEvent.recurrencePattern,
+          instructor: instructorName,
+          instructorId: formData.instructorId || null,
+        });
+      }
 
-      await api.put(`/events/${editingEvent.id}`, eventData);
       setShowEditModal(false);
       setEditingEvent(null);
+      setEditingGroupId(null);
+      setEditAllInSeries(false);
       resetForm();
       loadEvents();
     } catch (error: any) {
@@ -1041,10 +1065,32 @@ const Events = () => {
           <div className={styles.modalContent}>
             <div className={styles.modalHeader}>
               <h2>Edit Event</h2>
-              <button onClick={() => { setShowEditModal(false); setEditingEvent(null); resetForm(); }} className={styles.closeBtn}>
+              <button onClick={() => { setShowEditModal(false); setEditingEvent(null); setEditingGroupId(null); setEditAllInSeries(false); resetForm(); }} className={styles.closeBtn}>
                 <CloseIcon size={24} />
               </button>
             </div>
+
+            {editingGroupId && (
+              <div className={styles.seriesBanner}>
+                <span className={styles.seriesBannerLabel}>Recurring series — edit:</span>
+                <div className={styles.seriesScopeToggle}>
+                  <button
+                    type="button"
+                    className={`${styles.seriesScopeBtn} ${!editAllInSeries ? styles.seriesScopeBtnActive : ''}`}
+                    onClick={() => setEditAllInSeries(false)}
+                  >
+                    This session only
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.seriesScopeBtn} ${editAllInSeries ? styles.seriesScopeBtnActive : ''}`}
+                    onClick={() => setEditAllInSeries(true)}
+                  >
+                    All sessions in series
+                  </button>
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleUpdate} className={styles.form}>
               <div className={styles.formGroup}>
@@ -1100,7 +1146,7 @@ const Events = () => {
                 />
               </div>
 
-              <div className={styles.dateTimeSection}>
+              {!editAllInSeries && <div className={styles.dateTimeSection}>
                 <h3 className={styles.sectionTitle}>Schedule</h3>
 
                 <div className={styles.formRow}>
@@ -1151,9 +1197,9 @@ const Events = () => {
                     />
                   </div>
                 </div>
-              </div>
+              </div>}
 
-              <div className={styles.recurringSection}>
+              {!editAllInSeries && <div className={styles.recurringSection}>
                 <div className={styles.formGroup}>
                   <label className={styles.checkbox}>
                     <input
@@ -1202,7 +1248,7 @@ const Events = () => {
                     </div>
                   </div>
                 )}
-              </div>
+              </div>}
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
