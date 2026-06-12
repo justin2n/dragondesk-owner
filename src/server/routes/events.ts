@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { query, run, get } from '../models/database';
+import { query, run, get, pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { serverError } from '../utils/errors';
 
@@ -207,15 +207,19 @@ router.post('/schedule', async (req: AuthRequest, res) => {
       type: 'schedule_builder', groupId, schedule, startDate, endDate,
     });
 
-    let created = 0;
-    for (const evt of toCreate) {
-      await run(
-        `INSERT INTO events (
-          name, description, eventType, programType, startDateTime, endDateTime,
-          location, locationId, maxAttendees, price, requiresRegistration, isRecurring,
-          recurrencePattern, instructor, instructorId, tags, createdBy
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+    const INSERT_SQL = `
+      INSERT INTO events (
+        name, description, "eventType", "programType", "startDateTime", "endDateTime",
+        location, "locationId", "maxAttendees", price, "requiresRegistration", "isRecurring",
+        "recurrencePattern", instructor, "instructorId", tags, "createdBy"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    `;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const evt of toCreate) {
+        await client.query(INSERT_SQL, [
           name, description || null, eventType, programType || null,
           evt.startDateTime, evt.endDateTime,
           location || null, locationId ? parseInt(locationId) : null,
@@ -224,15 +228,21 @@ router.post('/schedule', async (req: AuthRequest, res) => {
           recurrencePatternJson, instructor || null,
           instructorId ? parseInt(instructorId) : null, tags || null,
           req.user!.id,
-        ]
-      );
-      created++;
+        ]);
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
 
-    res.status(201).json({ created, groupId });
+    res.status(201).json({ created: toCreate.length, groupId });
   } catch (error: any) {
     console.error('Create schedule error:', error);
-    serverError(res, error);
+    // Return actual error message to help with debugging
+    res.status(500).json({ error: error?.message || 'Internal server error' });
   }
 });
 
