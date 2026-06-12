@@ -220,7 +220,8 @@ router.post('/schedule', async (req: AuthRequest, res) => {
       await client.query('BEGIN');
       for (const evt of toCreate) {
         await client.query(INSERT_SQL, [
-          name, description || null, eventType, programType || null,
+          name, description || null, eventType,
+          programType && programType !== 'All' ? programType : null,
           evt.startDateTime, evt.endDateTime,
           location || null, locationId ? parseInt(locationId) : null,
           maxAttendees ? parseInt(maxAttendees) : null, price ? parseFloat(price) : 0,

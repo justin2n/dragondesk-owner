@@ -1054,6 +1054,24 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // Rebuild programType CHECK constraint to include 'All' (was missing in older deployments)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS "events_programType_check";
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE events ADD CONSTRAINT "events_programType_check"
+          CHECK("programType" IN (
+            'Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
+            'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
+            'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
+            'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'
+          ));
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
     // Seed admin user if none exists
     await seedAdminUser(client);
 
