@@ -74,6 +74,15 @@ const Events = () => {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterProgram, setFilterProgram] = useState<string>('all');
 
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({
+    name: '', description: '', eventType: 'class', programType: 'All',
+    locationId: '', instructorId: '', maxAttendees: '', durationMinutes: '60',
+    selectedDays: [] as string[],
+    dayTimes: {} as Record<string, string[]>,
+    startDate: '', endDate: '',
+  });
+
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -376,6 +385,114 @@ const Events = () => {
     });
   };
 
+  const SCHED_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  const toggleScheduleDay = (day: string) => {
+    setScheduleForm(prev => {
+      if (prev.selectedDays.includes(day)) {
+        const { [day]: _removed, ...rest } = prev.dayTimes;
+        return { ...prev, selectedDays: prev.selectedDays.filter(d => d !== day), dayTimes: rest };
+      }
+      return { ...prev, selectedDays: [...prev.selectedDays, day], dayTimes: { ...prev.dayTimes, [day]: [''] } };
+    });
+  };
+
+  const updateScheduleTime = (day: string, idx: number, val: string) => {
+    setScheduleForm(prev => {
+      const times = [...(prev.dayTimes[day] || [])];
+      times[idx] = val;
+      return { ...prev, dayTimes: { ...prev.dayTimes, [day]: times } };
+    });
+  };
+
+  const addScheduleTime = (day: string) => {
+    setScheduleForm(prev => ({
+      ...prev,
+      dayTimes: { ...prev.dayTimes, [day]: [...(prev.dayTimes[day] || []), ''] },
+    }));
+  };
+
+  const removeScheduleTime = (day: string, idx: number) => {
+    setScheduleForm(prev => ({
+      ...prev,
+      dayTimes: { ...prev.dayTimes, [day]: prev.dayTimes[day].filter((_, i) => i !== idx) },
+    }));
+  };
+
+  const scheduleSessionCount = (() => {
+    if (!scheduleForm.startDate || !scheduleForm.endDate || scheduleForm.startDate > scheduleForm.endDate) return 0;
+    const DAY_NUM: Record<string, number> = {
+      Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 0,
+    };
+    let total = 0;
+    for (const day of scheduleForm.selectedDays) {
+      const times = (scheduleForm.dayTimes[day] || []).filter(t => t.trim());
+      if (!times.length) continue;
+      const targetDay = DAY_NUM[day];
+      let curDate = scheduleForm.startDate;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(curDate + 'T12:00:00Z');
+        if (d.getUTCDay() === targetDay) break;
+        d.setUTCDate(d.getUTCDate() + 1);
+        curDate = d.toISOString().slice(0, 10);
+      }
+      let count = 0;
+      while (curDate <= scheduleForm.endDate) {
+        count++;
+        const d = new Date(curDate + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 7);
+        curDate = d.toISOString().slice(0, 10);
+      }
+      total += count * times.length;
+    }
+    return total;
+  })();
+
+  const handleCreateSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const schedule = SCHED_DAYS
+      .filter(day => scheduleForm.selectedDays.includes(day))
+      .map(day => ({ day, times: (scheduleForm.dayTimes[day] || []).filter(t => t.trim()) }))
+      .filter(({ times }) => times.length > 0);
+
+    if (!schedule.length) {
+      toast('Select at least one day and add a start time for it', 'error');
+      return;
+    }
+
+    const selectedLocation = locations.find(l => l.id === Number(scheduleForm.locationId));
+    const selectedInstructor = instructors.find(i => i.id === Number(scheduleForm.instructorId));
+
+    try {
+      const result = await api.post('/events/schedule', {
+        name: scheduleForm.name,
+        description: scheduleForm.description,
+        eventType: scheduleForm.eventType,
+        programType: scheduleForm.programType,
+        location: selectedLocation?.name || '',
+        locationId: scheduleForm.locationId || null,
+        instructor: selectedInstructor
+          ? `${selectedInstructor.firstName} ${selectedInstructor.lastName}` : '',
+        instructorId: scheduleForm.instructorId || null,
+        maxAttendees: scheduleForm.maxAttendees,
+        durationMinutes: parseInt(scheduleForm.durationMinutes) || 60,
+        schedule,
+        startDate: scheduleForm.startDate,
+        endDate: scheduleForm.endDate,
+      });
+      setShowScheduleModal(false);
+      setScheduleForm({
+        name: '', description: '', eventType: 'class', programType: 'All',
+        locationId: '', instructorId: '', maxAttendees: '', durationMinutes: '60',
+        selectedDays: [], dayTimes: {}, startDate: '', endDate: '',
+      });
+      loadEvents();
+      toast(`Created ${result.created} class session${result.created !== 1 ? 's' : ''}`, 'success');
+    } catch (error: any) {
+      toast(error.message || 'Failed to create schedule', 'error');
+    }
+  };
+
   const getEventsForDate = (date: Date) => {
     return events.filter((event) => {
       const eventDate = new Date(event.startDateTime);
@@ -424,6 +541,9 @@ const Events = () => {
         <div className={styles.actions}>
           <button onClick={handleSyncMyStudio} className={styles.secondaryBtn}>
             Sync MyStudio
+          </button>
+          <button onClick={() => setShowScheduleModal(true)} className={styles.scheduleBtn}>
+            Schedule Builder
           </button>
           <button onClick={() => setShowCreateModal(true)} className={styles.primaryBtn}>
             <AddIcon size={20} />
@@ -1162,6 +1282,225 @@ const Events = () => {
                 </button>
                 <button type="submit" className={styles.primaryBtn}>
                   Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Builder Modal */}
+      {showScheduleModal && (
+        <div className={styles.modal}>
+          <div className={`${styles.modalContent} ${styles.scheduleModalContent}`}>
+            <div className={styles.modalHeader}>
+              <div>
+                <h2>Schedule Builder</h2>
+                <p className={styles.modalSubtitle}>Set up a recurring class schedule for a full season</p>
+              </div>
+              <button onClick={() => setShowScheduleModal(false)} className={styles.closeBtn}>
+                <CloseIcon size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSchedule} className={styles.form}>
+              <div className={styles.formGroup}>
+                <label>Class Name *</label>
+                <input
+                  type="text"
+                  value={scheduleForm.name}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, name: e.target.value })}
+                  required
+                  className={styles.input}
+                  placeholder="e.g. Pewee 1 TKD"
+                />
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Type *</label>
+                  <select
+                    value={scheduleForm.eventType}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, eventType: e.target.value })}
+                    className={styles.input}
+                  >
+                    {eventTypes.map(t => (
+                      <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Program</label>
+                  <select
+                    value={scheduleForm.programType}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, programType: e.target.value })}
+                    className={styles.input}
+                  >
+                    {programTypes.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Instructor</label>
+                  <select
+                    value={scheduleForm.instructorId}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, instructorId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">Select instructor...</option>
+                    {instructors.map(i => (
+                      <option key={i.id} value={i.id}>{i.firstName} {i.lastName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Location</label>
+                  <select
+                    value={scheduleForm.locationId}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, locationId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">Select location...</option>
+                    {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className={styles.scheduleSection}>
+                <h3 className={styles.sectionTitle}>Weekly Schedule</h3>
+                <p className={styles.scheduleHint}>Click days to select, then set start time(s) for each</p>
+
+                <div className={styles.dayPicker}>
+                  {SCHED_DAYS.map(day => (
+                    <button
+                      key={day}
+                      type="button"
+                      className={`${styles.dayPill} ${scheduleForm.selectedDays.includes(day) ? styles.dayPillActive : ''}`}
+                      onClick={() => toggleScheduleDay(day)}
+                    >
+                      {day.slice(0, 3)}
+                    </button>
+                  ))}
+                </div>
+
+                {SCHED_DAYS.filter(day => scheduleForm.selectedDays.includes(day)).map(day => (
+                  <div key={day} className={styles.dayTimesSection}>
+                    <div className={styles.dayTimesHeader}>{day}</div>
+                    <div className={styles.dayTimesList}>
+                      {(scheduleForm.dayTimes[day] || ['']).map((time, idx) => (
+                        <div key={idx} className={styles.dayTimeRow}>
+                          <input
+                            type="time"
+                            value={time}
+                            onChange={(e) => updateScheduleTime(day, idx, e.target.value)}
+                            required
+                            className={`${styles.input} ${styles.timeInput}`}
+                          />
+                          {(scheduleForm.dayTimes[day] || []).length > 1 && (
+                            <button
+                              type="button"
+                              className={styles.removeTimeBtn}
+                              onClick={() => removeScheduleTime(day, idx)}
+                              aria-label="Remove time"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className={styles.addTimeBtn}
+                        onClick={() => addScheduleTime(day)}
+                      >
+                        + Add time
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {scheduleForm.selectedDays.length === 0 && (
+                  <div className={styles.noDaysHint}>No days selected yet</div>
+                )}
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Class Duration (minutes) *</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="300"
+                    step="5"
+                    value={scheduleForm.durationMinutes}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, durationMinutes: e.target.value })}
+                    required
+                    className={styles.input}
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Max Attendees</label>
+                  <input
+                    type="number"
+                    value={scheduleForm.maxAttendees}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, maxAttendees: e.target.value })}
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label>Season Start Date *</label>
+                  <input
+                    type="date"
+                    value={scheduleForm.startDate}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, startDate: e.target.value })}
+                    required
+                    className={styles.input}
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Season End Date *</label>
+                  <input
+                    type="date"
+                    value={scheduleForm.endDate}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, endDate: e.target.value })}
+                    min={scheduleForm.startDate}
+                    required
+                    className={styles.input}
+                  />
+                </div>
+              </div>
+
+              {scheduleSessionCount > 0 && (
+                <div className={styles.schedulePreview}>
+                  <CalendarIcon size={16} />
+                  <span>
+                    This will create <strong>{scheduleSessionCount}</strong> class session{scheduleSessionCount !== 1 ? 's' : ''}
+                    {scheduleSessionCount > 100 && (
+                      <span className={styles.schedulePreviewWarn}> — consider a shorter date range</span>
+                    )}
+                  </span>
+                </div>
+              )}
+
+              <div className={styles.modalActions}>
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleModal(false)}
+                  className={styles.secondaryBtn}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={styles.primaryBtn}
+                  disabled={scheduleSessionCount === 0}
+                >
+                  Create {scheduleSessionCount > 0 ? `${scheduleSessionCount} ` : ''}Sessions
                 </button>
               </div>
             </form>

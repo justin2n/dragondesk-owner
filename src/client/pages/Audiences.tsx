@@ -43,6 +43,8 @@ const Audiences = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [rankingOpen, setRankingOpen] = useState(false);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
 
   const emptyFilters = {
     accountStatus: [] as AccountStatus[],
@@ -90,7 +92,23 @@ const Audiences = () => {
   const handleOpenModal = () => {
     setFormData({ name: '', description: '', filters: emptyFilters });
     setRankingOpen(false);
+    setTagInput('');
     setIsModalOpen(true);
+    api.get('/members/tags').then(setAvailableTags).catch(() => {});
+  };
+
+  const handleAddTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (!trimmed) return;
+    setFormData(prev => {
+      if (prev.filters.tags.includes(trimmed)) return prev;
+      return { ...prev, filters: { ...prev.filters, tags: [...prev.filters.tags, trimmed] } };
+    });
+    setTagInput('');
+  };
+
+  const handleRemoveTag = (tag: string) => {
+    setFormData(prev => ({ ...prev, filters: { ...prev.filters, tags: prev.filters.tags.filter(t => t !== tag) } }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -355,6 +373,45 @@ const Audiences = () => {
                           ))}
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Tags */}
+              <div className={styles.filterBlock}>
+                <label className={styles.filterLabel}>
+                  Tags {f.tags.length > 0 && <span className={styles.rankingBadge}>{f.tags.length} selected</span>}
+                </label>
+                {availableTags.length > 0 && (
+                  <div className={styles.pillGroup}>
+                    {availableTags.map(tag => (
+                      <button key={tag} type="button"
+                        className={`${styles.pill} ${styles.pillSmall} ${f.tags.includes(tag) ? styles.pillActive : ''}`}
+                        onClick={() => f.tags.includes(tag) ? handleRemoveTag(tag) : handleAddTag(tag)}>
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className={styles.tagInputRow}>
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddTag(tagInput); } }}
+                    className={styles.input}
+                    placeholder="Type a tag and press Enter or Add"
+                  />
+                  <button type="button" className={styles.tagAddBtn} onClick={() => handleAddTag(tagInput)}>Add</button>
+                </div>
+                {f.tags.length > 0 && (
+                  <div className={styles.pillGroup} style={{ marginTop: 8 }}>
+                    {f.tags.map(tag => (
+                      <span key={tag} className={styles.tagChip}>
+                        {tag}
+                        <button type="button" className={styles.tagChipRemove} onClick={() => handleRemoveTag(tag)}>×</button>
+                      </span>
                     ))}
                   </div>
                 )}

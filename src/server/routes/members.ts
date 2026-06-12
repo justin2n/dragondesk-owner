@@ -106,6 +106,30 @@ router.get('/', async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/tags', async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT tags FROM members WHERE tags IS NOT NULL AND tags != ''`
+    );
+    const tagSet = new Set<string>();
+    for (const row of result.rows) {
+      const raw: string = row.tags;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((t: any) => { if (t && typeof t === 'string' && t.trim()) tagSet.add(t.trim()); });
+          continue;
+        }
+      } catch {}
+      raw.split(',').forEach(t => { if (t.trim()) tagSet.add(t.trim()); });
+    }
+    res.json(Array.from(tagSet).sort());
+  } catch (error) {
+    console.error('Get tags error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
     const result = await pool.query('SELECT * FROM members WHERE id = $1', [req.params.id]);

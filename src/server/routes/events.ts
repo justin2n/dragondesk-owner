@@ -144,6 +144,98 @@ router.post('/', async (req: AuthRequest, res) => {
   }
 });
 
+// Bulk schedule builder — creates one event row per occurrence
+router.post('/schedule', async (req: AuthRequest, res) => {
+  try {
+    const {
+      name, description, eventType, programType,
+      location, locationId, instructor, instructorId,
+      durationMinutes, maxAttendees, price, requiresRegistration,
+      schedule, startDate, endDate, tags,
+    } = req.body;
+
+    if (!name || !eventType || !Array.isArray(schedule) || !schedule.length || !startDate || !endDate) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const DAY_NUM: Record<string, number> = {
+      Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
+      Thursday: 4, Friday: 5, Saturday: 6,
+    };
+
+    const duration = Math.max(5, Math.min(480, parseInt(durationMinutes) || 60));
+    const groupId = `sched_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const toCreate: Array<{ startDateTime: string; endDateTime: string }> = [];
+
+    for (const { day, times } of schedule as Array<{ day: string; times: string[] }>) {
+      const targetDay = DAY_NUM[day];
+      if (targetDay === undefined || !Array.isArray(times) || !times.length) continue;
+
+      // Advance from startDate to first occurrence of this weekday
+      let curDate = startDate;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(curDate + 'T12:00:00Z');
+        if (d.getUTCDay() === targetDay) break;
+        d.setUTCDate(d.getUTCDate() + 1);
+        curDate = d.toISOString().slice(0, 10);
+      }
+
+      while (curDate <= endDate) {
+        for (const time of times) {
+          if (!time || !/^\d{2}:\d{2}$/.test(time)) continue;
+          const startDT = `${curDate}T${time}:00`;
+          const dtZ = new Date(startDT + 'Z');
+          dtZ.setUTCMinutes(dtZ.getUTCMinutes() + duration);
+          toCreate.push({ startDateTime: startDT, endDateTime: dtZ.toISOString().slice(0, 19) });
+        }
+        const d = new Date(curDate + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 7);
+        curDate = d.toISOString().slice(0, 10);
+      }
+    }
+
+    if (toCreate.length === 0) {
+      return res.status(400).json({ error: 'No sessions within the specified date range' });
+    }
+    if (toCreate.length > 500) {
+      return res.status(400).json({
+        error: `Too many sessions (${toCreate.length}). Shorten the date range or reduce time slots.`,
+      });
+    }
+
+    const recurrencePatternJson = JSON.stringify({
+      type: 'schedule_builder', groupId, schedule, startDate, endDate,
+    });
+
+    let created = 0;
+    for (const evt of toCreate) {
+      await run(
+        `INSERT INTO events (
+          name, description, eventType, programType, startDateTime, endDateTime,
+          location, locationId, maxAttendees, price, requiresRegistration, isRecurring,
+          recurrencePattern, instructor, instructorId, tags, createdBy
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          name, description || null, eventType, programType || null,
+          evt.startDateTime, evt.endDateTime,
+          location || null, locationId ? parseInt(locationId) : null,
+          maxAttendees ? parseInt(maxAttendees) : null, price ? parseFloat(price) : 0,
+          Boolean(requiresRegistration), true,
+          recurrencePatternJson, instructor || null,
+          instructorId ? parseInt(instructorId) : null, tags || null,
+          req.user!.id,
+        ]
+      );
+      created++;
+    }
+
+    res.status(201).json({ created, groupId });
+  } catch (error: any) {
+    console.error('Create schedule error:', error);
+    serverError(res, error);
+  }
+});
+
 // Update event
 router.put('/:id', async (req: AuthRequest, res) => {
   try {

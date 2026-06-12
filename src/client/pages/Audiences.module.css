@@ -497,3 +497,59 @@
   background-color: var(--color-red-hover);
   box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
+
+/* ── Tag filter ──────────────────────────────────────────── */
+.tagInputRow {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.tagInputRow .input {
+  flex: 1;
+}
+
+.tagAddBtn {
+  padding: 0.5rem 1rem;
+  background-color: var(--color-grey);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s;
+}
+
+.tagAddBtn:hover {
+  border-color: var(--color-text-secondary);
+}
+
+.tagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background-color: var(--color-red);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem 0.25rem 0.75rem;
+}
+
+.tagChipRemove {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tagChipRemove:hover {
+  color: #fff;
+}
