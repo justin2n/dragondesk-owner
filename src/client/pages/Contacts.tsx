@@ -58,6 +58,8 @@ const Contacts = () => {
   const [viewTab, setViewTab] = useState<'details' | 'billing' | 'attendance' | 'history'>('details');
   const [memberHistory, setMemberHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [webActivity, setWebActivity] = useState<any[]>([]);
+  const [webActivityLoading, setWebActivityLoading] = useState(false);
   const [memberQRCode, setMemberQRCode] = useState<{ qrCode: string; qrCodeData: string } | null>(null);
   const [memberCheckIns, setMemberCheckIns] = useState<any[]>([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
@@ -451,6 +453,18 @@ const Contacts = () => {
     }
   };
 
+  const loadWebActivity = async (memberId: number) => {
+    setWebActivityLoading(true);
+    try {
+      const data = await api.get(`/members/${memberId}/web-activity`);
+      setWebActivity(Array.isArray(data) ? data : []);
+    } catch {
+      setWebActivity([]);
+    } finally {
+      setWebActivityLoading(false);
+    }
+  };
+
   const handleViewMember = (member: Member) => {
     setViewingMember(member);
     setViewTab('details');
@@ -469,6 +483,7 @@ const Contacts = () => {
     setAttendanceError(null);
     setShowAddPaymentModal(false);
     setShowSubscribeModal(false);
+    setWebActivity([]);
   };
 
   const loadMemberBillingData = async (memberId: number) => {
@@ -1586,7 +1601,7 @@ const Contacts = () => {
               </button>
               <button
                 className={`${styles.viewTab} ${viewTab === 'history' ? styles.active : ''}`}
-                onClick={() => setViewTab('history')}
+                onClick={() => { setViewTab('history'); if (webActivity.length === 0) loadWebActivity(viewingMember.id); }}
               >
                 History
               </button>
@@ -1981,6 +1996,7 @@ const Contacts = () => {
 
               {viewTab === 'history' && (
                 <div className={styles.viewSection}>
+                  {/* CRM change history */}
                   <div className={styles.billingBlock}>
                     <h4 className={styles.billingTitle}>Change History</h4>
                     {historyLoading ? (
@@ -2016,6 +2032,65 @@ const Contacts = () => {
                             )}
                           </div>
                         ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Website activity */}
+                  <div className={styles.billingBlock}>
+                    <h4 className={styles.billingTitle}>Website Activity</h4>
+                    {webActivityLoading ? (
+                      <div className={styles.billingLoading}>Loading website activity...</div>
+                    ) : webActivity.length === 0 ? (
+                      <p className={styles.billingEmpty}>No website activity recorded for this contact.</p>
+                    ) : (
+                      <div className={styles.webActivityList}>
+                        {(() => {
+                          let lastDate = '';
+                          return webActivity.map((evt, i) => {
+                            const d = new Date(evt.createdAt);
+                            const dateLabel = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+                            const showDate = dateLabel !== lastDate;
+                            lastDate = dateLabel;
+
+                            const label = (() => {
+                              if (evt.eventType === 'pageview') return evt.pageTitle || evt.pagePath || 'Page view';
+                              if (evt.eventType === 'form_submit') return 'Form submitted';
+                              if (evt.eventType === 'click') return evt.elementText ? `Clicked "${evt.elementText.slice(0, 40)}"` : 'Clicked element';
+                              if (evt.eventType === 'scroll') return 'Scrolled page';
+                              return evt.eventType;
+                            })();
+
+                            const sub = (() => {
+                              if (evt.eventType === 'pageview' && evt.pagePath) return evt.pagePath;
+                              if (evt.pagePath && evt.eventType !== 'pageview') return evt.pagePath;
+                              return null;
+                            })();
+
+                            return (
+                              <div key={i}>
+                                {showDate && (
+                                  <div className={styles.webActivityDateSep}>{dateLabel}</div>
+                                )}
+                                <div className={styles.webActivityRow}>
+                                  <span className={`${styles.webActivityTypePill} ${styles[`webEvt_${evt.eventType}`]}`}>
+                                    {evt.eventType === 'pageview' ? '👁' :
+                                     evt.eventType === 'form_submit' ? '📝' :
+                                     evt.eventType === 'click' ? '🖱' :
+                                     evt.eventType === 'scroll' ? '↕' : '•'}
+                                  </span>
+                                  <div className={styles.webActivityInfo}>
+                                    <span className={styles.webActivityLabel}>{label}</span>
+                                    {sub && <span className={styles.webActivitySub}>{sub}</span>}
+                                  </div>
+                                  <span className={styles.webActivityTime}>
+                                    {d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     )}
                   </div>

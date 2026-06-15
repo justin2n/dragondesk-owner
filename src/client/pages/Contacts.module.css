@@ -1457,6 +1457,90 @@
   font-weight: 500;
 }
 
+/* ── Website Activity timeline ──────────────────────────────────────────── */
+
+.webActivityList {
+  display: flex;
+  flex-direction: column;
+}
+
+.webActivityDateSep {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  padding: 0.75rem 0 0.35rem;
+  border-top: 1px solid var(--color-border);
+  margin-top: 0.25rem;
+}
+
+.webActivityList > div:first-child .webActivityDateSep {
+  border-top: none;
+  padding-top: 0;
+}
+
+.webActivityRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.webActivityRow:last-child {
+  border-bottom: none;
+}
+
+.webActivityTypePill {
+  flex-shrink: 0;
+  font-size: 13px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--color-grey);
+}
+
+.webEvt_pageview    { background: rgba(59, 130, 246, 0.15); }
+.webEvt_form_submit { background: rgba(16, 185, 129, 0.15); }
+.webEvt_click       { background: rgba(245, 158, 11, 0.15); }
+.webEvt_scroll      { background: rgba(107, 114, 128, 0.12); }
+
+.webActivityInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.webActivityLabel {
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.webActivitySub {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.webActivityTime {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  padding-top: 3px;
+}
+
 /* ── Account Holder / Participant split ─────────────────────────────────── */
 
 .typeTabs {

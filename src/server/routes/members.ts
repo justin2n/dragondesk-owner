@@ -328,6 +328,43 @@ router.put('/:id', async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/:id/web-activity', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 200, 500);
+
+    // Find all visitor identities linked to this member, then pull their events
+    const result = await pool.query(
+      `SELECT
+         te."eventType",
+         te."pagePath",
+         te."pageTitle",
+         te."pageUrl",
+         te.selector,
+         te."elementText",
+         te.metadata,
+         te."createdAt",
+         tv."ipAddress",
+         tv.country,
+         tv.city
+       FROM tracking_events te
+       INNER JOIN visitor_identities vi
+         ON vi."visitorId" = te."visitorId" AND vi.token = te.token
+       LEFT JOIN tracking_visitors tv
+         ON tv."visitorId" = te."visitorId" AND tv.token = te.token
+       WHERE vi."memberId" = $1 AND vi.type = 'email'
+       ORDER BY te."createdAt" DESC
+       LIMIT $2`,
+      [id, limit]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get member web activity error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:id/history', async (req: AuthRequest, res) => {
   try {
     const result = await pool.query(
