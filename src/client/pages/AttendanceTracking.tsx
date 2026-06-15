@@ -38,7 +38,8 @@ const AttendanceTracking: React.FC = () => {
     checkInsByProgram: {}
   });
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('today');
+  const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('week');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -55,6 +56,7 @@ const AttendanceTracking: React.FC = () => {
 
   const loadCheckIns = async () => {
     setLoading(true);
+    setError(null);
     try {
       const locationParam = isAllLocations ? 'all' : selectedLocation?.id;
       let url = `/api/check-ins?locationId=${locationParam}`;
@@ -74,7 +76,8 @@ const AttendanceTracking: React.FC = () => {
       });
 
       if (!response.ok) {
-        console.error('Check-ins API error:', response.status);
+        const errData = await response.json().catch(() => ({}));
+        setError(errData.error || `Failed to load check-ins (${response.status})`);
         return;
       }
 
@@ -82,8 +85,8 @@ const AttendanceTracking: React.FC = () => {
       if (Array.isArray(data)) {
         setCheckIns(data);
       }
-    } catch (error) {
-      console.error('Error loading check-ins:', error);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load check-ins');
     } finally {
       setLoading(false);
     }
@@ -312,6 +315,8 @@ const AttendanceTracking: React.FC = () => {
       <div className={styles.tableContainer}>
         {loading ? (
           <div className={styles.loading}>Loading check-ins...</div>
+        ) : error ? (
+          <div className={styles.empty} style={{ color: '#ef4444' }}>Error: {error}</div>
         ) : checkIns.length === 0 ? (
           <div className={styles.empty}>No check-ins found for the selected period</div>
         ) : (
