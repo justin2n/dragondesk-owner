@@ -22,6 +22,7 @@ import {
   BillingIcon,
   CheckIcon,
   SalesSignalsIcon,
+  BellIcon,
 } from './Icons';
 import styles from './Layout.module.css';
 import AIAssistant from './AIAssistant';
@@ -35,6 +36,8 @@ const Layout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showLocationMenu, setShowLocationMenu] = useState(false);
   const [signalCount, setSignalCount] = useState(0);
+  const [alerts, setAlerts] = useState<{ type: string; message: string; severity: string }[]>([]);
+  const [showAlerts, setShowAlerts] = useState(false);
 
   // Load locations when Layout mounts (user is authenticated at this point)
   useEffect(() => {
@@ -59,6 +62,25 @@ const Layout = () => {
     };
     fetchCount();
     const interval = setInterval(fetchCount, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll system alerts every 5 minutes
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/alerts', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAlerts(data.alerts || []);
+        }
+      } catch {}
+    };
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -137,14 +159,46 @@ const Layout = () => {
           ))}
         </nav>
         <div className={styles.sidebarFooter}>
-          {isSidebarOpen && (
-            <div className={styles.userInfo}>
-              <div className={styles.userName}>
-                {user?.firstName} {user?.lastName}
+          <div className={styles.footerUserRow}>
+            {isSidebarOpen && (
+              <div className={styles.userInfo}>
+                <div className={styles.userName}>
+                  {user?.firstName} {user?.lastName}
+                </div>
+                <div className={styles.userRole}>{user?.role}</div>
               </div>
-              <div className={styles.userRole}>{user?.role}</div>
+            )}
+            <div className={styles.bellWrapper}>
+              <button
+                className={`${styles.bellBtn} ${alerts.length > 0 ? styles.bellActive : ''}`}
+                onClick={() => setShowAlerts(v => !v)}
+                aria-label="System alerts"
+              >
+                <BellIcon size={20} />
+                {alerts.length > 0 && isSidebarOpen && (
+                  <span className={styles.bellBadge}>{alerts.length}</span>
+                )}
+                {alerts.length > 0 && !isSidebarOpen && (
+                  <span className={styles.bellDot} />
+                )}
+              </button>
+              {showAlerts && (
+                <div className={styles.alertDropdown}>
+                  <div className={styles.alertDropdownTitle}>System Alerts</div>
+                  {alerts.length === 0 ? (
+                    <div className={styles.alertEmpty}>No active alerts</div>
+                  ) : (
+                    alerts.map((alert, i) => (
+                      <div key={i} className={`${styles.alertItem} ${styles[`alertSev_${alert.severity}`]}`}>
+                        <span className={styles.alertItemDot} />
+                        <span className={styles.alertItemMsg}>{alert.message}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
           <button onClick={logout} className={styles.logoutBtn}>
             <LogoutIcon size={20} />
             {isSidebarOpen && <span>Logout</span>}

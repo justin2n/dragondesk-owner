@@ -38,6 +38,7 @@ import {
   MdViewModule,
   MdViewList,
   MdBolt,
+  MdNotifications,
 } from 'react-icons/md';
 
 interface IconProps {
@@ -94,3 +95,4 @@ export const SalesSignalsIcon: React.FC<IconProps> = (props) => <MdBolt {...prop
 export const DojoIcon: React.FC<IconProps> = (props) => (
   <MdSportsMartialArts {...props} />
 );
+export const BellIcon: React.FC<IconProps> = (props) => <MdNotifications {...props} />;
