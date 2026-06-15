@@ -1054,6 +1054,11 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // Attendance tracking columns (added after initial deploy)
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalClassesAttended" INTEGER DEFAULT 0`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastCheckInAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "attendanceStreak" INTEGER DEFAULT 0`);
+
     // Rebuild programType CHECK constraint to include 'All' (was missing in older deployments)
     await client.query(`
       DO $$ BEGIN

@@ -1553,7 +1553,7 @@ const Contacts = () => {
               )}
               <button
                 className={`${styles.viewTab} ${viewTab === 'attendance' ? styles.active : ''}`}
-                onClick={() => setViewTab('attendance')}
+                onClick={() => { setViewTab('attendance'); loadMemberAttendanceData(viewingMember.id); }}
               >
                 Attendance
               </button>
