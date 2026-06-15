@@ -288,6 +288,25 @@
   font-size: 13px;
   color: var(--color-text-primary);
   line-height: 1.45;
+  flex: 1;
+}
+
+.alertDismissBtn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  margin-left: 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.alertDismissBtn:hover {
+  color: var(--color-text-primary);
 }
 
 .userInfo {

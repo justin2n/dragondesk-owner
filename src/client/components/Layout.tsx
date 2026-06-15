@@ -38,6 +38,21 @@ const Layout = () => {
   const [signalCount, setSignalCount] = useState(0);
   const [alerts, setAlerts] = useState<{ type: string; message: string; severity: string }[]>([]);
   const [showAlerts, setShowAlerts] = useState(false);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('dd_dismissed_alerts') || '{}'); } catch { return {}; }
+  });
+
+  const dismissAlert = (type: string) => {
+    const updated = { ...dismissedAlerts, [type]: Date.now() };
+    setDismissedAlerts(updated);
+    localStorage.setItem('dd_dismissed_alerts', JSON.stringify(updated));
+  };
+
+  const visibleAlerts = alerts.filter(a => {
+    const dismissedAt = dismissedAlerts[a.type];
+    if (!dismissedAt) return true;
+    return Date.now() - dismissedAt > 24 * 60 * 60 * 1000;
+  });
 
   // Load locations when Layout mounts (user is authenticated at this point)
   useEffect(() => {
@@ -170,28 +185,35 @@ const Layout = () => {
             )}
             <div className={styles.bellWrapper}>
               <button
-                className={`${styles.bellBtn} ${alerts.length > 0 ? styles.bellActive : ''}`}
+                className={`${styles.bellBtn} ${visibleAlerts.length > 0 ? styles.bellActive : ''}`}
                 onClick={() => setShowAlerts(v => !v)}
                 aria-label="System alerts"
               >
                 <BellIcon size={20} />
-                {alerts.length > 0 && isSidebarOpen && (
-                  <span className={styles.bellBadge}>{alerts.length}</span>
+                {visibleAlerts.length > 0 && isSidebarOpen && (
+                  <span className={styles.bellBadge}>{visibleAlerts.length}</span>
                 )}
-                {alerts.length > 0 && !isSidebarOpen && (
+                {visibleAlerts.length > 0 && !isSidebarOpen && (
                   <span className={styles.bellDot} />
                 )}
               </button>
               {showAlerts && (
                 <div className={styles.alertDropdown}>
                   <div className={styles.alertDropdownTitle}>System Alerts</div>
-                  {alerts.length === 0 ? (
+                  {visibleAlerts.length === 0 ? (
                     <div className={styles.alertEmpty}>No active alerts</div>
                   ) : (
-                    alerts.map((alert, i) => (
+                    visibleAlerts.map((alert, i) => (
                       <div key={i} className={`${styles.alertItem} ${styles[`alertSev_${alert.severity}`]}`}>
                         <span className={styles.alertItemDot} />
                         <span className={styles.alertItemMsg}>{alert.message}</span>
+                        <button
+                          className={styles.alertDismissBtn}
+                          onClick={() => dismissAlert(alert.type)}
+                          aria-label="Dismiss alert"
+                        >
+                          ×
+                        </button>
                       </div>
                     ))
                   )}
