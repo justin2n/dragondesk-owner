@@ -45,6 +45,41 @@ router.get('/classes/today/:locationId', async (req, res) => {
   }
 });
 
+// Get today's classes for a specific member (filtered by their program type)
+router.get('/classes/member/:memberId', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+
+    const memberResult = await pool.query(
+      `SELECT "programType" FROM members WHERE id = $1`,
+      [memberId]
+    );
+
+    if (memberResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    const raw = memberResult.rows[0].programType;
+    const programType = (raw && raw !== 'No Program Selected') ? raw : null;
+
+    const result = await pool.query(`
+      SELECT e.*, u."firstName" as "instructorFirstName", u."lastName" as "instructorLastName"
+      FROM events e
+      LEFT JOIN users u ON e."instructorId" = u.id
+      WHERE DATE(e."startDateTime") = CURRENT_DATE
+        AND e.status = 'scheduled'
+        AND e."eventType" = 'class'
+        AND ($1::text IS NULL OR e."programType" = $1)
+      ORDER BY e."startDateTime" ASC
+    `, [programType]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching member classes:', error);
+    res.status(500).json({ error: 'Failed to fetch classes' });
+  }
+});
+
 // Check in via QR code scan
 router.post('/check-in/qr', async (req, res) => {
   try {
