@@ -114,9 +114,9 @@ const AppRoutes = () => {
         <Route
           path="workforce"
           element={
-            <SuperAdminRoute>
+            <AdminRoute>
               <WorkforceManagement />
-            </SuperAdminRoute>
+            </AdminRoute>
           }
         />
         <Route
