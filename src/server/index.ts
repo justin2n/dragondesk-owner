@@ -46,6 +46,7 @@ import importCsvRoutes from './routes/import-csv';
 import webhooksRoutes from './routes/webhooks';
 import posRoutes from './routes/pos';
 import adminEmailsRoutes from './routes/admin-emails';
+import salesSignalsRoutes from './routes/sales-signals';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
 import { serverError } from './utils/errors';
 import { createHash } from 'crypto';
@@ -329,6 +330,7 @@ app.use('/api/import-csv', importCsvRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/admin-emails', adminEmailsRoutes);
+app.use('/api/sales-signals', salesSignalsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });

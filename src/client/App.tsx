@@ -21,6 +21,7 @@ import Billing from './pages/Billing';
 import Kiosk from './pages/Kiosk';
 import POS from './pages/POS';
 import AttendanceTracking from './pages/AttendanceTracking';
+import SalesSignals from './pages/SalesSignals';
 import Layout from './components/Layout';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -109,6 +110,7 @@ const AppRoutes = () => {
         <Route path="social" element={<DragonDeskSocial />} />
         <Route path="analytics" element={<DragonDeskAnalytics />} />
         <Route path="attendance" element={<AttendanceTracking />} />
+        <Route path="sales-signals" element={<SalesSignals />} />
         <Route
           path="workforce"
           element={

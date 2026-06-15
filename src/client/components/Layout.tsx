@@ -21,6 +21,7 @@ import {
   WorkforceIcon,
   BillingIcon,
   CheckIcon,
+  SalesSignalsIcon,
 } from './Icons';
 import styles from './Layout.module.css';
 import AIAssistant from './AIAssistant';
@@ -33,6 +34,7 @@ const Layout = () => {
   const { locations, selectedLocation, isAllLocations, setSelectedLocation, setAllLocations, loadLocations } = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showLocationMenu, setShowLocationMenu] = useState(false);
+  const [signalCount, setSignalCount] = useState(0);
 
   // Load locations when Layout mounts (user is authenticated at this point)
   useEffect(() => {
@@ -41,12 +43,32 @@ const Layout = () => {
     }
   }, []);
 
+  // Poll signal count for sidebar badge
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/sales-signals/count', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSignalCount(data.count || 0);
+        }
+      } catch {}
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   const navItems = [
     { path: '/', label: 'Dashboard', Icon: DashboardIcon },
     { path: '/members', label: 'Contacts', Icon: MembersIcon },
     { path: '/audiences', label: 'Audiences', Icon: AudiencesIcon },
     { path: '/events', label: 'Events & Calendar', Icon: CalendarIcon },
     { path: '/attendance', label: 'Attendance', Icon: CheckIcon },
+    { path: '/sales-signals', label: 'Sales Signals', Icon: SalesSignalsIcon, badge: signalCount },
     { path: '/optimize', label: 'DragonDesk: Optimize', Icon: OptimizeIcon },
     { path: '/engage', label: 'DragonDesk: Engage', Icon: EngageIcon },
     { path: '/outreach', label: 'DragonDesk: Outreach', Icon: OutreachIcon },
@@ -105,6 +127,12 @@ const Layout = () => {
                 <item.Icon size={20} />
               </span>
               {isSidebarOpen && <span>{item.label}</span>}
+              {isSidebarOpen && (item as any).badge > 0 && (
+                <span className={styles.navBadge}>{(item as any).badge}</span>
+              )}
+              {!isSidebarOpen && (item as any).badge > 0 && (
+                <span className={styles.navBadgeDot} />
+              )}
             </Link>
           ))}
         </nav>
