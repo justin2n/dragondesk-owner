@@ -68,7 +68,7 @@ const Layout = () => {
     { path: '/audiences', label: 'Audiences', Icon: AudiencesIcon },
     { path: '/events', label: 'Events & Calendar', Icon: CalendarIcon },
     { path: '/attendance', label: 'Attendance', Icon: CheckIcon },
-    { path: '/sales-signals', label: 'Sales Signals', Icon: SalesSignalsIcon, badge: signalCount },
+    { path: '/sales-signals', label: 'DragonDesk: Pulse', Icon: SalesSignalsIcon, badge: signalCount },
     { path: '/optimize', label: 'DragonDesk: Optimize', Icon: OptimizeIcon },
     { path: '/engage', label: 'DragonDesk: Engage', Icon: EngageIcon },
     { path: '/outreach', label: 'DragonDesk: Outreach', Icon: OutreachIcon },

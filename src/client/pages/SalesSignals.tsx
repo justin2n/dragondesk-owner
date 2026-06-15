@@ -91,7 +91,7 @@ const SalesSignals: React.FC = () => {
     <div className={styles.page}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <h1 className={styles.title}>Sales Signals</h1>
+          <h1 className={styles.title}>DragonDesk: Pulse</h1>
           <p className={styles.subtitle}>
             Identified leads with high engagement — contact them now
           </p>
