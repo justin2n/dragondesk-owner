@@ -58,6 +58,7 @@ const Contacts = () => {
   const [memberQRCode, setMemberQRCode] = useState<{ qrCode: string; qrCodeData: string } | null>(null);
   const [memberCheckIns, setMemberCheckIns] = useState<any[]>([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
   const [memberSubscription, setMemberSubscription] = useState<Subscription | null>(null);
   const [memberPaymentMethods, setMemberPaymentMethods] = useState<PaymentMethod[]>([]);
   const [memberInvoices, setMemberInvoices] = useState<Invoice[]>([]);
@@ -441,6 +442,7 @@ const Contacts = () => {
     setMemberInvoices([]);
     setMemberQRCode(null);
     setMemberCheckIns([]);
+    setAttendanceError(null);
     setShowAddPaymentModal(false);
     setShowSubscribeModal(false);
   };
@@ -471,16 +473,17 @@ const Contacts = () => {
 
   const loadMemberAttendanceData = async (memberId: number) => {
     setAttendanceLoading(true);
+    setAttendanceError(null);
     try {
-      const [qrCode, checkInsData] = await Promise.all([
-        api.get(`/qr-codes/member/${memberId}`).catch(() => null),
-        api.get(`/check-ins/member/${memberId}?limit=10`)
-      ]);
-
+      const qrCode = await api.get(`/qr-codes/member/${memberId}`).catch(() => null);
       setMemberQRCode(qrCode);
+    } catch {}
+    try {
+      const checkInsData = await api.get(`/check-ins/member/${memberId}?limit=50`);
       setMemberCheckIns(checkInsData?.checkIns || []);
-    } catch (error) {
-      console.error('Failed to load attendance data:', error);
+    } catch (error: any) {
+      console.error('Failed to load check-ins:', error);
+      setAttendanceError(error?.message || 'Failed to load check-in history');
     } finally {
       setAttendanceLoading(false);
     }
@@ -1899,8 +1902,21 @@ const Contacts = () => {
 
                       {/* Recent Check-ins */}
                       <div className={styles.billingBlock}>
-                        <h4 className={styles.billingTitle}>Recent Check-ins</h4>
-                        {memberCheckIns.length > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                          <h4 className={styles.billingTitle} style={{ margin: 0 }}>Recent Check-ins</h4>
+                          <button
+                            onClick={() => loadMemberAttendanceData(viewingMember.id)}
+                            className={styles.cancelBtn}
+                            style={{ padding: '0.375rem 0.75rem', fontSize: '0.8125rem' }}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                        {attendanceError ? (
+                          <p style={{ color: '#ef4444', fontSize: '0.875rem' }}>
+                            Error loading check-ins: {attendanceError}
+                          </p>
+                        ) : memberCheckIns.length > 0 ? (
                           <div className={styles.checkInsList}>
                             {memberCheckIns.map((checkIn: any) => (
                               <div key={checkIn.id} className={styles.checkInItem}>
