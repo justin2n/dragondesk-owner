@@ -372,6 +372,40 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       value: allMembers.filter(m => m.programType === program && m.accountStatus === 'member').length,
     }));
 
+    // Zapier webhook activity by month — from log table so duplicates are tracked too
+    let zapierActivityData: any[] = periods.map(p => ({
+      month: p.label,
+      total: 0,
+      new_contacts: 0,
+      returning_contacts: 0,
+    }));
+    try {
+      const zapierResult = await pool.query(
+        `SELECT DATE_TRUNC('month', "receivedAt" AT TIME ZONE 'UTC') AS month,
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE "wasNew" = true)::int AS new_contacts,
+           COUNT(*) FILTER (WHERE "wasNew" = false)::int AS returning_contacts
+         FROM zapier_webhook_log
+         WHERE "receivedAt" >= $1
+         GROUP BY DATE_TRUNC('month', "receivedAt" AT TIME ZONE 'UTC')`,
+        [periods[0].start]
+      );
+      zapierActivityData = periods.map(period => {
+        const row = zapierResult.rows.find(r => {
+          const d = new Date(r.month);
+          return d >= period.start && d <= period.end;
+        });
+        return {
+          month: period.label,
+          total: row?.total ?? 0,
+          new_contacts: row?.new_contacts ?? 0,
+          returning_contacts: row?.returning_contacts ?? 0,
+        };
+      });
+    } catch {
+      // table may not exist on older deployments — return zeros
+    }
+
     res.json({
       programs,
       trialsData,
@@ -380,6 +414,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       summary,
       programDistribution,
       leadSources,
+      zapierActivityData,
     });
   } catch (error: any) {
     console.error('Error fetching program analytics:', error);

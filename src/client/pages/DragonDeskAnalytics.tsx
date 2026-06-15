@@ -68,6 +68,7 @@ interface AnalyticsData {
   trialsData: any[];
   leadsData: any[];
   membersData: any[];
+  zapierActivityData?: { month: string; total: number; new_contacts: number; returning_contacts: number }[];
   summary: {
     programs: ProgramSummary[];
     totals: {
@@ -97,6 +98,7 @@ const PROGRAM_COLORS: Record<string, string> = {
   'Dragon Launch': '#14b8a6',
   'Personal Training': '#64748b',
   'DGMT Private Training': '#6366f1',
+  'No Program Selected': '#a855f7',
   total: '#10b981',
 };
 
@@ -354,11 +356,32 @@ const DragonDeskAnalytics = () => {
           </div>
         </div>
 
+        {data.zapierActivityData && data.zapierActivityData.some(d => d.total > 0) && (
+          <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
+            <div className={styles.chartHeader}>
+              <h3>Zapier Webhook Activity</h3>
+              <p>
+                Leads submitted via Zapier per month — counts every webhook hit,
+                including re-submissions of contacts already in DragonDesk
+              </p>
+            </div>
+            {renderChart(
+              data.zapierActivityData,
+              ['new_contacts', 'returning_contacts'],
+              'bar'
+            )}
+            <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
+              <strong>New contacts</strong> = email did not exist in DragonDesk before this Zapier hit.&nbsp;
+              <strong>Re-submissions</strong> = email already existed; lead acquisition date is unchanged in the chart above.
+            </p>
+          </div>
+        )}
+
         {data.leadSources && data.leadSources.length > 0 && (
           <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
             <div className={styles.chartHeader}>
               <h3>Lead Sources</h3>
-              <p>All contacts by acquisition channel</p>
+              <p>All contacts by acquisition channel (total lifetime)</p>
             </div>
             <table className={styles.dataTable}>
               <thead>

@@ -12,12 +12,12 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_members',
-    description: 'Search and list members. Can filter by name, email, status, or belt rank. Returns member list with key details.',
+    description: 'Search and list members. Can filter by name, email, or account status. Returns member list with key details.',
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search term for name or email (optional)' },
-        status: { type: 'string', enum: ['active', 'inactive', 'prospect'], description: 'Filter by membership status' },
+        status: { type: 'string', enum: ['lead', 'trialer', 'member', 'cancelled'], description: 'Filter by account status' },
         limit: { type: 'number', description: 'Max results to return (default 20)' },
       },
     },
@@ -43,9 +43,9 @@ const TOOLS: Anthropic.Tool[] = [
         lastName: { type: 'string' },
         email: { type: 'string' },
         phone: { type: 'string' },
-        status: { type: 'string', enum: ['active', 'inactive', 'prospect'], description: 'Default: prospect' },
-        program: { type: 'string', description: 'e.g. BJJ, Muay Thai, Taekwondo' },
-        beltRank: { type: 'string' },
+        accountStatus: { type: 'string', enum: ['lead', 'trialer', 'member', 'cancelled'], description: 'Default: lead' },
+        programType: { type: 'string', description: 'e.g. Adult BJJ, Adult Muay Thai & Kickboxing, No Program Selected' },
+        ranking: { type: 'string', description: 'Belt rank e.g. White, Blue, Purple, Brown, Black' },
         notes: { type: 'string' },
       },
       required: ['firstName', 'lastName'],
@@ -62,9 +62,9 @@ const TOOLS: Anthropic.Tool[] = [
         lastName: { type: 'string' },
         email: { type: 'string' },
         phone: { type: 'string' },
-        status: { type: 'string', enum: ['active', 'inactive', 'prospect'] },
-        program: { type: 'string' },
-        beltRank: { type: 'string' },
+        accountStatus: { type: 'string', enum: ['lead', 'trialer', 'member', 'cancelled'] },
+        programType: { type: 'string' },
+        ranking: { type: 'string' },
         notes: { type: 'string' },
       },
       required: ['member_id'],
@@ -169,7 +169,7 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
     switch (name) {
       case 'search_members': {
         const limit = input.limit || 20;
-        let query = 'SELECT id, "firstName", "lastName", email, phone, status, program, "beltRank", "createdAt" FROM members WHERE 1=1';
+        let query = 'SELECT id, "firstName", "lastName", email, phone, "accountStatus", "programType", ranking, "createdAt" FROM members WHERE 1=1';
         const params: any[] = [];
         if (input.query) {
           params.push(`%${input.query}%`);
@@ -177,7 +177,7 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
         }
         if (input.status) {
           params.push(input.status);
-          query += ` AND status = $${params.length}`;
+          query += ` AND "accountStatus" = $${params.length}`;
         }
         params.push(limit);
         query += ` ORDER BY "createdAt" DESC LIMIT $${params.length}`;
@@ -196,14 +196,17 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
 
       case 'create_member': {
         const result = await pool.query(
-          `INSERT INTO members ("firstName", "lastName", email, phone, status, program, "beltRank", notes, "createdBy")
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+          `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", ranking, notes, "locationId")
+           VALUES ($1, $2, $3, $4, $5, 'basic', $6, $7, $8,
+             (SELECT id FROM locations WHERE "isPrimary" = true LIMIT 1))
+           RETURNING *`,
           [
             input.firstName, input.lastName,
             input.email || null, input.phone || null,
-            input.status || 'prospect', input.program || null,
-            input.beltRank || null, input.notes || null,
-            userId,
+            input.accountStatus || 'lead',
+            input.programType || 'No Program Selected',
+            input.ranking || 'White',
+            input.notes || null,
           ]
         );
         return JSON.stringify({ success: true, member: result.rows[0] });
@@ -212,7 +215,7 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
       case 'update_member': {
         const fields: string[] = [];
         const params: any[] = [];
-        const updatable = ['firstName', 'lastName', 'email', 'phone', 'status', 'program', 'beltRank', 'notes'];
+        const updatable = ['firstName', 'lastName', 'email', 'phone', 'accountStatus', 'programType', 'ranking', 'notes'];
         for (const field of updatable) {
           if (input[field] !== undefined) {
             params.push(input[field]);
@@ -313,9 +316,10 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
         const [members, events, recentSignups] = await Promise.all([
           pool.query(`SELECT
             COUNT(*) AS total,
-            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
-            SUM(CASE WHEN status = 'prospect' THEN 1 ELSE 0 END) AS prospects,
-            SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive
+            SUM(CASE WHEN "accountStatus" = 'member' THEN 1 ELSE 0 END) AS active_members,
+            SUM(CASE WHEN "accountStatus" = 'trialer' THEN 1 ELSE 0 END) AS trialers,
+            SUM(CASE WHEN "accountStatus" = 'lead' THEN 1 ELSE 0 END) AS leads,
+            SUM(CASE WHEN "accountStatus" = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
             FROM members`),
           pool.query(`SELECT
             COUNT(*) AS total,
@@ -326,7 +330,7 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
         return JSON.stringify({
           members: members.rows[0],
           events: events.rows[0],
-          new_members_last_30_days: recentSignups.rows[0].count,
+          new_contacts_last_30_days: recentSignups.rows[0].count,
         });
       }
 

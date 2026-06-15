@@ -151,6 +151,19 @@ pool.query(`
 `).catch(() => {});
 
 pool.query(`
+  CREATE TABLE IF NOT EXISTS zapier_webhook_log (
+    id SERIAL PRIMARY KEY,
+    email TEXT NOT NULL,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    "wasNew" BOOLEAN NOT NULL DEFAULT true,
+    "receivedAt" TIMESTAMPTZ DEFAULT NOW()
+  )
+`).catch(() => {});
+pool.query(`CREATE INDEX IF NOT EXISTS idx_zapier_log_received ON zapier_webhook_log("receivedAt")`).catch(() => {});
+
+pool.query(`
   CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
     action TEXT NOT NULL,

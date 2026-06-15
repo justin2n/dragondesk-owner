@@ -115,13 +115,22 @@ router.post('/zapier/leads', async (req, res) => {
         "companyName" = COALESCE(EXCLUDED."companyName", members."companyName"),
         notes = COALESCE(EXCLUDED.notes, members.notes),
         "updatedAt" = NOW()
-      RETURNING id, "firstName", "lastName", email, "accountStatus"`,
+      RETURNING id, "firstName", "lastName", email, "accountStatus",
+        (xmax::text::bigint = 0) AS "wasInserted"`,
       [firstName, lastName, email, phone, program || 'No Program Selected', source, company, notes, locationId]
     );
 
     const member = result.rows[0];
-    // Only log history for genuinely new contacts (INSERT, not UPDATE)
-    if (result.rowCount === 1 && member.accountStatus === 'lead') {
+    const wasInserted: boolean = member.wasInserted;
+
+    // Log every Zapier hit so analytics can show real activity, including re-submissions
+    await pool.query(
+      `INSERT INTO zapier_webhook_log (email, "firstName", "lastName", "memberId", "wasNew")
+       VALUES ($1, $2, $3, $4, $5)`,
+      [email, firstName, lastName, member.id, wasInserted]
+    ).catch(() => {});
+
+    if (wasInserted) {
       await pool.query(
         `INSERT INTO member_history ("memberId", "userId", "userName", action, changes)
          VALUES ($1, NULL, 'Zapier webhook', 'created', NULL)`,
