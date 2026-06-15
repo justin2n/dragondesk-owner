@@ -479,8 +479,8 @@ const Contacts = () => {
       setMemberQRCode(qrCode);
     } catch {}
     try {
-      const checkInsData = await api.get(`/check-ins/member/${memberId}?limit=50`);
-      setMemberCheckIns(checkInsData?.checkIns || []);
+      const checkInsData = await api.get(`/check-ins?memberId=${memberId}&limit=50`);
+      setMemberCheckIns(Array.isArray(checkInsData) ? checkInsData : (checkInsData?.checkIns || []));
     } catch (error: any) {
       console.error('Failed to load check-ins:', error);
       setAttendanceError(error?.message || 'Failed to load check-in history');
