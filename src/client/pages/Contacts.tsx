@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Member, ParticipantSummary, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
 import { CardViewIcon, TableViewIcon, AddIcon, CheckIcon } from '../components/Icons';
@@ -43,6 +44,8 @@ const BULK_VALUE_LABELS: Record<string, Record<string, string>> = {
 const Contacts = () => {
   const { selectedLocation, isAllLocations, locations } = useLocation();
   const { toast, confirm } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkHandled = useRef(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -133,6 +136,27 @@ const Contacts = () => {
     api.get('/programs').then(setPrograms).catch(() => {});
     api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
   }, []);
+
+  // Deep-link: ?member=<id> auto-opens the profile modal
+  useEffect(() => {
+    const targetId = searchParams.get('member');
+    if (!targetId || deepLinkHandled.current) return;
+
+    const open = (member: Member) => {
+      deepLinkHandled.current = true;
+      handleViewMember(member);
+      setSearchParams({}, { replace: true });
+    };
+
+    const inList = members.find(m => m.id === parseInt(targetId));
+    if (inList) {
+      open(inList);
+      return;
+    }
+
+    // Member may not be in the current filtered list — fetch directly
+    api.get(`/members/${targetId}`).then(open).catch(() => {});
+  }, [members, searchParams]);
 
   const loadMembers = async () => {
     setIsLoading(true);

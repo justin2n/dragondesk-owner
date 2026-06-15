@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import styles from './SalesSignals.module.css';
 
@@ -37,6 +38,7 @@ const SalesSignals: React.FC = () => {
   const [hours, setHours] = useState(24);
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const navigate = useNavigate();
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -172,7 +174,11 @@ const SalesSignals: React.FC = () => {
             const isMember = !!lead.memberTableId;
 
             return (
-              <div key={`${lead.visitorId}-${lead.token}`} className={`${styles.leadCard} ${urgency.cls}`}>
+              <div
+                key={`${lead.visitorId}-${lead.token}`}
+                className={`${styles.leadCard} ${urgency.cls} ${isMember ? styles.clickable : ''}`}
+                onClick={() => isMember && navigate(`/members?member=${lead.memberTableId}`)}
+              >
                 <div className={styles.cardHeader}>
                   <div className={styles.leadInfo}>
                     <span className={styles.leadName}>{displayName(lead)}</span>
@@ -221,7 +227,7 @@ const SalesSignals: React.FC = () => {
                   </div>
                 )}
 
-                <div className={styles.actions}>
+                <div className={styles.actions} onClick={e => e.stopPropagation()}>
                   {lead.phone && (
                     <a
                       href={`tel:${lead.phone}`}
