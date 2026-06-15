@@ -2074,10 +2074,10 @@ const Contacts = () => {
                                 )}
                                 <div className={styles.webActivityRow}>
                                   <span className={`${styles.webActivityTypePill} ${styles[`webEvt_${evt.eventType}`]}`}>
-                                    {evt.eventType === 'pageview' ? '👁' :
-                                     evt.eventType === 'form_submit' ? '📝' :
-                                     evt.eventType === 'click' ? '🖱' :
-                                     evt.eventType === 'scroll' ? '↕' : '•'}
+                                    {evt.eventType === 'pageview' ? 'PV' :
+                                     evt.eventType === 'form_submit' ? 'FM' :
+                                     evt.eventType === 'click' ? 'CL' :
+                                     evt.eventType === 'scroll' ? 'SC' : '—'}
                                   </span>
                                   <div className={styles.webActivityInfo}>
                                     <span className={styles.webActivityLabel}>{label}</span>
