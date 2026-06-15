@@ -20,7 +20,7 @@ const DragonDeskOptimize = () => {
 
   // Behavior tracking state
   const [trackingToken, setTrackingToken] = useState('');
-  const [trackingTab, setTrackingTab] = useState<'install' | 'events' | 'pages' | 'audiences' | 'identity'>('install');
+  const [trackingTab, setTrackingTab] = useState<'events' | 'pages' | 'audiences' | 'identity' | 'install'>('events');
   const [trackingSummary, setTrackingSummary] = useState<any>(null);
   const [trackingEvents, setTrackingEvents] = useState<any[]>([]);
   const [topElements, setTopElements] = useState<any[]>([]);
@@ -652,7 +652,7 @@ const DragonDeskOptimize = () => {
         )}
 
         <div className={styles.trackingTabs}>
-          {(['install', 'events', 'pages', 'audiences', 'identity'] as const).map(tab => (
+          {(['events', 'pages', 'audiences', 'identity', 'install'] as const).map(tab => (
             <button key={tab} className={`${styles.trackingTab} ${trackingTab === tab ? styles.trackingTabActive : ''}`}
               onClick={() => {
                 setTrackingTab(tab);
