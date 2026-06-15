@@ -1059,6 +1059,15 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastCheckInAt" TIMESTAMP`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "attendanceStreak" INTEGER DEFAULT 0`);
 
+    // Ensure event_attendees unique constraint exists (needed for ON CONFLICT upsert in kiosk check-in)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE event_attendees ADD CONSTRAINT event_attendees_eventid_memberid_unique UNIQUE ("eventId", "memberId");
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      WHEN others THEN NULL;
+      END $$;
+    `);
+
     // Rebuild programType CHECK constraint to include 'All' (was missing in older deployments)
     await client.query(`
       DO $$ BEGIN

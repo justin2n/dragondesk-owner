@@ -99,14 +99,18 @@ router.post('/check-in/qr', async (req, res) => {
       WHERE id = $1
     `, [member.id]);
 
-    // If event specified, update event_attendees
+    // If event specified, update event_attendees (non-fatal)
     if (eventId) {
-      await pool.query(`
-        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
-        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, 'qr_scan')
-        ON CONFLICT ("eventId", "memberId") DO UPDATE
-          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
-      `, [eventId, member.id]);
+      try {
+        await pool.query(`
+          INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+          VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, 'qr_scan')
+          ON CONFLICT ("eventId", "memberId") DO UPDATE
+            SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
+        `, [eventId, member.id]);
+      } catch (err) {
+        console.error('event_attendees upsert failed (non-fatal):', err);
+      }
     }
 
     await logKioskActivity(locationId, 'qr_check_in', member.id);
@@ -217,14 +221,18 @@ router.post('/check-in/search', async (req, res) => {
       WHERE id = $1
     `, [memberId]);
 
-    // If event specified, update event_attendees
+    // If event specified, update event_attendees (non-fatal)
     if (eventId) {
-      await pool.query(`
-        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
-        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, $3)
-        ON CONFLICT ("eventId", "memberId") DO UPDATE
-          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
-      `, [eventId, memberId, method]);
+      try {
+        await pool.query(`
+          INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+          VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, $3)
+          ON CONFLICT ("eventId", "memberId") DO UPDATE
+            SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
+        `, [eventId, memberId, method]);
+      } catch (err) {
+        console.error('event_attendees upsert failed (non-fatal):', err);
+      }
     }
 
     await logKioskActivity(locationId, 'search_check_in', memberId, { method });

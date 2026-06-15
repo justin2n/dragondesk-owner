@@ -200,6 +200,28 @@
   transform: translateY(-1px);
 }
 
+.selectClassHint {
+  margin-top: 12px;
+  font-size: 22px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+.selectedClassLabel {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-red);
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 6px;
+  padding: 6px 14px;
+  margin-bottom: 16px;
+  text-align: center;
+  width: 100%;
+}
+
 /* Search View */
 .searchView {
   width: 100%;

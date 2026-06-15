@@ -349,18 +349,29 @@ const Kiosk: React.FC = () => {
           {viewMode === 'scan' && (
             <div className={styles.scanView}>
               <h2 className={styles.sectionTitle}>Check In</h2>
-              <button
-                className={styles.primaryBtn}
-                onClick={() => setViewMode('search')}
-              >
-                Find Your Name to Check In
-              </button>
+              {selectedClass ? (
+                <button
+                  className={styles.primaryBtn}
+                  onClick={() => setViewMode('search')}
+                >
+                  Find Your Name to Check In
+                </button>
+              ) : (
+                <p className={styles.selectClassHint}>
+                  ← Select a class to check in
+                </p>
+              )}
             </div>
           )}
 
           {viewMode === 'search' && (
             <div className={styles.searchView}>
               <h2 className={styles.sectionTitle}>Find Your Name</h2>
+              {selectedClass && todaysClasses.find(c => c.id === selectedClass) && (
+                <p className={styles.selectedClassLabel}>
+                  {todaysClasses.find(c => c.id === selectedClass)!.name}
+                </p>
+              )}
               <div className={styles.searchBox}>
                 <input
                   type="text"
