@@ -1577,6 +1577,7 @@ const Contacts = () => {
               </div>
             )}
 
+            <div className={styles.modalScrollBody}>
             {/* Tabs */}
             <div className={styles.viewTabs}>
               <button
@@ -2097,6 +2098,7 @@ const Contacts = () => {
                 </div>
               )}
             </div>
+            </div>{/* end modalScrollBody */}
             <div className={styles.modalFooter}>
               <button onClick={handleCloseViewModal} className={styles.cancelBtn}>
                 Close

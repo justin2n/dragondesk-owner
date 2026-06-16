@@ -353,6 +353,14 @@
   max-width: 700px;
   max-height: 90vh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalScrollBody {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .modalHeader {
