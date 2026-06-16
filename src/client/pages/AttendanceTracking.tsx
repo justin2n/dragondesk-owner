@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from '../contexts/LocationContext';
+import { api } from '../utils/api';
 import styles from './AttendanceTracking.module.css';
 
 interface CheckIn {
@@ -59,29 +60,17 @@ const AttendanceTracking: React.FC = () => {
     setError(null);
     try {
       const locationParam = isAllLocations ? 'all' : selectedLocation?.id;
-      let url = `/api/check-ins?locationId=${locationParam}`;
+      let endpoint = `/check-ins?locationId=${locationParam}`;
 
       if (dateRange === 'today') {
-        url = `/api/check-ins/today?locationId=${locationParam}`;
+        endpoint = `/check-ins/today?locationId=${locationParam}`;
       } else {
         const dates = getDateRange();
-        if (dates.start) url += `&startDate=${dates.start}`;
-        if (dates.end) url += `&endDate=${dates.end}`;
+        if (dates.start) endpoint += `&startDate=${dates.start}`;
+        if (dates.end) endpoint += `&endDate=${dates.end}`;
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        setError(errData.error || `Failed to load check-ins (${response.status})`);
-        return;
-      }
-
-      const data = await response.json();
+      const data = await api.get(endpoint);
       if (Array.isArray(data)) {
         setCheckIns(data);
       }
@@ -96,22 +85,11 @@ const AttendanceTracking: React.FC = () => {
     try {
       const locationParam = isAllLocations ? 'all' : selectedLocation?.id;
       const dates = getDateRange();
-      let url = `/api/check-ins/stats?locationId=${locationParam}`;
-      if (dates.start) url += `&startDate=${dates.start}`;
-      if (dates.end) url += `&endDate=${dates.end}`;
+      let endpoint = `/check-ins/stats?locationId=${locationParam}`;
+      if (dates.start) endpoint += `&startDate=${dates.start}`;
+      if (dates.end) endpoint += `&endDate=${dates.end}`;
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) {
-        console.error('Stats API error:', response.status);
-        return;
-      }
-
-      const data = await response.json();
+      const data = await api.get(endpoint);
       if (data && typeof data === 'object') {
         setStats({
           totalCheckIns: data.totalCheckIns ?? 0,
@@ -185,17 +163,9 @@ const AttendanceTracking: React.FC = () => {
     if (!confirm('Are you sure you want to delete this check-in?')) return;
 
     try {
-      const response = await fetch(`/api/check-ins/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
-        setCheckIns(checkIns.filter(c => c.id !== id));
-        loadStats();
-      }
+      await api.delete(`/check-ins/${id}`);
+      setCheckIns(checkIns.filter(c => c.id !== id));
+      loadStats();
     } catch (error) {
       console.error('Error deleting check-in:', error);
     }
