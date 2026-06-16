@@ -170,10 +170,25 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
 
   for (const row of rows) {
     try {
-      // Resolve name — prefer Participant, fall back to Buyer/Customer
-      let firstName = (row['Participant First Name'] || row['Buyer First Name'] || row['Customer First Name'] || row['First Name'] || '').trim();
-      let lastName = (row['Participant Last Name'] || row['Buyer Last Name'] || row['Customer Last Name'] || row['Last Name'] || '').trim();
+      // Customer = Account Holder (paying parent/adult)
+      // Participant = the actual practitioner (child or same person for adults)
+      const customerFirstName = (row['Customer First Name'] || row['Buyer First Name'] || row['First Name'] || '').trim();
+      const customerLastName  = (row['Customer Last Name']  || row['Buyer Last Name']  || row['Last Name']  || '').trim();
+      const participantFirstName = (row['Participant First Name'] || '').trim();
+      const participantLastName  = (row['Participant Last Name']  || '').trim();
       const email = (row['Email'] || row['Email Address'] || '').trim().toLowerCase();
+
+      // A "distinct participant" row has a Participant name that differs from the Customer name.
+      // This represents a child whose parent (Customer) is the account holder.
+      const hasDistinctParticipant = !!(
+        participantFirstName &&
+        (participantFirstName.toLowerCase() !== customerFirstName.toLowerCase() ||
+         participantLastName.toLowerCase() !== customerLastName.toLowerCase())
+      );
+
+      // Primary name used for the main record (account holder in all cases)
+      let firstName = customerFirstName || participantFirstName;
+      let lastName  = customerLastName  || participantLastName;
 
       // Handle full name in first name field
       if (firstName && !lastName && firstName.includes(' ')) {
@@ -181,14 +196,12 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         firstName = parts[0];
         lastName = parts.slice(1).join(' ');
       }
-
-      // Skip placeholder last names like "."
       if (lastName === '.') lastName = '';
 
       if (!firstName || !email) {
         results.skipped++;
         if (results.skipReasons.length < 3) {
-          results.skipReasons.push(`Missing firstName or email — firstName:"${firstName}" email:"${email}"`);
+          results.skipReasons.push(`Missing name or email — name:"${firstName}" email:"${email}"`);
         }
         continue;
       }
@@ -199,20 +212,19 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         const ex = existing.rows[0];
         if (type === 'member' && (ex.accountStatus === 'trialer' || ex.accountStatus === 'lead')) {
           results.upgraded++;
-          // Fall through — the ON CONFLICT upsert below will upgrade the record
         } else if (type === 'trial' && ex.accountStatus === 'lead') {
           results.upgraded++;
-          // Fall through — the ON CONFLICT upsert below will upgrade the record
-        } else {
+        } else if (!hasDistinctParticipant) {
           results.skipped++;
           results.duplicates.push(`${firstName} ${lastName} (${email}) — already exists as ${ex.firstName} ${ex.lastName} [${ex.accountStatus}]`);
           continue;
         }
+        // If hasDistinctParticipant, fall through — we still need to upsert the account holder
+        // then check/create the participant below
       }
 
       const phone = (row['Mobile Phone'] || '').trim() || null;
       const dob = parseDate(row['Birthday'] || '');
-      const address = (row['Address'] || '').trim() || null;
 
       let accountStatus: string;
       let programType: string;
@@ -230,8 +242,6 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         membershipAge = normalizeAge(programType, row['Age'] || '', dob || '');
         ranking = 'White';
         leadSource = normalizeLeadSource(row['Source'] || '');
-        memberStartDate = null;
-        trialStartDate = null;
 
       } else if (type === 'trial') {
         accountStatus = 'trialer';
@@ -253,7 +263,6 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       } else {
         // member
         accountStatus = 'member';
-        // Membership column format: "Program Name, _Plan Name_"
         const membershipRaw = row['Program'] || row['Program Name'] || row['Membership'] || row['membership'] || row['program'] || '';
         const membershipParts = membershipRaw.split(', _');
         const programRaw = membershipParts[0] || programOverride || '';
@@ -286,23 +295,17 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
           if (planMatch.rows.length > 0) {
             pricingPlanId = planMatch.rows[0].id;
           } else {
-            // Create the plan so it can be configured later
             const inserted = await pool.query(
               `INSERT INTO pricing_plans (name, description, "accountType", "programType", "membershipAge", amount, currency, "billingInterval", "intervalCount", "isActive")
                VALUES ($1, $2, 'basic', $3, $4, 0, 'usd', 'month', 1, true) RETURNING id`,
-              [
-                planName,
-                `Auto-created from MyStudio import`,
-                programType || 'No Program Selected',
-                membershipAge || 'Adult',
-              ]
+              [planName, 'Auto-created from MyStudio import', programType || 'No Program Selected', membershipAge || 'Adult']
             );
             pricingPlanId = inserted.rows[0].id;
           }
         }
       }
 
-      // Resolve membership from the Membership field in the CSV
+      // Resolve membership
       const membershipRawField = row['Membership']?.trim() || '';
       let membershipId: number | null = null;
       let membershipName: string | null = null;
@@ -322,27 +325,30 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
       const totalAttendance = parseInt(row['Total Attendance Count'] || row['Attendance Count'] || '0') || 0;
       const lastAttendance = parseDate(row['Last Attendance'] || '');
 
-      await pool.query(
+      // ── Upsert the Account Holder (Customer) ────────────────────────────
+      const ahResult = await pool.query(
         `INSERT INTO members (
           "firstName", "lastName", email, phone, "accountStatus", "accountType",
           "programType", "membershipAge", ranking, "leadSource", "dateOfBirth",
           notes, "locationId", "trialStartDate", "memberStartDate",
           "pricingPlanId", "totalClassesAttended", "lastCheckInAt",
-          "syncedFromMyStudio", "membershipId", "membershipName"
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          "syncedFromMyStudio", "membershipId", "membershipName", "memberType"
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'account_holder')
         ON CONFLICT (email) DO UPDATE SET
           "accountStatus" = EXCLUDED."accountStatus",
-          "programType" = EXCLUDED."programType",
+          "programType"   = EXCLUDED."programType",
           "membershipAge" = EXCLUDED."membershipAge",
-          ranking = EXCLUDED.ranking,
+          ranking         = EXCLUDED.ranking,
+          "memberType"    = 'account_holder',
           "pricingPlanId" = COALESCE(EXCLUDED."pricingPlanId", members."pricingPlanId"),
-          "trialStartDate" = COALESCE(EXCLUDED."trialStartDate", members."trialStartDate"),
-          "memberStartDate" = COALESCE(EXCLUDED."memberStartDate", members."memberStartDate"),
+          "trialStartDate"   = COALESCE(EXCLUDED."trialStartDate",   members."trialStartDate"),
+          "memberStartDate"  = COALESCE(EXCLUDED."memberStartDate",  members."memberStartDate"),
           "totalClassesAttended" = GREATEST(COALESCE(members."totalClassesAttended", 0), COALESCE(EXCLUDED."totalClassesAttended", 0)),
-          "membershipId" = COALESCE(EXCLUDED."membershipId", members."membershipId"),
+          "membershipId"   = COALESCE(EXCLUDED."membershipId",   members."membershipId"),
           "membershipName" = COALESCE(EXCLUDED."membershipName", members."membershipName"),
           "syncedFromMyStudio" = true,
-          "updatedAt" = CURRENT_TIMESTAMP`,
+          "updatedAt" = CURRENT_TIMESTAMP
+        RETURNING id`,
         [
           firstName, lastName, email, phone, accountStatus, 'basic',
           programType, membershipAge, ranking, leadSource, dob,
@@ -352,7 +358,61 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
         ]
       );
 
-      results.imported++;
+      const accountHolderId: number = ahResult.rows[0].id;
+
+      // ── If this row has a distinct Participant, upsert them too ─────────
+      if (hasDistinctParticipant) {
+        const pFirst = participantFirstName;
+        const pLast  = participantLastName;
+
+        // Check if this participant already exists under this account holder
+        const existingParticipant = await pool.query(
+          `SELECT id FROM members
+           WHERE "accountHolderId" = $1
+             AND LOWER("firstName") = LOWER($2)
+             AND LOWER("lastName")  = LOWER($3)`,
+          [accountHolderId, pFirst, pLast]
+        );
+
+        if (existingParticipant.rows.length > 0) {
+          // Update the existing participant record
+          await pool.query(
+            `UPDATE members SET
+               "accountStatus" = $1, "programType" = $2, "membershipAge" = $3,
+               ranking = $4, "trialStartDate" = $5, "memberStartDate" = $6,
+               "pricingPlanId" = COALESCE($7, "pricingPlanId"),
+               "totalClassesAttended" = GREATEST(COALESCE("totalClassesAttended", 0), COALESCE($8, 0)),
+               "syncedFromMyStudio" = true, "updatedAt" = CURRENT_TIMESTAMP
+             WHERE id = $9`,
+            [accountStatus, programType, membershipAge, ranking,
+             trialStartDate, memberStartDate, pricingPlanId,
+             totalAttendance || null, existingParticipant.rows[0].id]
+          );
+          results.upgraded++;
+        } else {
+          // Insert new participant (no email — avoids unique constraint conflict)
+          await pool.query(
+            `INSERT INTO members (
+               "firstName", "lastName", phone, "accountStatus", "accountType",
+               "programType", "membershipAge", ranking, "locationId",
+               "memberType", "accountHolderId", "trialStartDate", "memberStartDate",
+               "pricingPlanId", "totalClassesAttended", "lastCheckInAt",
+               "syncedFromMyStudio", "membershipId", "membershipName"
+             ) VALUES ($1,$2,$3,$4,'basic',$5,$6,$7,$8,'participant',$9,$10,$11,$12,$13,$14,true,$15,$16)`,
+            [
+              pFirst, pLast, phone, accountStatus,
+              programType, membershipAge, ranking, locationId,
+              accountHolderId, trialStartDate, memberStartDate,
+              pricingPlanId, totalAttendance || null, lastAttendance,
+              membershipId, membershipName,
+            ]
+          );
+          results.imported++;
+        }
+      } else {
+        results.imported++;
+      }
+
     } catch (err: any) {
       results.errors++;
       results.errorDetails.push(err.message);
