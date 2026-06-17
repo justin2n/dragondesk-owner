@@ -469,6 +469,16 @@ if (existsSync(clientPath)) {
   });
 }
 
+// Safety net: a single stray rejection/exception should never take the whole
+// API down (Node's default on unhandledRejection is to exit). Log loudly and
+// keep serving — per-request errors are still handled by their route's catch.
+process.on('unhandledRejection', (reason) => {
+  console.error('[process] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[process] uncaughtException:', err);
+});
+
 app.listen(PORT, () => {
   console.log(`🐉 DragonDesk CRM server running on port ${PORT}`);
 });

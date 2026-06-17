@@ -356,19 +356,23 @@ async function importStudentDetails(
   }
 
   if (!preview) {
-    await auditLog('member.import_csv', req.user?.id ?? null, req, {
-      fileName: req.file?.originalname,
-      type: 'student-details',
-      total: rows.length,
-      imported: results.imported,
-      upgraded: results.upgraded,
-      skipped: results.skipped,
-      errors: results.errors,
-      accountHoldersCreated: results.accountHoldersCreated,
-      participantsCreated: results.participantsCreated,
-      relinked: results.relinked,
-      contactsUpdated: results.contactsUpdated,
-    });
+    try {
+      await auditLog('member.import_csv', req.user?.id ?? null, req, {
+        fileName: req.file?.originalname,
+        type: 'student-details',
+        total: rows.length,
+        imported: results.imported,
+        upgraded: results.upgraded,
+        skipped: results.skipped,
+        errors: results.errors,
+        accountHoldersCreated: results.accountHoldersCreated,
+        participantsCreated: results.participantsCreated,
+        relinked: results.relinked,
+        contactsUpdated: results.contactsUpdated,
+      });
+    } catch (err) {
+      console.error('[import-csv] audit log failed (non-fatal):', err);
+    }
   }
 
   return res.json({
@@ -391,6 +395,7 @@ async function importStudentDetails(
 // --- Import endpoint ---
 
 router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest, res) => {
+ try {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   let locationId = req.body.locationId ? parseInt(req.body.locationId) : null;
@@ -419,7 +424,7 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
   // and no program/rank/status data, so it gets its own handler.
   if (type === 'student-details') {
     const preview = String(req.body.preview ?? '') === 'true';
-    return importStudentDetails(rows, locationId, req as AuthRequest, res, preview);
+    return await importStudentDetails(rows, locationId, req as AuthRequest, res, preview);
   }
 
   const results = { imported: 0, upgraded: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[], duplicates: [] as string[] };
@@ -694,6 +699,15 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
     duplicateCount: results.duplicates.length,
     duplicateList: results.duplicates,
   });
+ } catch (err: any) {
+  // Without this, an async rejection here becomes an unhandledRejection that
+  // crashes the whole process (Railway then restarts it) — the request shows
+  // up in the browser as "Failed to fetch" with no status. Always respond.
+  console.error('[import-csv] request failed:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: err?.message || 'Import failed unexpectedly' });
+  }
+ }
 });
 
 export default router;
