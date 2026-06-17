@@ -1,6 +1,6 @@
 import { serverError } from '../utils/errors';
 import { auditLog } from '../utils/audit';
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import multer from 'multer';
 import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
@@ -58,8 +58,10 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
   return { headers, rows };
 }
 
-function detectType(headers: string[]): 'lead' | 'trial' | 'member' | 'unknown' {
-  const h = headers.map(x => x.toLowerCase());
+function detectType(headers: string[]): 'lead' | 'trial' | 'member' | 'student-details' | 'unknown' {
+  const h = headers.map(x => x.trim().toLowerCase());
+  // Student Details export: one account holder per row + numbered participant columns.
+  if (h.includes('participant 1 first name') || (h.includes('customer for') && h.includes('member portal'))) return 'student-details';
   if (h.includes('buyer first name') || h.includes('opt in date')) return 'lead';
   if (h.includes('trial status') || h.includes('trial program')) return 'trial';
   if (h.includes('membership') || h.includes('next payment date') || h.includes('rank')) return 'member';
@@ -139,6 +141,253 @@ function parseDate(raw: string): string | null {
   return d.toISOString();
 }
 
+// --- Student Details import (account holder + participants) ---
+
+function cleanName(raw: string | undefined): string {
+  const v = (raw || '').trim();
+  if (v === '.' || v === '*' || v === '-') return '';
+  return v;
+}
+
+function parseMoney(raw: string | undefined): number {
+  if (!raw) return 0;
+  const n = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+function cleanEmail(raw: string | undefined): string | null {
+  const v = (raw || '').trim().toLowerCase();
+  if (!v || !EMAIL_RE.test(v)) return null;
+  if (v.includes('@mystudio.academy')) return null; // demo/system account
+  return v;
+}
+
+async function importStudentDetails(
+  rows: Record<string, string>[],
+  locationId: number | null,
+  req: AuthRequest,
+  res: Response,
+  preview: boolean,
+) {
+  const results = {
+    imported: 0,            // new records created (account holders + participants)
+    upgraded: 0,            // existing records updated / relinked
+    skipped: 0,
+    errors: 0,
+    accountHoldersCreated: 0,
+    participantsCreated: 0,
+    relinked: 0,
+    contactsUpdated: 0,
+    errorDetails: [] as string[],
+    skipReasons: [] as string[],
+  };
+
+  // Preview mode performs no writes. To stay accurate when the same account
+  // holder / participant appears in multiple rows (this export is full of
+  // duplicates), we track what we've already "virtually" created in this run.
+  const previewHolders = new Map<string, number | null>(); // email -> existing id, or null = would-create
+  const previewParticipants = new Set<string>();           // `${email}|${first}|${last}` already counted
+
+  for (const row of rows) {
+    try {
+      const custFirst = cleanName(row['Customer First Name']);
+      const custLast = cleanName(row['Customer Last Name']);
+      const email = cleanEmail(row['Email']);
+      const phone = (row['Mobile Phone Number'] || '').trim() || null;
+
+      // Collect participants 1..11
+      const participants: { first: string; last: string }[] = [];
+      for (let i = 1; i <= 11; i++) {
+        const f = cleanName(row[`Participant ${i} First Name`]);
+        const l = cleanName(row[`Participant ${i} Last Name`]);
+        if (f) participants.push({ first: f, last: l });
+      }
+
+      // Account holder identity — fall back to the first participant if the
+      // Customer name is blank (some rows only carry a participant).
+      const ahFirst = custFirst || participants[0]?.first || '';
+      const ahLast = custLast || participants[0]?.last || '';
+
+      // Account holders are keyed on email; without one we can't safely match.
+      if (!email) {
+        results.skipped++;
+        if (results.skipReasons.length < 8) {
+          results.skipReasons.push(`No valid email for "${`${ahFirst} ${ahLast}`.trim()}" — skipped`);
+        }
+        continue;
+      }
+      if (!ahFirst) {
+        results.skipped++;
+        if (results.skipReasons.length < 8) results.skipReasons.push(`No name for ${email} — skipped`);
+        continue;
+      }
+
+      const totalPayments = parseMoney(row['Total Payments']);
+      const pastDue = parseMoney(row['Past Due']);
+      const lastContactText = (row['Last Contact'] || '').trim() || null;
+      const customerFor = (row['Customer For'] || '').trim() || null;
+      const portalEnabled = (row['Member Portal'] || '').trim().toLowerCase() === 'enabled';
+      const portalUsername = (row['Username'] || '').trim() || null;
+
+      // ── Account holder: overwrite contact fields, preserve program/rank/status ──
+      // accountHolderId is the real id (existing/just-written) or null when it
+      // would be created in preview mode.
+      let accountHolderId: number | null;
+      let ahExisted: boolean;
+
+      if (preview) {
+        if (previewHolders.has(email)) {
+          // Seen earlier in this same file — counts as an update, not a new create.
+          accountHolderId = previewHolders.get(email)!;
+          ahExisted = true;
+        } else {
+          const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
+          ahExisted = existing.rows.length > 0;
+          accountHolderId = ahExisted ? existing.rows[0].id : null;
+          previewHolders.set(email, accountHolderId);
+        }
+      } else {
+        const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
+        ahExisted = existing.rows.length > 0;
+        const ahResult = await pool.query(
+          `INSERT INTO members (
+             "firstName", "lastName", email, phone,
+             "accountStatus", "accountType", "membershipAge", ranking,
+             "locationId", "memberType",
+             "totalPayments", "pastDue", "lastContactText", "customerFor",
+             "portalEnabled", "portalUsername", "syncedFromMyStudio"
+           ) VALUES ($1,$2,$3,$4,'member','basic','Adult','White',$5,'account_holder',$6,$7,$8,$9,$10,$11,true)
+           ON CONFLICT (email) DO UPDATE SET
+             "firstName"       = EXCLUDED."firstName",
+             "lastName"        = EXCLUDED."lastName",
+             phone             = COALESCE(EXCLUDED.phone, members.phone),
+             "memberType"      = 'account_holder',
+             "totalPayments"   = EXCLUDED."totalPayments",
+             "pastDue"         = EXCLUDED."pastDue",
+             "lastContactText" = EXCLUDED."lastContactText",
+             "customerFor"     = EXCLUDED."customerFor",
+             "portalEnabled"   = EXCLUDED."portalEnabled",
+             "portalUsername"  = COALESCE(EXCLUDED."portalUsername", members."portalUsername"),
+             "syncedFromMyStudio" = true,
+             "updatedAt"       = CURRENT_TIMESTAMP
+           RETURNING id`,
+          [ahFirst, ahLast, email, phone, locationId, totalPayments, pastDue, lastContactText, customerFor, portalEnabled, portalUsername],
+        );
+        accountHolderId = ahResult.rows[0].id;
+      }
+      if (ahExisted) { results.upgraded++; results.contactsUpdated++; }
+      else { results.imported++; results.accountHoldersCreated++; }
+
+      // ── Participants ──
+      const seen = new Set<string>();
+      for (const p of participants) {
+        const key = `${p.first.toLowerCase()}|${p.last.toLowerCase()}`;
+        if (seen.has(key)) continue; // duplicate participant within the same row
+        seen.add(key);
+
+        // Participant that is the account holder themselves — already represented.
+        if (
+          p.first.toLowerCase() === ahFirst.toLowerCase() &&
+          p.last.toLowerCase() === ahLast.toLowerCase()
+        ) {
+          continue;
+        }
+
+        if (preview) {
+          // Dedupe across the whole file so repeated rows don't recount.
+          const pkey = `${email}|${key}`;
+          if (previewParticipants.has(pkey)) continue;
+          previewParticipants.add(pkey);
+
+          // A brand-new holder (id null) has no existing participants → would create.
+          let existsP = false;
+          if (accountHolderId != null) {
+            const r = await pool.query(
+              `SELECT id FROM members
+                 WHERE "accountHolderId" = $1
+                   AND LOWER("firstName") = LOWER($2)
+                   AND LOWER("lastName")  = LOWER($3)`,
+              [accountHolderId, p.first, p.last],
+            );
+            existsP = r.rows.length > 0;
+          }
+          if (existsP) { results.upgraded++; results.relinked++; }
+          else { results.imported++; results.participantsCreated++; }
+          continue;
+        }
+
+        // Match only within this account holder to avoid merging unrelated people.
+        const existingP = await pool.query(
+          `SELECT id FROM members
+             WHERE "accountHolderId" = $1
+               AND LOWER("firstName") = LOWER($2)
+               AND LOWER("lastName")  = LOWER($3)`,
+          [accountHolderId, p.first, p.last],
+        );
+
+        if (existingP.rows.length > 0) {
+          await pool.query(
+            `UPDATE members SET
+               "firstName" = $1, "lastName" = $2,
+               "memberType" = 'participant',
+               "syncedFromMyStudio" = true,
+               "updatedAt" = CURRENT_TIMESTAMP
+             WHERE id = $3`,
+            [p.first, p.last, existingP.rows[0].id],
+          );
+          results.upgraded++; results.relinked++;
+        } else {
+          await pool.query(
+            `INSERT INTO members (
+               "firstName", "lastName", "accountStatus", "accountType",
+               "membershipAge", ranking, "locationId", "memberType",
+               "accountHolderId", "syncedFromMyStudio"
+             ) VALUES ($1,$2,'member','basic','Kids','White',$3,'participant',$4,true)`,
+            [p.first, p.last, locationId, accountHolderId],
+          );
+          results.imported++; results.participantsCreated++;
+        }
+      }
+    } catch (err: any) {
+      results.errors++;
+      if (results.errorDetails.length < 8) results.errorDetails.push(err.message);
+    }
+  }
+
+  if (!preview) {
+    await auditLog('member.import_csv', req.user?.id ?? null, req, {
+      fileName: req.file?.originalname,
+      type: 'student-details',
+      total: rows.length,
+      imported: results.imported,
+      upgraded: results.upgraded,
+      skipped: results.skipped,
+      errors: results.errors,
+      accountHoldersCreated: results.accountHoldersCreated,
+      participantsCreated: results.participantsCreated,
+      relinked: results.relinked,
+      contactsUpdated: results.contactsUpdated,
+    });
+  }
+
+  return res.json({
+    type: 'student-details',
+    preview,
+    total: rows.length,
+    imported: results.imported,
+    upgraded: results.upgraded,
+    skipped: results.skipped,
+    errors: results.errors,
+    accountHoldersCreated: results.accountHoldersCreated,
+    participantsCreated: results.participantsCreated,
+    relinked: results.relinked,
+    contactsUpdated: results.contactsUpdated,
+    firstErrors: results.errorDetails.slice(0, 8),
+    skipReasons: results.skipReasons.slice(0, 8),
+  });
+}
+
 // --- Import endpoint ---
 
 router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest, res) => {
@@ -163,7 +412,14 @@ router.post('/', authorizeAdmin, upload.single('file'), async (req: AuthRequest,
 
   const type = detectType(headers);
   if (type === 'unknown') {
-    return res.status(400).json({ error: 'Could not detect CSV type. Expected Lead, Trial, or Member format from MyStudio.' });
+    return res.status(400).json({ error: 'Could not detect CSV type. Expected Lead, Trial, Member, or Student Details format.' });
+  }
+
+  // Student Details has a different shape (account holder + up to 11 participants per row)
+  // and no program/rank/status data, so it gets its own handler.
+  if (type === 'student-details') {
+    const preview = String(req.body.preview ?? '') === 'true';
+    return importStudentDetails(rows, locationId, req as AuthRequest, res, preview);
   }
 
   const results = { imported: 0, upgraded: 0, skipped: 0, errors: 0, errorDetails: [] as string[], skipReasons: [] as string[], duplicates: [] as string[] };

@@ -1054,6 +1054,14 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // "Student Details" export fields (payments / portal / contact recency)
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalPayments" NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pastDue" NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastContactText" TEXT`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "customerFor" TEXT`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "portalEnabled" BOOLEAN DEFAULT false`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "portalUsername" TEXT`);
+
     // Attendance tracking columns (added after initial deploy)
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalClassesAttended" INTEGER DEFAULT 0`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastCheckInAt" TIMESTAMP`);

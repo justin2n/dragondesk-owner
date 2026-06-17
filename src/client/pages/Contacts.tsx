@@ -316,7 +316,7 @@ const Contacts = () => {
     }
   };
 
-  const handleImport = async () => {
+  const handleImport = async (preview = false) => {
     if (!importFiles.length) return;
     setImportLoading(true);
     setImportResults([]);
@@ -332,6 +332,7 @@ const Contacts = () => {
         formData.append('file', file);
         if (importProgram) formData.append('program', importProgram);
         if (locationId) formData.append('locationId', locationId);
+        if (preview) formData.append('preview', 'true');
         const response = await fetch('/api/import-csv', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
@@ -347,7 +348,7 @@ const Contacts = () => {
     setImportResults(results);
     setImportProgress(null);
     setImportLoading(false);
-    loadMembers();
+    if (!preview) loadMembers(); // preview writes nothing, so no need to refresh
   };
 
   const handleDelete = async (id: number) => {
@@ -1312,7 +1313,7 @@ const Contacts = () => {
             {importResults.length === 0 ? (
               <div className={styles.form}>
                 <p className={styles.importHint}>
-                  Select one or more CSV exports from MyStudio (Leads, Trials, or Members). Each file is processed in order — duplicates are upgraded automatically.
+                  Select one or more CSV exports (Leads, Trials, Members, or Student Details). Each file is processed in order — duplicates are upgraded automatically. Student Details links participants to their account holder and refreshes contact info without overwriting program, rank, or status.
                 </p>
 
                 {/* Drop zone / file picker */}
@@ -1401,7 +1402,10 @@ const Contacts = () => {
 
                 <div className={styles.modalFooter}>
                   <button onClick={() => setShowImportModal(false)} className={styles.cancelBtn} type="button">Cancel</button>
-                  <button onClick={handleImport} className={styles.saveBtn} disabled={!importFiles.length || importLoading} type="button">
+                  <button onClick={() => handleImport(true)} className={styles.cancelBtn} disabled={!importFiles.length || importLoading} type="button">
+                    {importLoading ? 'Working…' : 'Preview changes'}
+                  </button>
+                  <button onClick={() => handleImport(false)} className={styles.saveBtn} disabled={!importFiles.length || importLoading} type="button">
                     {importLoading
                       ? `Importing ${importProgress?.current ?? 1} of ${importProgress?.total ?? importFiles.length}…`
                       : `Import ${importFiles.length > 0 ? `${importFiles.length} File${importFiles.length > 1 ? 's' : ''}` : ''}`}
@@ -1411,6 +1415,11 @@ const Contacts = () => {
             ) : (
               /* Results view */
               <div className={styles.form}>
+                {importResults.some(r => r.preview) && (
+                  <p className={styles.importHint}>
+                    <strong>Preview only — nothing was saved.</strong> These are the changes that would be made if you import. Review the counts below, then click <strong>Apply import</strong> to commit.
+                  </p>
+                )}
                 {/* Aggregate totals */}
                 {importResults.length > 1 && (() => {
                   const totals = importResults.reduce((acc, r) => ({
@@ -1478,8 +1487,12 @@ const Contacts = () => {
                 </div>
 
                 <div className={styles.modalFooter}>
-                  <button onClick={() => { setImportResults([]); setImportFiles([]); }} className={styles.cancelBtn} type="button">Import More</button>
-                  <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>
+                  <button onClick={() => { setImportResults([]); if (!importResults.some(r => r.preview)) setImportFiles([]); }} className={styles.cancelBtn} type="button">
+                    {importResults.some(r => r.preview) ? 'Back' : 'Import More'}
+                  </button>
+                  {importResults.some(r => r.preview)
+                    ? <button onClick={() => handleImport(false)} className={styles.saveBtn} disabled={importLoading} type="button">Apply import</button>
+                    : <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>}
                 </div>
               </div>
             )}
