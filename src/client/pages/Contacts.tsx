@@ -51,6 +51,7 @@ const Contacts = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
+  const [collapsedHolders, setCollapsedHolders] = useState<Set<number>>(new Set());
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [memberToCancel, setMemberToCancel] = useState<Member | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -630,6 +631,20 @@ const Contacts = () => {
     return groups;
   }, [members]);
 
+  const collapsibleHolderIds = useMemo(
+    () => groupedMembers.filter(g => g.holder && g.participants.length > 0).map(g => g.holder!.id),
+    [groupedMembers],
+  );
+  const allCollapsed = collapsibleHolderIds.length > 0 && collapsibleHolderIds.every(id => collapsedHolders.has(id));
+  const toggleHolderCollapse = (id: number) =>
+    setCollapsedHolders(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAllCollapse = () =>
+    setCollapsedHolders(allCollapsed ? new Set() : new Set(collapsibleHolderIds));
+
   const renderMemberCard = (member: Member, stacked = false) => (
     <div
       key={member.id}
@@ -675,7 +690,11 @@ const Contacts = () => {
     </div>
   );
 
-  const renderMemberRow = (member: Member, isChild = false) => (
+  const renderMemberRow = (
+    member: Member,
+    isChild = false,
+    holderToggle?: { count: number; collapsed: boolean; onToggle: () => void },
+  ) => (
     <tr
       key={member.id}
       onClick={() => handleViewMember(member)}
@@ -686,9 +705,20 @@ const Contacts = () => {
         <input type="checkbox" checked={selectedIds.has(member.id)} onChange={() => toggleSelect(member.id)} />
       </td>
       <td className={`${styles.nameCell} ${isChild ? styles.childName : ''}`}>
+        {holderToggle && (
+          <button
+            type="button"
+            className={styles.rowToggle}
+            onClick={(e) => { e.stopPropagation(); holderToggle.onToggle(); }}
+            aria-label={holderToggle.collapsed ? 'Expand participants' : 'Collapse participants'}
+          >
+            <span className={`${styles.chev} ${holderToggle.collapsed ? styles.chevCollapsed : ''}`} />
+          </button>
+        )}
         {isChild && <span className={styles.treeBranch}>↳</span>}
         {member.firstName} {member.lastName}
         {member.memberType === 'participant' && <span className={styles.memberTypeChip} style={{ marginLeft: 8 }}>Participant</span>}
+        {holderToggle && <span className={styles.countBadge}>{holderToggle.count}</span>}
       </td>
       <td>{member.email}</td>
       <td>{member.phone}</td>
@@ -737,6 +767,11 @@ const Contacts = () => {
               <TableViewIcon size={20} />
             </button>
           </div>
+          {collapsibleHolderIds.length > 0 && (
+            <button onClick={toggleAllCollapse} className={styles.collapseAllBtn} type="button">
+              {allCollapsed ? 'Expand all' : 'Collapse all'}
+            </button>
+          )}
           <button onClick={() => { setShowImportModal(true); setImportResults([]); setImportFiles([]); }} className={styles.importBtn}>
             Import CSV
           </button>
@@ -814,20 +849,26 @@ const Contacts = () => {
         </div>
       ) : viewMode === 'card' ? (
         <div className={styles.grid}>
-          {groupedMembers.map((group) =>
-            group.holder ? (
-              <div
-                key={`h${group.holder.id}`}
-                className={group.participants.length ? styles.cardStack : undefined}
-              >
-                {renderMemberCard(group.holder)}
-                {group.participants.map((p) => renderMemberCard(p, true))}
-              </div>
-            ) : (
+          {groupedMembers.map((group) => {
+            if (!group.holder) {
               // Orphan participants (account holder not in the current view)
-              group.participants.map((p) => renderMemberCard(p))
-            )
-          )}
+              return group.participants.map((p) => renderMemberCard(p));
+            }
+            const hasParticipants = group.participants.length > 0;
+            const collapsed = collapsedHolders.has(group.holder.id);
+            return (
+              <div key={`h${group.holder.id}`} className={hasParticipants ? styles.cardStack : undefined}>
+                {renderMemberCard(group.holder)}
+                {hasParticipants && (
+                  <button type="button" className={styles.stackToggle} onClick={() => toggleHolderCollapse(group.holder!.id)}>
+                    <span className={`${styles.chev} ${collapsed ? styles.chevCollapsed : ''}`} />
+                    {collapsed ? 'Show' : 'Hide'} {group.participants.length} participant{group.participants.length > 1 ? 's' : ''}
+                  </button>
+                )}
+                {hasParticipants && !collapsed && group.participants.map((p) => renderMemberCard(p, true))}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className={styles.tableContainer}>
@@ -921,12 +962,22 @@ const Contacts = () => {
               </tr>
             </thead>
             <tbody>
-              {groupedMembers.map((group) => (
-                <React.Fragment key={group.holder ? `h${group.holder.id}` : `o${group.participants[0]?.id ?? 'x'}`}>
-                  {group.holder && renderMemberRow(group.holder, false)}
-                  {group.participants.map((p) => renderMemberRow(p, !!group.holder))}
-                </React.Fragment>
-              ))}
+              {groupedMembers.map((group) => {
+                const collapsed = group.holder ? collapsedHolders.has(group.holder.id) : false;
+                const hasParticipants = group.participants.length > 0;
+                return (
+                  <React.Fragment key={group.holder ? `h${group.holder.id}` : `o${group.participants[0]?.id ?? 'x'}`}>
+                    {group.holder && renderMemberRow(
+                      group.holder,
+                      false,
+                      hasParticipants
+                        ? { count: group.participants.length, collapsed, onToggle: () => toggleHolderCollapse(group.holder!.id) }
+                        : undefined,
+                    )}
+                    {!collapsed && group.participants.map((p) => renderMemberRow(p, !!group.holder))}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

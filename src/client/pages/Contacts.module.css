@@ -1636,6 +1636,99 @@
   margin-right: 6px;
 }
 
+/* CSS chevron indicator (no glyph/emoji) */
+.chev {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform 0.15s ease;
+}
+.chevCollapsed {
+  transform: rotate(-90deg);
+}
+
+/* Count pill on an account holder */
+.countBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.4rem;
+  margin-left: 0.5rem;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+/* Expand/collapse control in the holder's name cell (table) */
+.rowToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-right: 0.4rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.rowToggle:hover {
+  color: var(--color-text-primary);
+}
+
+/* Show/Hide participants bar under a holder card */
+.stackToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: flex-start;
+  margin-left: 1.5rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-dark-grey);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.stackToggle:hover {
+  border-color: rgba(168, 85, 247, 0.6);
+  color: #a855f7;
+}
+.stackToggle .chev {
+  color: #a855f7;
+}
+
+/* Collapse all / Expand all toolbar button */
+.collapseAllBtn {
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-dark-grey);
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.collapseAllBtn:hover {
+  border-color: var(--color-red);
+  color: var(--color-text-primary);
+}
+
 /* Member type toggle in modal */
 .memberTypeToggle {
   display: flex;
