@@ -321,7 +321,6 @@ const Contacts = () => {
     setImportLoading(true);
     setImportResults([]);
     const locationId = isAllLocations ? '' : String(selectedLocation?.id || '');
-    const token = localStorage.getItem('token');
     const results: any[] = [];
 
     for (let i = 0; i < importFiles.length; i++) {
@@ -333,15 +332,12 @@ const Contacts = () => {
         if (importProgram) formData.append('program', importProgram);
         if (locationId) formData.append('locationId', locationId);
         if (preview) formData.append('preview', 'true');
-        const response = await fetch('/api/import-csv', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        const result = await response.json();
-        results.push({ fileName: file.name, ...(response.ok ? result : { error: result.error || 'Import failed' }) });
+        // api.upload handles auth + token refresh on 401 (a raw fetch here was
+        // sending a stale token and getting 401s that surfaced as "Failed to fetch").
+        const result = await api.upload('/import-csv', formData);
+        results.push({ fileName: file.name, ...result });
       } catch (err: any) {
-        results.push({ fileName: file.name, error: err.message });
+        results.push({ fileName: file.name, error: err.message || 'Import failed' });
       }
     }
 
