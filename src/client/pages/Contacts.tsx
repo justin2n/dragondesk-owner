@@ -1470,13 +1470,24 @@ const Contacts = () => {
                       {r.error ? (
                         <div className={styles.importError}>{r.error}</div>
                       ) : (
-                        <div className={styles.importFileResultStats}>
-                          <span>{r.total} rows</span>
-                          <span className={styles.importSuccess}>{r.imported} imported</span>
-                          {r.upgraded > 0 && <span className={styles.importUpgraded}>{r.upgraded} upgraded</span>}
-                          {r.skipped > 0 && <span>{r.skipped} skipped</span>}
-                          {r.errors > 0 && <span className={styles.importFailed}>{r.errors} errors</span>}
-                        </div>
+                        <>
+                          <div className={styles.importFileResultStats}>
+                            <span>{r.total} rows</span>
+                            <span className={styles.importSuccess}>{r.imported} imported</span>
+                            {r.upgraded > 0 && <span className={styles.importUpgraded}>{r.upgraded} upgraded</span>}
+                            {r.skipped > 0 && <span>{r.skipped} skipped</span>}
+                            {r.errors > 0 && <span className={styles.importFailed}>{r.errors} errors</span>}
+                          </div>
+                          {/* Student Details breakdown (account holder / participant linking) */}
+                          {(r.accountHoldersCreated != null || r.participantsCreated != null || r.relinked != null || r.contactsUpdated != null) && (
+                            <div className={styles.importFileResultStats}>
+                              {r.accountHoldersCreated > 0 && <span>{r.accountHoldersCreated} account holders created</span>}
+                              {r.participantsCreated > 0 && <span>{r.participantsCreated} participants created</span>}
+                              {r.relinked > 0 && <span>{r.relinked} participants relinked</span>}
+                              {r.contactsUpdated > 0 && <span>{r.contactsUpdated} contacts updated</span>}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   ))}
