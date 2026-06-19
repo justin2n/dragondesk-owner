@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Member, ParticipantSummary, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
@@ -605,6 +605,107 @@ const Contacts = () => {
   const typeLabel = contactType === 'account_holders' ? 'Account Holders'
     : contactType === 'participants' ? 'Participants' : 'All Contacts';
 
+  // Group participants under their account holder for nested/stacked display.
+  // Participants whose holder isn't in the current (filtered) view are shown
+  // standalone so nothing is hidden.
+  const groupedMembers = useMemo(() => {
+    const holders = members.filter(m => m.memberType !== 'participant');
+    const holderIds = new Set(holders.map(h => h.id));
+    const byHolder = new Map<number, Member[]>();
+    const orphans: Member[] = [];
+    for (const m of members) {
+      if (m.memberType !== 'participant') continue;
+      const ahId = m.accountHolderId ?? null;
+      if (ahId != null && holderIds.has(ahId)) {
+        const arr = byHolder.get(ahId) || [];
+        arr.push(m);
+        byHolder.set(ahId, arr);
+      } else {
+        orphans.push(m);
+      }
+    }
+    const groups: { holder: Member | null; participants: Member[] }[] =
+      holders.map(h => ({ holder: h, participants: byHolder.get(h.id) || [] }));
+    if (orphans.length) groups.push({ holder: null, participants: orphans });
+    return groups;
+  }, [members]);
+
+  const renderMemberCard = (member: Member, stacked = false) => (
+    <div
+      key={member.id}
+      className={`${styles.card} ${member.memberType === 'participant' ? styles.participantCard : ''} ${stacked ? styles.stackedCard : ''}`}
+    >
+      <div className={styles.cardHeader} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <h3 className={styles.cardTitle}>{member.firstName} {member.lastName}</h3>
+          {member.memberType === 'participant' && (
+            <span className={styles.memberTypeChip}>Participant</span>
+          )}
+        </div>
+        <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{member.accountStatus}</span>
+      </div>
+      <div className={styles.cardBody} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
+        {member.memberType !== 'participant' && member.email && (
+          <div className={styles.info}><span className={styles.label}>Email:</span><span>{member.email}</span></div>
+        )}
+        {member.memberType !== 'participant' && (
+          <div className={styles.info}><span className={styles.label}>Phone:</span><span>{member.phone || '—'}</span></div>
+        )}
+        {member.memberType === 'participant' && !stacked && (
+          <div className={styles.info}>
+            <span className={styles.label}>Account Holder:</span>
+            <span>{
+              accountHolders.find(ah => ah.id === member.accountHolderId)
+                ? `${accountHolders.find(ah => ah.id === member.accountHolderId)!.firstName} ${accountHolders.find(ah => ah.id === member.accountHolderId)!.lastName}`
+                : '—'
+            }</span>
+          </div>
+        )}
+        <div className={styles.info}><span className={styles.label}>Program:</span><span>{member.programType || '—'}</span></div>
+        <div className={styles.info}><span className={styles.label}>Ranking:</span><span>{member.ranking}</span></div>
+        {member.memberType !== 'participant' && (
+          <div className={styles.info}><span className={styles.label}>Plan:</span><span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span></div>
+        )}
+        <div className={styles.info}><span className={styles.label}>Age Group:</span><span>{member.membershipAge}</span></div>
+      </div>
+      <div className={styles.cardFooter}>
+        <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>Edit</button>
+        <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>Delete</button>
+      </div>
+    </div>
+  );
+
+  const renderMemberRow = (member: Member, isChild = false) => (
+    <tr
+      key={member.id}
+      onClick={() => handleViewMember(member)}
+      style={{ cursor: 'pointer' }}
+      className={`${selectedIds.has(member.id) ? styles.selectedRow : ''} ${isChild ? styles.childRow : ''}`}
+    >
+      <td onClick={e => e.stopPropagation()} className={styles.checkboxCol}>
+        <input type="checkbox" checked={selectedIds.has(member.id)} onChange={() => toggleSelect(member.id)} />
+      </td>
+      <td className={`${styles.nameCell} ${isChild ? styles.childName : ''}`}>
+        {isChild && <span className={styles.treeBranch}>↳</span>}
+        {member.firstName} {member.lastName}
+        {member.memberType === 'participant' && <span className={styles.memberTypeChip} style={{ marginLeft: 8 }}>Participant</span>}
+      </td>
+      <td>{member.email}</td>
+      <td>{member.phone}</td>
+      <td><span className={`${styles.badge} ${styles[member.accountStatus]}`}>{member.accountStatus}</span></td>
+      <td>{member.programType}</td>
+      <td>{member.ranking}</td>
+      <td>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</td>
+      <td>{member.membershipAge}</td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <div className={styles.tableActions}>
+          <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>Edit</button>
+          <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>Delete</button>
+        </div>
+      </td>
+    </tr>
+  );
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -713,81 +814,20 @@ const Contacts = () => {
         </div>
       ) : viewMode === 'card' ? (
         <div className={styles.grid}>
-          {members.map((member) => (
-            <div key={member.id} className={`${styles.card} ${member.memberType === 'participant' ? styles.participantCard : ''}`}>
+          {groupedMembers.map((group) =>
+            group.holder ? (
               <div
-                className={styles.cardHeader}
-                onClick={() => handleViewMember(member)}
-                style={{ cursor: 'pointer' }}
+                key={`h${group.holder.id}`}
+                className={group.participants.length ? styles.cardStack : undefined}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <h3 className={styles.cardTitle}>
-                    {member.firstName} {member.lastName}
-                  </h3>
-                  {member.memberType === 'participant' && (
-                    <span className={styles.memberTypeChip}>Participant</span>
-                  )}
-                </div>
-                <span className={`${styles.badge} ${styles[member.accountStatus]}`}>
-                  {member.accountStatus}
-                </span>
+                {renderMemberCard(group.holder)}
+                {group.participants.map((p) => renderMemberCard(p, true))}
               </div>
-              <div
-                className={styles.cardBody}
-                onClick={() => handleViewMember(member)}
-                style={{ cursor: 'pointer' }}
-              >
-                {member.memberType !== 'participant' && member.email && (
-                  <div className={styles.info}>
-                    <span className={styles.label}>Email:</span>
-                    <span>{member.email}</span>
-                  </div>
-                )}
-                {member.memberType !== 'participant' && (
-                  <div className={styles.info}>
-                    <span className={styles.label}>Phone:</span>
-                    <span>{member.phone || '—'}</span>
-                  </div>
-                )}
-                {member.memberType === 'participant' && (
-                  <div className={styles.info}>
-                    <span className={styles.label}>Account Holder:</span>
-                    <span>{
-                      accountHolders.find(ah => ah.id === member.accountHolderId)
-                        ? `${accountHolders.find(ah => ah.id === member.accountHolderId)!.firstName} ${accountHolders.find(ah => ah.id === member.accountHolderId)!.lastName}`
-                        : '—'
-                    }</span>
-                  </div>
-                )}
-                <div className={styles.info}>
-                  <span className={styles.label}>Program:</span>
-                  <span>{member.programType || '—'}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Ranking:</span>
-                  <span>{member.ranking}</span>
-                </div>
-                {member.memberType !== 'participant' && (
-                  <div className={styles.info}>
-                    <span className={styles.label}>Plan:</span>
-                    <span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span>
-                  </div>
-                )}
-                <div className={styles.info}>
-                  <span className={styles.label}>Age Group:</span>
-                  <span>{member.membershipAge}</span>
-                </div>
-              </div>
-              <div className={styles.cardFooter}>
-                <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>
-                  Edit
-                </button>
-                <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
+            ) : (
+              // Orphan participants (account holder not in the current view)
+              group.participants.map((p) => renderMemberCard(p))
+            )
+          )}
         </div>
       ) : (
         <div className={styles.tableContainer}>
@@ -881,45 +921,11 @@ const Contacts = () => {
               </tr>
             </thead>
             <tbody>
-              {members.map((member) => (
-                <tr
-                  key={member.id}
-                  onClick={() => handleViewMember(member)}
-                  style={{ cursor: 'pointer' }}
-                  className={selectedIds.has(member.id) ? styles.selectedRow : ''}
-                >
-                  <td onClick={e => e.stopPropagation()} className={styles.checkboxCol}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(member.id)}
-                      onChange={() => toggleSelect(member.id)}
-                    />
-                  </td>
-                  <td className={styles.nameCell}>
-                    {member.firstName} {member.lastName}
-                  </td>
-                  <td>{member.email}</td>
-                  <td>{member.phone}</td>
-                  <td>
-                    <span className={`${styles.badge} ${styles[member.accountStatus]}`}>
-                      {member.accountStatus}
-                    </span>
-                  </td>
-                  <td>{member.programType}</td>
-                  <td>{member.ranking}</td>
-                  <td>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</td>
-                  <td>{member.membershipAge}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <div className={styles.tableActions}>
-                      <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+              {groupedMembers.map((group) => (
+                <React.Fragment key={group.holder ? `h${group.holder.id}` : `o${group.participants[0]?.id ?? 'x'}`}>
+                  {group.holder && renderMemberRow(group.holder, false)}
+                  {group.participants.map((p) => renderMemberRow(p, !!group.holder))}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

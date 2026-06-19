@@ -1596,6 +1596,46 @@
   border-left: 3px solid rgba(168, 85, 247, 0.5);
 }
 
+/* Account holder + nested participants (card view) */
+.cardStack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* Participant cards stacked under their account holder */
+.cardStack .stackedCard {
+  margin-left: 1.5rem;
+  position: relative;
+}
+
+/* Connector tying each stacked participant back to the holder */
+.cardStack .stackedCard::before {
+  content: '';
+  position: absolute;
+  left: -0.85rem;
+  top: -0.6rem;
+  height: calc(50% + 0.6rem);
+  width: 0.85rem;
+  border-left: 2px solid rgba(168, 85, 247, 0.4);
+  border-bottom: 2px solid rgba(168, 85, 247, 0.4);
+  border-bottom-left-radius: 6px;
+}
+
+/* Nested participant rows (table view) */
+.childRow td {
+  background: rgba(168, 85, 247, 0.05);
+}
+
+.childName {
+  padding-left: 1.75rem;
+}
+
+.treeBranch {
+  color: rgba(168, 85, 247, 0.85);
+  margin-right: 6px;
+}
+
 /* Member type toggle in modal */
 .memberTypeToggle {
   display: flex;
