@@ -150,7 +150,12 @@ const Contacts = () => {
 
     const open = (member: Member) => {
       deepLinkHandled.current = true;
-      handleViewMember(member);
+      handleViewMember(member); // defaults to the 'details' tab
+      // Optional ?tab= deep-link (e.g. from Pulse → open straight to History)
+      const tab = searchParams.get('tab');
+      if (tab === 'history') { setViewTab('history'); loadWebActivity(member.id); }
+      else if (tab === 'attendance') { setViewTab('attendance'); loadMemberAttendanceData(member.id); }
+      else if (tab === 'billing') { setViewTab('billing'); }
       setSearchParams({}, { replace: true });
     };
 

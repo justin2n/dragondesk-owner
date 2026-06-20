@@ -177,7 +177,7 @@ const SalesSignals: React.FC = () => {
               <div
                 key={`${lead.visitorId}-${lead.token}`}
                 className={`${styles.leadCard} ${urgency.cls} ${isMember ? styles.clickable : ''}`}
-                onClick={() => isMember && navigate(`/members?member=${lead.memberTableId}`)}
+                onClick={() => isMember && navigate(`/members?member=${lead.memberTableId}&tab=history`)}
               >
                 <div className={styles.cardHeader}>
                   <div className={styles.leadInfo}>
@@ -250,7 +250,8 @@ const SalesSignals: React.FC = () => {
                   </a>
                   {isMember && (
                     <a
-                      href={`/members?highlight=${lead.memberTableId}`}
+                      href={`/members?member=${lead.memberTableId}`}
+                      onClick={(e) => { e.preventDefault(); navigate(`/members?member=${lead.memberTableId}`); }}
                       className={`${styles.actionBtn} ${styles.profileBtn}`}
                     >
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
