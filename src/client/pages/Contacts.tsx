@@ -645,6 +645,19 @@ const Contacts = () => {
   const toggleAllCollapse = () =>
     setCollapsedHolders(allCollapsed ? new Set() : new Set(collapsibleHolderIds));
 
+  // O(1) lookups so per-row rendering doesn't scan these lists for every member.
+  const pricingPlanById = useMemo(() => {
+    const m = new Map<number, PricingPlan>();
+    for (const p of allPricingPlans) m.set(p.id, p);
+    return m;
+  }, [allPricingPlans]);
+  const accountHolderById = useMemo(() => {
+    const m = new Map<number, Member>();
+    for (const ah of accountHolders) m.set(ah.id, ah);
+    return m;
+  }, [accountHolders]);
+  const planName = (id?: number | null) => (id != null ? pricingPlanById.get(id)?.name : undefined) || '—';
+
   const renderMemberCard = (member: Member, stacked = false) => (
     <div
       key={member.id}
@@ -669,17 +682,16 @@ const Contacts = () => {
         {member.memberType === 'participant' && !stacked && (
           <div className={styles.info}>
             <span className={styles.label}>Account Holder:</span>
-            <span>{
-              accountHolders.find(ah => ah.id === member.accountHolderId)
-                ? `${accountHolders.find(ah => ah.id === member.accountHolderId)!.firstName} ${accountHolders.find(ah => ah.id === member.accountHolderId)!.lastName}`
-                : '—'
-            }</span>
+            <span>{(() => {
+              const ah = member.accountHolderId != null ? accountHolderById.get(member.accountHolderId) : undefined;
+              return ah ? `${ah.firstName} ${ah.lastName}` : '—';
+            })()}</span>
           </div>
         )}
         <div className={styles.info}><span className={styles.label}>Program:</span><span>{member.programType || '—'}</span></div>
         <div className={styles.info}><span className={styles.label}>Ranking:</span><span>{member.ranking}</span></div>
         {member.memberType !== 'participant' && (
-          <div className={styles.info}><span className={styles.label}>Plan:</span><span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span></div>
+          <div className={styles.info}><span className={styles.label}>Plan:</span><span>{planName(member.pricingPlanId)}</span></div>
         )}
         <div className={styles.info}><span className={styles.label}>Age Group:</span><span>{member.membershipAge}</span></div>
       </div>
@@ -725,7 +737,7 @@ const Contacts = () => {
       <td><span className={`${styles.badge} ${styles[member.accountStatus]}`}>{member.accountStatus}</span></td>
       <td>{member.programType}</td>
       <td>{member.ranking}</td>
-      <td>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</td>
+      <td>{planName(member.pricingPlanId)}</td>
       <td>{member.membershipAge}</td>
       <td onClick={(e) => e.stopPropagation()}>
         <div className={styles.tableActions}>
@@ -1710,7 +1722,7 @@ const Contacts = () => {
 
                   <div className={styles.viewField}>
                     <label className={styles.viewLabel}>Subscription Type</label>
-                    <div className={styles.viewValue}>{allPricingPlans.find(p => p.id === viewingMember.pricingPlanId)?.name || '—'}</div>
+                    <div className={styles.viewValue}>{planName(viewingMember.pricingPlanId)}</div>
                   </div>
 
                   {(viewingMember as any).membershipName && (

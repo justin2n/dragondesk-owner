@@ -897,6 +897,16 @@ async function initializeDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_visitor ON tracking_events("visitorId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_type ON tracking_events("eventType")`);
 
+    // Performance indexes for the Contacts/Events list queries (filter + sort)
+    // and for participant→account-holder lookups (used heavily during CSV import).
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_location ON members("locationId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_status ON members("accountStatus")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_member_type ON members("memberType")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_holder ON members("accountHolderId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_created_at ON members("createdAt")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_events_start ON events("startDateTime")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_events_location ON events("locationId")`);
+
     // Churn metrics table
     await client.query(`
       CREATE TABLE IF NOT EXISTS churn_metrics (
