@@ -52,6 +52,9 @@ const Contacts = () => {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
   const [collapsedHolders, setCollapsedHolders] = useState<Set<number>>(new Set());
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [memberToCancel, setMemberToCancel] = useState<Member | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -627,7 +630,9 @@ const Contacts = () => {
     }
     const groups: { holder: Member | null; participants: Member[] }[] =
       holders.map(h => ({ holder: h, participants: byHolder.get(h.id) || [] }));
-    if (orphans.length) groups.push({ holder: null, participants: orphans });
+    // Each orphan participant is its own group so progressive rendering windows
+    // them individually (e.g. the Participants tab, which is all orphans).
+    for (const o of orphans) groups.push({ holder: null, participants: [o] });
     return groups;
   }, [members]);
 
@@ -644,6 +649,26 @@ const Contacts = () => {
     });
   const toggleAllCollapse = () =>
     setCollapsedHolders(allCollapsed ? new Set() : new Set(collapsibleHolderIds));
+
+  // Progressive rendering: only mount the first N holder groups, then grow as
+  // the user scrolls near the bottom. Keeps initial DOM small on big lists.
+  const visibleGroups = useMemo(() => groupedMembers.slice(0, visibleCount), [groupedMembers, visibleCount]);
+  const hasMoreGroups = visibleCount < groupedMembers.length;
+  // Reset the window whenever the underlying list changes (filter/search/sort/location).
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [members]);
+  useEffect(() => {
+    if (!hasMoreGroups) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) setVisibleCount((c) => Math.min(c + PAGE_SIZE, groupedMembers.length)); },
+      { rootMargin: '800px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+    // visibleCount in deps: re-observe after each page so we keep loading while
+    // the sentinel remains in view (IO won't re-fire if it never leaves view).
+  }, [hasMoreGroups, groupedMembers.length, visibleCount]);
 
   // O(1) lookups so per-row rendering doesn't scan these lists for every member.
   const pricingPlanById = useMemo(() => {
@@ -861,7 +886,7 @@ const Contacts = () => {
         </div>
       ) : viewMode === 'card' ? (
         <div className={styles.grid}>
-          {groupedMembers.map((group) => {
+          {visibleGroups.map((group) => {
             if (!group.holder) {
               // Orphan participants (account holder not in the current view)
               return group.participants.map((p) => renderMemberCard(p));
@@ -974,7 +999,7 @@ const Contacts = () => {
               </tr>
             </thead>
             <tbody>
-              {groupedMembers.map((group) => {
+              {visibleGroups.map((group) => {
                 const collapsed = group.holder ? collapsedHolders.has(group.holder.id) : false;
                 const hasParticipants = group.participants.length > 0;
                 return (
@@ -992,6 +1017,21 @@ const Contacts = () => {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {hasMoreGroups && (
+        <div ref={sentinelRef} className={styles.loadMore}>
+          <button
+            type="button"
+            className={styles.loadMoreBtn}
+            onClick={() => setVisibleCount((c) => Math.min(c + PAGE_SIZE, groupedMembers.length))}
+          >
+            Load more
+          </button>
+          <span className={styles.loadMoreHint}>
+            Showing {visibleGroups.length} of {groupedMembers.length}
+          </span>
         </div>
       )}
 
