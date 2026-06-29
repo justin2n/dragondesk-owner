@@ -29,19 +29,49 @@ async function logHistory(
   );
 }
 
-// Keep a member's program-offering link (members.programId) in sync with their
-// profile. Only participants map to a program offering; for everyone else the
-// link is cleared. A programType with no matching program leaves programId null
-// (surfaced via GET /participants/unassigned).
-async function syncParticipantProgram(memberId: number, memberType: string | null | undefined, programType: string | null | undefined) {
-  if (memberType === 'participant' && programType) {
-    await pool.query(
-      `UPDATE members SET "programId" = (SELECT id FROM programs WHERE name = $1) WHERE id = $2`,
-      [programType, memberId],
-    );
-  } else {
+// Keep a participant's program assignments in sync. member_programs is the
+// source of truth (a participant can train in many programs); members."programId"
+// and "programType" are kept as the *primary* program (first selected) for
+// back-compat with program-segmented analytics, events and belt logic.
+// Non-participants have no programs. Participants with none are surfaced via
+// GET /participants/unassigned.
+async function syncParticipantPrograms(
+  memberId: number,
+  memberType: string | null | undefined,
+  programIds: number[] | undefined,
+  programType?: string | null,
+) {
+  if (memberType !== 'participant') {
+    await pool.query(`DELETE FROM member_programs WHERE "memberId" = $1`, [memberId]);
     await pool.query(`UPDATE members SET "programId" = NULL WHERE id = $1`, [memberId]);
+    return;
   }
+
+  // Resolve the program id list: explicit programIds, else match programType by name.
+  let ids = Array.isArray(programIds)
+    ? programIds.map(Number).filter(n => Number.isFinite(n))
+    : [];
+  if (ids.length === 0 && programType) {
+    const r = await pool.query(`SELECT id FROM programs WHERE name = $1`, [programType]);
+    if (r.rows[0]) ids = [r.rows[0].id];
+  }
+
+  await pool.query(`DELETE FROM member_programs WHERE "memberId" = $1`, [memberId]);
+  for (const pid of ids) {
+    await pool.query(
+      `INSERT INTO member_programs ("memberId", "programId") VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [memberId, pid],
+    );
+  }
+
+  const primaryId = ids[0] ?? null;
+  await pool.query(
+    `UPDATE members SET
+       "programId" = $1,
+       "programType" = COALESCE((SELECT name FROM programs WHERE id = $1), "programType")
+     WHERE id = $2`,
+    [primaryId, memberId],
+  );
 }
 
 function diffMember(oldRow: any, newValues: Record<string, any>) {
@@ -133,7 +163,8 @@ router.get('/participants/unassigned', async (req: AuthRequest, res) => {
               ah."lastName"  AS "accountHolderLastName"
        FROM members p
        LEFT JOIN members ah ON ah.id = p."accountHolderId"
-       WHERE p."memberType" = 'participant' AND p."programId" IS NULL
+       WHERE p."memberType" = 'participant'
+         AND NOT EXISTS (SELECT 1 FROM member_programs mp WHERE mp."memberId" = p.id)
        ORDER BY p."lastName" ASC, p."firstName" ASC`
     );
     res.json(result.rows);
@@ -177,6 +208,16 @@ router.get('/:id', async (req: AuthRequest, res) => {
 
     const member = result.rows[0];
 
+    // This member's programs (a participant trains in 1+; member_programs is the
+    // source of truth). Returned as [{ id, name }] for the multi-select UI.
+    const programsOf = async (id: number) => (await pool.query(
+      `SELECT p.id, p.name FROM member_programs mp
+       JOIN programs p ON p.id = mp."programId"
+       WHERE mp."memberId" = $1 ORDER BY p.name ASC`,
+      [id],
+    )).rows;
+    member.programs = await programsOf(member.id);
+
     // Include participants if this is an account holder
     if (!member.accountHolderId) {
       const participantsResult = await pool.query(
@@ -186,6 +227,9 @@ router.get('/:id', async (req: AuthRequest, res) => {
         [member.id]
       );
       member.participants = participantsResult.rows;
+      for (const p of member.participants) {
+        p.programs = await programsOf(p.id);
+      }
     }
 
     // Include account holder info if this is a participant
@@ -229,6 +273,7 @@ router.post('/', async (req: AuthRequest, res) => {
       companyName,
       memberType,
       accountHolderId,
+      programIds,
     } = req.body;
 
     const resolvedMemberType = memberType || 'account_holder';
@@ -278,8 +323,8 @@ router.post('/', async (req: AuthRequest, res) => {
       [created.id, created.email]
     ).catch(() => {});
 
-    // Link participants to their program offering based on their programType
-    await syncParticipantProgram(created.id, resolvedMemberType, created.programType).catch(() => {});
+    // Sync the participant's program assignments (many-to-many)
+    await syncParticipantPrograms(created.id, resolvedMemberType, programIds, created.programType).catch(() => {});
 
     res.status(201).json(created);
   } catch (error: any) {
@@ -316,6 +361,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       membershipName,
       memberType,
       accountHolderId,
+      programIds,
     } = req.body;
 
     const existing = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
@@ -362,8 +408,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
       await logHistory(updated.id, action, changes, req.user).catch(() => {});
     }
 
-    // Keep the participant→program offering link in sync with their programType
-    await syncParticipantProgram(updated.id, updated.memberType, updated.programType).catch(() => {});
+    // Sync the participant's program assignments (many-to-many)
+    await syncParticipantPrograms(updated.id, updated.memberType, programIds, updated.programType).catch(() => {});
 
     res.json(updated);
   } catch (error: any) {

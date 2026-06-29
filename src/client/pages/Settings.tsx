@@ -628,16 +628,6 @@ const Settings = () => {
     }
   };
 
-  const handleAssignProgramMembership = async (programId: number, membershipId: string) => {
-    try {
-      await api.put(`/programs/${programId}`, { membershipId: membershipId ? parseInt(membershipId) : null });
-      await loadMemberships();
-      await loadPrograms();
-    } catch (error: any) {
-      toast(error.message || 'Failed to assign program', 'error');
-    }
-  };
-
   const loadSettings = () => {
     // Load settings from localStorage
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark';
@@ -1318,7 +1308,7 @@ const Settings = () => {
       label: 'Gym Settings',
       tabs: [
         { id: 'locations', label: 'Locations' },
-        { id: 'memberships', label: 'Memberships' },
+        { id: 'memberships', label: 'Membership Plans' },
         { id: 'programs', label: 'Programs' },
       ]
     },
@@ -1338,7 +1328,6 @@ const Settings = () => {
       label: 'Billing',
       tabs: [
         { id: 'stripe', label: 'Stripe Payments' },
-        { id: 'pricing', label: 'Pricing Plans' },
         { id: 'pos', label: 'Point of Sale' },
       ]
     },
@@ -1798,14 +1787,14 @@ const Settings = () => {
             <div className={styles.section}>
               <div className={styles.sectionHeader}>
                 <div>
-                  <h2 className={styles.sectionTitle}>Memberships</h2>
+                  <h2 className={styles.sectionTitle}>Membership Plans</h2>
                   <p className={styles.sectionDesc}>
-                    Define membership tiers and assign programs to each one.
+                    The paid plans account holders subscribe to. Each plan's monthly price drives the financial metrics in DragonDesk: Analytics.
                   </p>
                 </div>
                 <button onClick={() => { setEditingMembership(null); setShowMembershipModal(true); }} className={styles.primaryBtn}>
                   <AddIcon size={20} />
-                  Add Membership
+                  Add Membership Plan
                 </button>
               </div>
 
@@ -1849,44 +1838,16 @@ const Settings = () => {
                 ))}
                 {memberships.length === 0 && (
                   <div className={styles.emptyState}>
-                    <p>No memberships yet. Add your first membership to get started!</p>
+                    <p>No membership plans yet. Add your first plan to get started!</p>
                   </div>
                 )}
               </div>
-
-              {/* Assign programs to memberships */}
-              {memberships.length > 0 && programs.length > 0 && (
-                <div className={styles.subsection}>
-                  <h3 className={styles.subsectionTitle}>Assign Programs to Memberships</h3>
-                  <p className={styles.sectionDesc}>Set which membership each program belongs to.</p>
-                  <div className={styles.locationsList}>
-                    {programs.map(program => (
-                      <div key={program.id} className={styles.locationCard} style={{ padding: '0.75rem 1rem' }}>
-                        <div className={styles.locationInfo}>
-                          <span className={styles.locationName} style={{ fontSize: '0.95rem' }}>{program.name}</span>
-                        </div>
-                        <select
-                          className={styles.input}
-                          style={{ width: 'auto', minWidth: '200px' }}
-                          value={program.membershipId ?? ''}
-                          onChange={e => handleAssignProgramMembership(program.id, e.target.value)}
-                        >
-                          <option value="">No membership</option>
-                          {memberships.map(m => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {showMembershipModal && (
                 <div className={styles.modal}>
                   <div className={styles.modalContent}>
                     <div className={styles.modalHeader}>
-                      <h2>{editingMembership ? 'Edit Membership' : 'Add New Membership'}</h2>
+                      <h2>{editingMembership ? 'Edit Membership Plan' : 'Add New Membership Plan'}</h2>
                       <button onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.closeBtn}>×</button>
                     </div>
                     <form onSubmit={handleSaveMembership}>
@@ -1915,7 +1876,7 @@ const Settings = () => {
                       </div>
                       <div className={styles.modalActions}>
                         <button type="button" onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.secondaryBtn}>Cancel</button>
-                        <button type="submit" className={styles.saveBtn}>{editingMembership ? 'Update Membership' : 'Create Membership'}</button>
+                        <button type="submit" className={styles.saveBtn}>{editingMembership ? 'Update Membership Plan' : 'Create Membership Plan'}</button>
                       </div>
                     </form>
                   </div>

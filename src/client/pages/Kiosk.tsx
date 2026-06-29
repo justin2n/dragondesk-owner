@@ -27,7 +27,12 @@ interface Member {
   ranking?: string;
 }
 
-type ViewMode = 'loading' | 'search' | 'select-class' | 'success' | 'already-checked-in' | 'error' | 'select-location';
+interface Program {
+  id: number;
+  name: string;
+}
+
+type ViewMode = 'loading' | 'search' | 'select-program' | 'select-class' | 'success' | 'already-checked-in' | 'error' | 'select-location';
 
 const Kiosk: React.FC = () => {
   const { locationId: paramLocationId } = useParams<{ locationId?: string }>();
@@ -43,6 +48,8 @@ const Kiosk: React.FC = () => {
   const [searching, setSearching] = useState(false);
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [memberPrograms, setMemberPrograms] = useState<Program[]>([]);
+  const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [memberClasses, setMemberClasses] = useState<ClassEvent[]>([]);
   const [loadingClasses, setLoadingClasses] = useState(false);
 
@@ -113,6 +120,8 @@ const Kiosk: React.FC = () => {
     setSearchQuery('');
     setSearchResults([]);
     setSelectedMember(null);
+    setMemberPrograms([]);
+    setSelectedProgram(null);
     setMemberClasses([]);
     setCheckedInMember(null);
     setError(null);
@@ -131,16 +140,44 @@ const Kiosk: React.FC = () => {
     finally { setSearching(false); }
   };
 
-  const handleSelectMember = async (member: Member) => {
-    setSelectedMember(member);
+  // Load today's classes for a member, optionally scoped to one program.
+  const loadClasses = async (memberId: number, programId?: number) => {
     setMemberClasses([]);
     setLoadingClasses(true);
     setViewMode('select-class');
     try {
-      const res = await fetch(`/api/kiosk/classes/member/${member.id}`);
+      const url = programId
+        ? `/api/kiosk/classes/member/${memberId}?programId=${programId}`
+        : `/api/kiosk/classes/member/${memberId}`;
+      const res = await fetch(url);
       if (res.ok) setMemberClasses(await res.json());
     } catch {}
     finally { setLoadingClasses(false); }
+  };
+
+  const handleSelectMember = async (member: Member) => {
+    setSelectedMember(member);
+    setSelectedProgram(null);
+    setMemberPrograms([]);
+    // If the participant trains in more than one program, ask which one first.
+    try {
+      const res = await fetch(`/api/kiosk/member/${member.id}/programs`);
+      const programs: Program[] = res.ok ? await res.json() : [];
+      if (programs.length > 1) {
+        setMemberPrograms(programs);
+        setViewMode('select-program');
+        return;
+      }
+      await loadClasses(member.id, programs[0]?.id);
+      setSelectedProgram(programs[0] || null);
+    } catch {
+      await loadClasses(member.id);
+    }
+  };
+
+  const handleSelectProgram = async (program: Program) => {
+    setSelectedProgram(program);
+    await loadClasses(selectedMember!.id, program.id);
   };
 
   const handleClassCheckIn = async (classId: number) => {
@@ -153,6 +190,7 @@ const Kiosk: React.FC = () => {
           memberId: selectedMember.id,
           locationId,
           eventId: classId,
+          programId: selectedProgram?.id || null,
           method: 'name_search',
         }),
       });
@@ -274,6 +312,32 @@ const Kiosk: React.FC = () => {
           </div>
         )}
 
+        {/* Step 2a: Select program (only when the member trains in several) */}
+        {viewMode === 'select-program' && selectedMember && (
+          <div className={styles.selectClassView}>
+            <div className={styles.memberHeader}>
+              <h2 className={styles.memberWelcome}>
+                Hi, {selectedMember.firstName} {selectedMember.lastName}!
+              </h2>
+            </div>
+            <h3 className={styles.selectClassTitle}>Which program are you here for?</h3>
+            <div className={styles.memberClassesList}>
+              {memberPrograms.map(program => (
+                <button key={program.id} className={styles.classCheckInBtn}
+                  onClick={() => handleSelectProgram(program)}>
+                  <div className={styles.classInfo}>
+                    <span className={styles.className}>{program.name}</span>
+                  </div>
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style={{ opacity: 0.4, flexShrink: 0 }}>
+                    <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>
+                  </svg>
+                </button>
+              ))}
+            </div>
+            <button className={styles.backBtn} onClick={resetToSearch}>← Back to Search</button>
+          </div>
+        )}
+
         {/* Step 2: Select class */}
         {viewMode === 'select-class' && selectedMember && (
           <div className={styles.selectClassView}>
@@ -281,8 +345,8 @@ const Kiosk: React.FC = () => {
               <h2 className={styles.memberWelcome}>
                 Hi, {selectedMember.firstName} {selectedMember.lastName}!
               </h2>
-              {selectedMember.programType && (
-                <span className={styles.memberProgramBadge}>{selectedMember.programType}</span>
+              {(selectedProgram?.name || selectedMember.programType) && (
+                <span className={styles.memberProgramBadge}>{selectedProgram?.name || selectedMember.programType}</span>
               )}
             </div>
 

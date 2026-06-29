@@ -45,10 +45,12 @@ router.get('/classes/today/:locationId', async (req, res) => {
   }
 });
 
-// Get today's classes for a specific member (filtered by their program type)
+// Get today's classes for a member. Filtered by a specific program (?programId)
+// or, by default, across ALL the member's programs (member_programs junction).
 router.get('/classes/member/:memberId', async (req, res) => {
   try {
     const { memberId } = req.params;
+    const { programId } = req.query;
 
     const memberResult = await pool.query(
       `SELECT "programType" FROM members WHERE id = $1`,
@@ -59,8 +61,25 @@ router.get('/classes/member/:memberId', async (req, res) => {
       return res.status(404).json({ error: 'Member not found' });
     }
 
-    const raw = memberResult.rows[0].programType;
-    const programType = (raw && raw !== 'No Program Selected') ? raw : null;
+    // Resolve the set of program names to filter classes by.
+    let names: string[] = [];
+    if (programId) {
+      const r = await pool.query(`SELECT name FROM programs WHERE id = $1`, [programId]);
+      names = r.rows.map((x: any) => x.name);
+    } else {
+      const r = await pool.query(
+        `SELECT p.name FROM member_programs mp
+         JOIN programs p ON p.id = mp."programId"
+         WHERE mp."memberId" = $1`,
+        [memberId]
+      );
+      names = r.rows.map((x: any) => x.name);
+      // Back-compat: fall back to the member's single programType.
+      if (names.length === 0) {
+        const raw = memberResult.rows[0].programType;
+        if (raw && raw !== 'No Program Selected') names = [raw];
+      }
+    }
 
     const result = await pool.query(`
       SELECT e.*, u."firstName" as "instructorFirstName", u."lastName" as "instructorLastName"
@@ -69,9 +88,9 @@ router.get('/classes/member/:memberId', async (req, res) => {
       WHERE DATE(e."startDateTime") = CURRENT_DATE
         AND e.status = 'scheduled'
         AND e."eventType" = 'class'
-        AND ($1::text IS NULL OR e."programType" = $1)
+        AND (cardinality($1::text[]) = 0 OR e."programType" = ANY($1::text[]))
       ORDER BY e."startDateTime" ASC
-    `, [programType]);
+    `, [names]);
 
     res.json(result.rows);
   } catch (error) {
@@ -80,10 +99,27 @@ router.get('/classes/member/:memberId', async (req, res) => {
   }
 });
 
+// List a member's programs (for the kiosk program picker)
+router.get('/member/:memberId/programs', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const result = await pool.query(
+      `SELECT p.id, p.name FROM member_programs mp
+       JOIN programs p ON p.id = mp."programId"
+       WHERE mp."memberId" = $1 ORDER BY p.name ASC`,
+      [memberId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching member programs:', error);
+    res.status(500).json({ error: 'Failed to fetch programs' });
+  }
+});
+
 // Check in via QR code scan
 router.post('/check-in/qr', async (req, res) => {
   try {
-    const { qrCode, locationId, eventId } = req.body;
+    const { qrCode, locationId, eventId, programId } = req.body;
 
     if (!qrCode || !locationId) {
       return res.status(400).json({ error: 'QR code and location ID are required' });
@@ -120,10 +156,10 @@ router.post('/check-in/qr', async (req, res) => {
 
     // Create check-in record
     const insertResult = await pool.query(`
-      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "checkInTime", "createdAt")
-      VALUES ($1, $2, 'qr_scan', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "programId", "checkInTime", "createdAt")
+      VALUES ($1, $2, 'qr_scan', $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
-    `, [member.id, locationId, eventId || null]);
+    `, [member.id, locationId, eventId || null, programId || null]);
 
     // Update member's attendance stats
     await pool.query(`
@@ -201,7 +237,7 @@ router.get('/member/lookup', async (req, res) => {
 // Check in via name/phone search
 router.post('/check-in/search', async (req, res) => {
   try {
-    const { memberId, locationId, eventId, method = 'name_search' } = req.body;
+    const { memberId, locationId, eventId, programId, method = 'name_search' } = req.body;
 
     if (!memberId || !locationId) {
       return res.status(400).json({ error: 'Member ID and location ID are required' });
@@ -242,10 +278,10 @@ router.post('/check-in/search', async (req, res) => {
 
     // Create check-in record
     const insertResult = await pool.query(`
-      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "checkInTime", "createdAt")
-      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "programId", "checkInTime", "createdAt")
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
-    `, [memberId, locationId, method, eventId || null]);
+    `, [memberId, locationId, method, eventId || null, programId || null]);
 
     // Update member's attendance stats
     await pool.query(`

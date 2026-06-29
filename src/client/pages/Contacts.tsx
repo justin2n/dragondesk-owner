@@ -125,6 +125,7 @@ const Contacts = () => {
     membershipName: '',
     memberType: 'account_holder' as 'account_holder' | 'participant',
     accountHolderId: '' as string,
+    programIds: [] as number[],
   });
 
   useEffect(() => {
@@ -193,8 +194,16 @@ const Contacts = () => {
     }
   };
 
-  const handleOpenModal = (member?: Member) => {
+  const handleOpenModal = async (member?: Member) => {
     if (member) {
+      let programIds: number[] = ((member as any).programs || []).map((p: any) => p.id);
+      // List rows don't carry the programs array — fetch detail for participants.
+      if (member.memberType === 'participant' && programIds.length === 0) {
+        try {
+          const full = await api.get(`/members/${member.id}`);
+          programIds = (full.programs || []).map((p: any) => p.id);
+        } catch { /* leave empty */ }
+      }
       setEditingMember(member);
       setFormData({
         firstName: member.firstName,
@@ -221,6 +230,7 @@ const Contacts = () => {
         membershipName: (member as any).membershipName || '',
         memberType: (member.memberType as 'account_holder' | 'participant') || 'account_holder',
         accountHolderId: member.accountHolderId?.toString() || '',
+        programIds,
       });
     } else {
       setEditingMember(null);
@@ -249,6 +259,7 @@ const Contacts = () => {
         membershipName: '',
         memberType: contactType === 'participants' ? 'participant' : 'account_holder',
         accountHolderId: '',
+        programIds: [],
       });
     }
     setIsModalOpen(true);
@@ -718,7 +729,18 @@ const Contacts = () => {
             })()}</span>
           </div>
         )}
-        <div className={styles.info}><span className={styles.label}>Program:</span><span>{member.programType || '—'}</span></div>
+        <div className={styles.info}>
+          <span className={styles.label}>{member.memberType === 'participant' ? 'Programs:' : 'Program:'}</span>
+          {(member as any).programs?.length ? (
+            <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+              {(member as any).programs.map((p: any) => (
+                <span key={p.id} className={styles.memberTypeChip}>{p.name}</span>
+              ))}
+            </span>
+          ) : (
+            <span>{member.programType || '—'}</span>
+          )}
+        </div>
         <div className={styles.info}><span className={styles.label}>Ranking:</span><span>{member.ranking}</span></div>
         {member.memberType !== 'participant' && (
           <div className={styles.info}><span className={styles.label}>Plan:</span><span>{planName(member.pricingPlanId)}</span></div>
@@ -1201,16 +1223,16 @@ const Contacts = () => {
                 </div>
               </div>
 
-              {memberships.length > 0 && (
+              {formData.memberType === 'account_holder' && memberships.length > 0 && (
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Membership</label>
+                    <label className={styles.formLabel}>Membership Plan</label>
                     <select
                       value={formData.membershipId}
-                      onChange={(e) => setFormData({ ...formData, membershipId: e.target.value, programType: 'No Program Selected' })}
+                      onChange={(e) => setFormData({ ...formData, membershipId: e.target.value })}
                       className={styles.input}
                     >
-                      <option value="">No membership</option>
+                      <option value="">No membership plan</option>
                       {memberships.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </div>
@@ -1219,42 +1241,75 @@ const Contacts = () => {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Program *</label>
-                  <select
-                    value={formData.programType}
-                    onChange={(e) => {
-                      const newProgram = e.target.value as ProgramType;
-                      setFormData({
-                        ...formData,
-                        programType: newProgram,
-                        ranking: RANKINGS[newProgram]?.[0] || 'Beginner',
-                      });
-                    }}
-                    className={styles.input}
-                    required
-                  >
-                    <option value="No Program Selected">No Program Selected</option>
-                    {(formData.membershipId
-                      ? programs.filter(p => p.membershipId === parseInt(formData.membershipId))
-                      : programs
-                    ).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                    {programs.length === 0 && <>
-                      <option value="Children's Martial Arts">Children's Martial Arts</option>
-                      <option value="Adult BJJ">Adult BJJ</option>
-                      <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                      <option value="DG Barbell">DG Barbell</option>
-                      <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                      <option value="The Ashtanga Club">The Ashtanga Club</option>
-                      <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                      <option value="Kids BJJ">Kids BJJ</option>
-                      <option value="Kids Muay Thai">Kids Muay Thai</option>
-                      <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                      <option value="DG Workspace">DG Workspace</option>
-                      <option value="Dragon Launch">Dragon Launch</option>
-                      <option value="Personal Training">Personal Training</option>
-                      <option value="DGMT Private Training">DGMT Private Training</option>
-                    </>}
-                  </select>
+                  {formData.memberType === 'participant' ? (
+                    <>
+                      <label className={styles.formLabel}>Programs *</label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.5rem 0' }}>
+                        {programs.map(p => (
+                          <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={formData.programIds.includes(p.id)}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...formData.programIds, p.id]
+                                  : formData.programIds.filter(id => id !== p.id);
+                                const primaryName = (programs.find(pr => pr.id === next[0])?.name || 'No Program Selected') as ProgramType;
+                                setFormData({
+                                  ...formData,
+                                  programIds: next,
+                                  programType: primaryName,
+                                  ranking: RANKINGS[primaryName]?.[0] || formData.ranking,
+                                });
+                              }}
+                            />
+                            {p.name}
+                          </label>
+                        ))}
+                        {programs.length === 0 && (
+                          <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                            No programs configured. Add them in Settings &rarr; Programs.
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label className={styles.formLabel}>Program *</label>
+                      <select
+                        value={formData.programType}
+                        onChange={(e) => {
+                          const newProgram = e.target.value as ProgramType;
+                          setFormData({
+                            ...formData,
+                            programType: newProgram,
+                            ranking: RANKINGS[newProgram]?.[0] || 'Beginner',
+                          });
+                        }}
+                        className={styles.input}
+                        required
+                      >
+                        <option value="No Program Selected">No Program Selected</option>
+                        {programs.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                        {programs.length === 0 && <>
+                          <option value="Children's Martial Arts">Children's Martial Arts</option>
+                          <option value="Adult BJJ">Adult BJJ</option>
+                          <option value="Adult TKD & HKD">Adult TKD & HKD</option>
+                          <option value="DG Barbell">DG Barbell</option>
+                          <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
+                          <option value="The Ashtanga Club">The Ashtanga Club</option>
+                          <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
+                          <option value="Kids BJJ">Kids BJJ</option>
+                          <option value="Kids Muay Thai">Kids Muay Thai</option>
+                          <option value="Young Ladies Yoga">Young Ladies Yoga</option>
+                          <option value="DG Workspace">DG Workspace</option>
+                          <option value="Dragon Launch">Dragon Launch</option>
+                          <option value="Personal Training">Personal Training</option>
+                          <option value="DGMT Private Training">DGMT Private Training</option>
+                        </>}
+                      </select>
+                    </>
+                  )}
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Ranking *</label>

@@ -1093,6 +1093,34 @@ async function initializeDatabase() {
         AND m."programType" = p.name
     `);
 
+    // ── Participant ↔ programs (many-to-many) ──────────────────────────────────
+    // A participant trains in one OR MANY programs. This junction is the source
+    // of truth; members."programId"/"programType" are kept as the *primary*
+    // program for back-compat (program-segmented analytics, events, belt logic).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS member_programs (
+        "memberId" INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        "programId" INTEGER REFERENCES programs(id) ON DELETE CASCADE,
+        PRIMARY KEY ("memberId", "programId")
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_programs_member ON member_programs("memberId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_programs_program ON member_programs("programId")`);
+    // Backfill the junction from the existing single program link.
+    await client.query(`
+      INSERT INTO member_programs ("memberId", "programId")
+      SELECT id, "programId" FROM members
+      WHERE "memberType" = 'participant' AND "programId" IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    // Record which program a kiosk check-in was for.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE check_ins ADD COLUMN IF NOT EXISTS "programId" INTEGER
+          REFERENCES programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
     // "Student Details" export fields (payments / portal / contact recency)
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalPayments" NUMERIC DEFAULT 0`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pastDue" NUMERIC DEFAULT 0`);
