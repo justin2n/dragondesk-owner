@@ -49,6 +49,12 @@ const createTransporter = async (settings?: any) => {
       pass: password,
     },
     dkim: dkimOptions,
+    // Fail fast instead of hanging when the SMTP host is unreachable (many
+    // PaaS hosts block outbound SMTP ports) — otherwise the request stays
+    // pending forever and the real error never surfaces to the client.
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 };
 
@@ -103,6 +109,9 @@ router.post('/test-connection', async (req: AuthRequest, res) => {
         user: username,
         pass: password,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
 
     // Verify connection
