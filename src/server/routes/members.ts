@@ -29,6 +29,21 @@ async function logHistory(
   );
 }
 
+// Keep a member's program-offering link (members.programId) in sync with their
+// profile. Only participants map to a program offering; for everyone else the
+// link is cleared. A programType with no matching program leaves programId null
+// (surfaced via GET /participants/unassigned).
+async function syncParticipantProgram(memberId: number, memberType: string | null | undefined, programType: string | null | undefined) {
+  if (memberType === 'participant' && programType) {
+    await pool.query(
+      `UPDATE members SET "programId" = (SELECT id FROM programs WHERE name = $1) WHERE id = $2`,
+      [programType, memberId],
+    );
+  } else {
+    await pool.query(`UPDATE members SET "programId" = NULL WHERE id = $1`, [memberId]);
+  }
+}
+
 function diffMember(oldRow: any, newValues: Record<string, any>) {
   const changes: Record<string, { from: any; to: any }> = {};
   for (const field of TRACKED_FIELDS) {
@@ -102,6 +117,28 @@ router.get('/', async (req: AuthRequest, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Get members error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Participants not linked to a program offering — their programType is blank,
+// 'No Program Selected', or doesn't match any program in the catalog. Surfaced
+// so admins can fix the profile (the backfill leaves these unassigned).
+router.get('/participants/unassigned', async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT p.id, p."firstName", p."lastName", p."programType",
+              p."accountHolderId",
+              ah."firstName" AS "accountHolderFirstName",
+              ah."lastName"  AS "accountHolderLastName"
+       FROM members p
+       LEFT JOIN members ah ON ah.id = p."accountHolderId"
+       WHERE p."memberType" = 'participant' AND p."programId" IS NULL
+       ORDER BY p."lastName" ASC, p."firstName" ASC`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get unassigned participants error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -241,6 +278,9 @@ router.post('/', async (req: AuthRequest, res) => {
       [created.id, created.email]
     ).catch(() => {});
 
+    // Link participants to their program offering based on their programType
+    await syncParticipantProgram(created.id, resolvedMemberType, created.programType).catch(() => {});
+
     res.status(201).json(created);
   } catch (error: any) {
     console.error('Create member error:', error);
@@ -321,6 +361,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
       const action = changes.accountStatus ? 'status_changed' : 'updated';
       await logHistory(updated.id, action, changes, req.user).catch(() => {});
     }
+
+    // Keep the participant→program offering link in sync with their programType
+    await syncParticipantProgram(updated.id, updated.memberType, updated.programType).catch(() => {});
+
     res.json(updated);
   } catch (error: any) {
     console.error('Update member error:', error);

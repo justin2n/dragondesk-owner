@@ -1064,6 +1064,31 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // ── Participant → program offering link ────────────────────────────────────
+    // Participants map to a Program (offering). Their profile already carries a
+    // free-text "programType"; this adds a real FK to the programs catalog and
+    // an index for lookups. The application keeps it in sync on create/update.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "programId" INTEGER
+          REFERENCES programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_program ON members("programId")`);
+    // One-time backfill: assign each participant to the program offering whose
+    // name matches their programType. Only touches rows not yet assigned (so it
+    // never clobbers a manual reassignment on restart) and leaves non-matches
+    // null — those are surfaced by GET /members/participants/unassigned.
+    await client.query(`
+      UPDATE members m
+      SET "programId" = p.id
+      FROM programs p
+      WHERE m."memberType" = 'participant'
+        AND m."programId" IS NULL
+        AND m."programType" IS NOT NULL
+        AND m."programType" = p.name
+    `);
+
     // "Student Details" export fields (payments / portal / contact recency)
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalPayments" NUMERIC DEFAULT 0`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pastDue" NUMERIC DEFAULT 0`);
