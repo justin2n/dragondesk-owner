@@ -932,6 +932,10 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipName" TEXT`);
     await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
+    // Memberships carry the recurring price (monthly, in cents). Account holders
+    // hold a membership; this is the single source of MRR/ARR. Programs are part
+    // of a membership and have no price of their own.
+    await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "priceAmount" INTEGER DEFAULT 0`);
 
     // Drop all programType CHECK constraints and NOT NULL on members — validation handled in application layer
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);

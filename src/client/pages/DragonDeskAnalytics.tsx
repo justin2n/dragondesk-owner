@@ -14,6 +14,8 @@ import {
   MdDevices,
   MdOpenInNew,
   MdTimerOff,
+  MdAttachMoney,
+  MdTrendingUp,
 } from 'react-icons/md';
 import {
   LineChart,
@@ -77,6 +79,8 @@ interface AnalyticsData {
       currentLeads: number;
       totalCancellations: number;
       expiredTrials: number;
+      mrr: number;
+      arr: number;
     };
   };
   programDistribution: { name: string; value: number }[];
@@ -719,6 +723,30 @@ const DragonDeskAnalytics = () => {
           <div className={styles.summaryContent}>
             <div className={styles.summaryValue}>{data.summary.totals.totalCancellations}</div>
             <div className={styles.summaryLabel}>Total Cancellations</div>
+          </div>
+        </div>
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryIcon}>
+            <MdAttachMoney size={28} />
+          </div>
+          <div className={styles.summaryContent}>
+            <div className={styles.summaryValue}>
+              ${(data.summary.totals.mrr || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            </div>
+            <div className={styles.summaryLabel}>MRR</div>
+            <div className={styles.summarySubLabel}>Active account holders' memberships</div>
+          </div>
+        </div>
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryIcon}>
+            <MdTrendingUp size={28} />
+          </div>
+          <div className={styles.summaryContent}>
+            <div className={styles.summaryValue}>
+              ${(data.summary.totals.arr || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            </div>
+            <div className={styles.summaryLabel}>ARR</div>
+            <div className={styles.summarySubLabel}>MRR &times; 12</div>
           </div>
         </div>
       </div>

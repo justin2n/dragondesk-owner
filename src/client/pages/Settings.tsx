@@ -63,6 +63,7 @@ interface Membership {
   name: string;
   description?: string;
   locationId?: number | null;
+  priceAmount?: number | null; // monthly price in cents
   isActive: boolean;
   programs: Program[];
   createdAt: string;
@@ -340,6 +341,10 @@ const Settings = () => {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [editingMembership, setEditingMembership] = useState<Membership | null>(null);
+  const [unassignedParticipants, setUnassignedParticipants] = useState<{
+    id: number; firstName: string; lastName: string; programType: string | null;
+    accountHolderFirstName: string | null; accountHolderLastName: string | null;
+  }[]>([]);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassignFrom, setReassignFrom] = useState<string>('null');
@@ -484,6 +489,7 @@ const Settings = () => {
     loadLocationsData();
     loadPrograms();
     loadMemberships();
+    loadUnassignedParticipants();
     loadSettings();
     loadSocialAccounts();
     loadDkimConfigs();
@@ -576,11 +582,25 @@ const Settings = () => {
     }
   };
 
+  const loadUnassignedParticipants = async () => {
+    try {
+      const response = await api.get('/members/participants/unassigned');
+      setUnassignedParticipants(response);
+    } catch (error) {
+      console.error('Failed to load unassigned participants:', error);
+    }
+  };
+
   const handleSaveMembership = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const form = e.target as any;
-      const data = { name: form.membershipName.value, description: form.membershipDescription.value || '' };
+      const priceDollars = parseFloat(form.membershipPrice.value);
+      const data = {
+        name: form.membershipName.value,
+        description: form.membershipDescription.value || '',
+        priceAmount: Number.isFinite(priceDollars) ? Math.round(priceDollars * 100) : 0,
+      };
       if (editingMembership) {
         await api.put(`/memberships/${editingMembership.id}`, data);
         showSaveMessage('Membership updated successfully!');
@@ -1796,6 +1816,9 @@ const Settings = () => {
                       <div className={styles.locationHeader}>
                         <h3 className={styles.locationName}>{membership.name}</h3>
                         <div className={styles.locationBadges}>
+                          <span className={styles.primaryBadge}>
+                            ${((membership.priceAmount || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo
+                          </span>
                           {!membership.isActive && <span className={styles.inactiveBadge}>Inactive</span>}
                         </div>
                       </div>
@@ -1870,7 +1893,20 @@ const Settings = () => {
                       <div className={styles.modalBody}>
                         <div className={styles.formGroup}>
                           <label className={styles.label}>Membership Name *</label>
-                          <input type="text" name="membershipName" defaultValue={editingMembership?.name || ''} className={styles.input} placeholder="e.g., Children's Martial Arts Programs" required />
+                          <input type="text" name="membershipName" defaultValue={editingMembership?.name || ''} className={styles.input} placeholder="e.g., Family Plan" required />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Monthly Price ($) *</label>
+                          <input
+                            type="number"
+                            name="membershipPrice"
+                            min="0"
+                            step="0.01"
+                            defaultValue={editingMembership?.priceAmount != null ? (editingMembership.priceAmount / 100).toFixed(2) : ''}
+                            className={styles.input}
+                            placeholder="e.g., 149.00"
+                            required
+                          />
                         </div>
                         <div className={styles.formGroup}>
                           <label className={styles.label}>Description</label>
@@ -1960,6 +1996,38 @@ const Settings = () => {
                   </div>
                 )}
               </div>
+
+              {/* Participants not linked to a program offering */}
+              {unassignedParticipants.length > 0 && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subsectionTitle}>
+                    Participants Without a Program ({unassignedParticipants.length})
+                  </h3>
+                  <p className={styles.sectionDesc}>
+                    These participants have no matching program offering (blank, "No Program Selected",
+                    or a program name not in the list above). Set their program on the contact to assign them.
+                  </p>
+                  <div className={styles.locationsList}>
+                    {unassignedParticipants.map((p) => (
+                      <div key={p.id} className={styles.locationCard} style={{ padding: '0.75rem 1rem' }}>
+                        <div className={styles.locationInfo}>
+                          <span className={styles.locationName} style={{ fontSize: '0.95rem' }}>
+                            {p.firstName} {p.lastName}
+                          </span>
+                          {(p.accountHolderFirstName || p.accountHolderLastName) && (
+                            <p className={styles.locationAddress} style={{ margin: 0 }}>
+                              Account holder: {p.accountHolderFirstName} {p.accountHolderLastName}
+                            </p>
+                          )}
+                        </div>
+                        <span className={styles.inactiveBadge}>
+                          {p.programType || 'No program'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {showProgramModal && (
                 <div className={styles.modal}>

@@ -34,12 +34,12 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
 
 router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
-    const { name, description, locationId } = req.body;
+    const { name, description, locationId, priceAmount } = req.body;
     if (!name) return res.status(400).json({ error: 'Membership name is required' });
 
     const result = await pool.query(
-      `INSERT INTO memberships (name, description, "locationId", "isActive") VALUES ($1, $2, $3, true) RETURNING *`,
-      [name, description || null, locationId || null]
+      `INSERT INTO memberships (name, description, "locationId", "priceAmount", "isActive") VALUES ($1, $2, $3, $4, true) RETURNING *`,
+      [name, description || null, locationId || null, Number.isFinite(priceAmount) ? Math.round(priceAmount) : 0]
     );
     res.status(201).json({ ...result.rows[0], programs: [] });
   } catch (error: any) {
@@ -50,7 +50,7 @@ router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res
 router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { name, description, locationId, isActive } = req.body;
+    const { name, description, locationId, isActive, priceAmount } = req.body;
 
     const existing = await pool.query('SELECT * FROM memberships WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Membership not found' });
@@ -61,9 +61,11 @@ router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, r
         description = COALESCE($2, description),
         "locationId" = $3,
         "isActive" = COALESCE($4, "isActive"),
+        "priceAmount" = COALESCE($5, "priceAmount"),
         "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $5 RETURNING *`,
-      [name || null, description || null, locationId || null, isActive !== undefined ? isActive : null, id]
+      WHERE id = $6 RETURNING *`,
+      [name || null, description || null, locationId || null, isActive !== undefined ? isActive : null,
+       Number.isFinite(priceAmount) ? Math.round(priceAmount) : null, id]
     );
     const programs = await pool.query(`SELECT * FROM programs WHERE "membershipId" = $1 ORDER BY name ASC`, [id]);
     res.json({ ...result.rows[0], programs: programs.rows });

@@ -186,12 +186,16 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         m."createdAt",
         m."updatedAt",
         m."pricingPlanId",
+        m."memberType",
+        m."membershipId",
+        ms."priceAmount" AS "membershipPrice",
         pp.amount AS "planAmount",
         pp."billingInterval",
         pp."intervalCount",
         pp.name AS "planName"
       FROM members m
       LEFT JOIN pricing_plans pp ON m."pricingPlanId" = pp.id
+      LEFT JOIN memberships ms ON m."membershipId" = ms.id
       WHERE 1=1`;
 
     if (locationId && locationId !== 'all') {
@@ -338,18 +342,14 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
-    // Helper: annualised monthly revenue for a member given their plan
-    const annualizedMonthly = (m: any): number => {
-      if (!m.planAmount) return 0;
-      const amount = m.planAmount / 100; // cents → dollars
-      const count = m.intervalCount || 1;
-      switch (m.billingInterval) {
-        case 'week':  return (amount * 52) / 12;
-        case 'month': return amount / count;
-        case 'year':  return (amount / count) / 12;
-        default:      return amount;
-      }
-    };
+    // Monthly recurring revenue for a member: only active account holders carry
+    // a priced membership. Participants belong to programs (no price) and add $0.
+    const memberMonthly = (m: any): number =>
+      m.accountStatus === 'member'
+        && (m.memberType || 'account_holder') === 'account_holder'
+        && m.membershipPrice
+        ? m.membershipPrice / 100
+        : 0;
 
     // Summary statistics
     const summary = {
@@ -359,7 +359,6 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         const currentTrials = programMembers.filter(m => m.accountStatus === 'trialer').length;
         const currentLeads = programMembers.filter(m => m.accountStatus === 'lead').length;
         const programCancellations = churnData.filter(c => c.programType === program).length;
-        const mrr = activeMembers.reduce((sum, m) => sum + annualizedMonthly(m), 0);
 
         return {
           name: program,
@@ -367,8 +366,6 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
           currentTrials,
           currentLeads,
           totalCancellations: programCancellations,
-          mrr: Math.round(mrr * 100) / 100,
-          arr: Math.round(mrr * 12 * 100) / 100,
           overallChurnRate: activeMembers.length > 0
             ? parseFloat(((programCancellations / (activeMembers.length + programCancellations)) * 100).toFixed(1))
             : 0,
@@ -385,8 +382,8 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
           const daysSince = (Date.now() - start.getTime()) / (1000 * 60 * 60 * 24);
           return daysSince > 30;
         }).length,
-        mrr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 100) / 100,
-        arr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 12 * 100) / 100,
+        mrr: Math.round(allMembers.reduce((sum, m) => sum + memberMonthly(m), 0) * 100) / 100,
+        arr: Math.round(allMembers.reduce((sum, m) => sum + memberMonthly(m), 0) * 12 * 100) / 100,
       },
     };
 
