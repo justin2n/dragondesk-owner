@@ -172,9 +172,11 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
     });
   } catch (error: any) {
     console.error('Error sending test email:', error);
+    // Surface the real reason (SMTP auth/connection/config) — the client only
+    // shows `error`, so a generic message hid the actual cause.
     res.status(500).json({
-      error: 'Failed to send test email',
-      details: error.message
+      error: `Failed to send test email: ${error.message || 'unknown error'}`,
+      details: error.message,
     });
   }
 });
