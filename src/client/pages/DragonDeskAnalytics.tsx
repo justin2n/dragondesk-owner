@@ -111,7 +111,8 @@ const DragonDeskAnalytics = () => {
   const [activeSection, setActiveSection] = useState<ActiveSection>('trials');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
   const [selectedMembershipAge, setSelectedMembershipAge] = useState<string>('all');
-  const [monthsBack, setMonthsBack] = useState<number>(12);
+  // '30d' = last 30 days (daily granularity); otherwise a month count.
+  const [timePeriod, setTimePeriod] = useState<string>('12');
   const [valueData, setValueData] = useState<ValueData | null>(null);
   const [valueLoading, setValueLoading] = useState(false);
   const [webData, setWebData] = useState<any | null>(null);
@@ -133,7 +134,8 @@ const DragonDeskAnalytics = () => {
     const fetchAnalytics = async () => {
       try {
         setIsLoading(true);
-        const response = await api.get(`/analytics/programs?months=${monthsBack}&locationId=${locationId}`);
+        const periodParam = timePeriod === '30d' ? 'days=30' : `months=${timePeriod}`;
+        const response = await api.get(`/analytics/programs?${periodParam}&locationId=${locationId}`);
         setData(response);
       } catch (error) {
         console.error('Failed to load analytics:', error);
@@ -142,7 +144,7 @@ const DragonDeskAnalytics = () => {
       }
     };
     fetchAnalytics();
-  }, [selectedLocation, isAllLocations, monthsBack]);
+  }, [selectedLocation, isAllLocations, timePeriod]);
 
   useEffect(() => {
     if (activeSection !== 'value') return;
@@ -850,14 +852,15 @@ const DragonDeskAnalytics = () => {
               <div className={styles.filterGroup}>
                 <label>Time Period:</label>
                 <select
-                  value={monthsBack}
-                  onChange={(e) => setMonthsBack(parseInt(e.target.value))}
+                  value={timePeriod}
+                  onChange={(e) => setTimePeriod(e.target.value)}
                   className={styles.select}
                 >
-                  <option value={3}>Last 3 Months</option>
-                  <option value={6}>Last 6 Months</option>
-                  <option value={12}>Last 12 Months</option>
-                  <option value={24}>Last 24 Months</option>
+                  <option value="30d">Last 30 Days</option>
+                  <option value="3">Last 3 Months</option>
+                  <option value="6">Last 6 Months</option>
+                  <option value="12">Last 12 Months</option>
+                  <option value="24">Last 24 Months</option>
                 </select>
               </div>
 

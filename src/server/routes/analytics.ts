@@ -25,6 +25,26 @@ const generateMonthPeriods = (monthsBack: number) => {
   return periods;
 };
 
+// Helper function to generate day periods (for short windows like "Last 30 Days")
+const generateDayPeriods = (daysBack: number) => {
+  const now = new Date();
+  const periods: { start: Date; end: Date; label: string; monthKey: string }[] = [];
+
+  for (let i = daysBack - 1; i >= 0; i--) {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59);
+
+    periods.push({
+      start,
+      end,
+      label: start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      monthKey: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
+    });
+  }
+
+  return periods;
+};
+
 // Get analytics data for dashboard (legacy endpoint)
 router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
   try {
@@ -146,8 +166,12 @@ router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
 // NEW: Comprehensive program-based analytics for DragonDesk: Analytics page
 router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { locationId, months = '12' } = req.query;
+    const { locationId, months = '12', days } = req.query;
     const monthsBack = parseInt(months as string) || 12;
+    const daysBack = days ? parseInt(days as string) : 0;
+    // Daily granularity for short windows (e.g. "Last 30 Days"); else monthly.
+    const useDays = daysBack > 0;
+    const truncUnit = useDays ? 'day' : 'month';
 
     // Build base query
     const params: any[] = [];
@@ -202,8 +226,8 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     // Get available programs
     const programs = [...new Set(allMembers.map(m => m.programType))].filter(Boolean);
 
-    // Generate month periods
-    const periods = generateMonthPeriods(monthsBack);
+    // Generate periods (daily for short windows, else monthly)
+    const periods = useDays ? generateDayPeriods(daysBack) : generateMonthPeriods(monthsBack);
 
     // Calculate trials data by program and month
     const trialsData = periods.map(period => {
@@ -381,14 +405,14 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     }));
     try {
       const zapierResult = await pool.query(
-        `SELECT DATE_TRUNC('month', "receivedAt" AT TIME ZONE 'UTC') AS month,
+        `SELECT DATE_TRUNC($2, "receivedAt" AT TIME ZONE 'UTC') AS month,
            COUNT(*)::int AS total,
            COUNT(*) FILTER (WHERE "wasNew" = true)::int AS new_contacts,
            COUNT(*) FILTER (WHERE "wasNew" = false)::int AS returning_contacts
          FROM zapier_webhook_log
          WHERE "receivedAt" >= $1
-         GROUP BY DATE_TRUNC('month', "receivedAt" AT TIME ZONE 'UTC')`,
-        [periods[0].start]
+         GROUP BY DATE_TRUNC($2, "receivedAt" AT TIME ZONE 'UTC')`,
+        [periods[0].start, truncUnit]
       );
       zapierActivityData = periods.map(period => {
         const row = zapierResult.rows.find(r => {
