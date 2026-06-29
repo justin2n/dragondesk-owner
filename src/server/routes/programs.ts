@@ -23,6 +23,40 @@ router.get('/active', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
+// Active member count per program, keyed by program name. Counts participants
+// assigned to each program (member_programs junction) whose household is an
+// active member — i.e. their account holder (or themselves) is accountStatus
+// 'member' — excluding cancelled participants. This is the new model's truth:
+// participants belong to programs; the paying member status lives on the holder.
+router.get('/member-counts', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { locationId } = req.query;
+    const params: any[] = [];
+    let locFilter = '';
+    if (locationId && locationId !== 'all') {
+      params.push(locationId);
+      locFilter = `AND COALESCE(m."locationId", ah."locationId") = $${params.length}::int`;
+    }
+    const result = await pool.query(`
+      SELECT p.name AS program, COUNT(*)::int AS count
+      FROM member_programs mp
+      JOIN members m ON m.id = mp."memberId"
+      JOIN programs p ON p.id = mp."programId"
+      LEFT JOIN members ah ON ah.id = m."accountHolderId"
+      WHERE m."memberType" = 'participant'
+        AND m."accountStatus" <> 'cancelled'
+        AND COALESCE(ah."accountStatus", m."accountStatus") = 'member'
+        ${locFilter}
+      GROUP BY p.name
+    `, params);
+    const counts: Record<string, number> = {};
+    for (const r of result.rows) counts[r.program] = r.count;
+    res.json(counts);
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
 router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { name, description, membershipId } = req.body;

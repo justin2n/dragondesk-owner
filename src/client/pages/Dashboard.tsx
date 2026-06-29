@@ -50,13 +50,11 @@ const Dashboard = () => {
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
       const members: Member[] = await api.get(`/members?locationId=${locationId}`);
 
-      // Count active members per programType
-      const programCounts: Record<string, number> = {};
-      for (const m of members) {
-        if (m.accountStatus === 'member' && m.programType) {
-          programCounts[m.programType] = (programCounts[m.programType] || 0) + 1;
-        }
-      }
+      // Active members per program come from the member_programs junction
+      // (participants belong to 1+ programs; a participant counts in each).
+      const programCounts: Record<string, number> = await api
+        .get(`/programs/member-counts?locationId=${locationId}`)
+        .catch(() => ({}));
 
       setStats({
         totalMembers: members.length,
