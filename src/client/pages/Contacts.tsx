@@ -75,6 +75,7 @@ const Contacts = () => {
   const [allPricingPlans, setAllPricingPlans] = useState<PricingPlan[]>([]);
   const [memberships, setMemberships] = useState<{ id: number; name: string; programs: { id: number; name: string }[] }[]>([]);
   const [programs, setPrograms] = useState<{ id: number; name: string; membershipId: number | null }[]>([]);
+  const [trialPrograms, setTrialPrograms] = useState<{ id: number; name: string }[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importProgram, setImportProgram] = useState('');
@@ -126,6 +127,7 @@ const Contacts = () => {
     memberType: 'account_holder' as 'account_holder' | 'participant',
     accountHolderId: '' as string,
     programIds: [] as number[],
+    trialProgramId: '' as string,
   });
 
   useEffect(() => {
@@ -141,6 +143,7 @@ const Contacts = () => {
     api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
     api.get('/memberships').then(setMemberships).catch(() => {});
     api.get('/programs').then(setPrograms).catch(() => {});
+    api.get('/trial-programs/active').then(setTrialPrograms).catch(() => {});
     api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
   }, []);
 
@@ -231,6 +234,7 @@ const Contacts = () => {
         memberType: (member.memberType as 'account_holder' | 'participant') || 'account_holder',
         accountHolderId: member.accountHolderId?.toString() || '',
         programIds,
+        trialProgramId: (member as any).trialProgramId?.toString() || '',
       });
     } else {
       setEditingMember(null);
@@ -260,6 +264,7 @@ const Contacts = () => {
         memberType: contactType === 'participants' ? 'participant' : 'account_holder',
         accountHolderId: '',
         programIds: [],
+        trialProgramId: '',
       });
     }
     setIsModalOpen(true);
@@ -288,6 +293,7 @@ const Contacts = () => {
         pricingPlanId: formData.pricingPlanId ? parseInt(formData.pricingPlanId) : null,
         membershipId: formData.membershipId ? parseInt(formData.membershipId) : null,
         membershipName: selectedMembership?.name || formData.membershipName || null,
+        trialProgramId: formData.trialProgramId ? parseInt(formData.trialProgramId) : null,
       };
 
       if (editingMember) {
@@ -742,6 +748,12 @@ const Contacts = () => {
           )}
         </div>
         <div className={styles.info}><span className={styles.label}>Ranking:</span><span>{member.ranking}</span></div>
+        {member.accountStatus === 'trialer' && (member as any).trialProgramId && (
+          <div className={styles.info}>
+            <span className={styles.label}>Trial Program:</span>
+            <span>{trialPrograms.find(tp => tp.id === (member as any).trialProgramId)?.name || '—'}</span>
+          </div>
+        )}
         {member.memberType !== 'participant' && (
           <div className={styles.info}><span className={styles.label}>Plan:</span><span>{planName(member.pricingPlanId)}</span></div>
         )}
@@ -1235,6 +1247,27 @@ const Contacts = () => {
                       <option value="">No membership plan</option>
                       {memberships.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
+                  </div>
+                </div>
+              )}
+
+              {formData.accountStatus === 'trialer' && (
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Trial Program</label>
+                    <select
+                      value={formData.trialProgramId}
+                      onChange={(e) => setFormData({ ...formData, trialProgramId: e.target.value })}
+                      className={styles.input}
+                    >
+                      <option value="">No trial program</option>
+                      {trialPrograms.map(tp => <option key={tp.id} value={tp.id}>{tp.name}</option>)}
+                    </select>
+                    {trialPrograms.length === 0 && (
+                      <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                        No trial programs configured. Add them in Settings &rarr; Trial Programs.
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

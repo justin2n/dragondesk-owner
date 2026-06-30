@@ -274,6 +274,7 @@ router.post('/', async (req: AuthRequest, res) => {
       memberType,
       accountHolderId,
       programIds,
+      trialProgramId,
     } = req.body;
 
     const resolvedMemberType = memberType || 'account_holder';
@@ -326,6 +327,12 @@ router.post('/', async (req: AuthRequest, res) => {
     // Sync the participant's program assignments (many-to-many)
     await syncParticipantPrograms(created.id, resolvedMemberType, programIds, created.programType).catch(() => {});
 
+    // Trial program (for trialers)
+    if (trialProgramId !== undefined) {
+      await pool.query(`UPDATE members SET "trialProgramId" = $1 WHERE id = $2`, [trialProgramId || null, created.id]).catch(() => {});
+      created.trialProgramId = trialProgramId || null;
+    }
+
     res.status(201).json(created);
   } catch (error: any) {
     console.error('Create member error:', error);
@@ -362,6 +369,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
       memberType,
       accountHolderId,
       programIds,
+      trialProgramId,
     } = req.body;
 
     const existing = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
@@ -410,6 +418,12 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
     // Sync the participant's program assignments (many-to-many)
     await syncParticipantPrograms(updated.id, updated.memberType, programIds, updated.programType).catch(() => {});
+
+    // Trial program (for trialers)
+    if (trialProgramId !== undefined) {
+      await pool.query(`UPDATE members SET "trialProgramId" = $1 WHERE id = $2`, [trialProgramId || null, updated.id]).catch(() => {});
+      updated.trialProgramId = trialProgramId || null;
+    }
 
     res.json(updated);
   } catch (error: any) {

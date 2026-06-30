@@ -1121,6 +1121,25 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // ── Trial programs ─────────────────────────────────────────────────────────
+    // Separate catalog of trial offerings (distinct from regular programs).
+    // A trialer's profile points at one trial program.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trial_programs (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "trialProgramId" INTEGER
+          REFERENCES trial_programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
     // "Student Details" export fields (payments / portal / contact recency)
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalPayments" NUMERIC DEFAULT 0`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pastDue" NUMERIC DEFAULT 0`);

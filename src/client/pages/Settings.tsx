@@ -345,6 +345,8 @@ const Settings = () => {
     id: number; firstName: string; lastName: string; programType: string | null;
     accountHolderFirstName: string | null; accountHolderLastName: string | null;
   }[]>([]);
+  const [trialPrograms, setTrialPrograms] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
+  const [newTrialProgram, setNewTrialProgram] = useState('');
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassignFrom, setReassignFrom] = useState<string>('null');
@@ -490,6 +492,7 @@ const Settings = () => {
     loadPrograms();
     loadMemberships();
     loadUnassignedParticipants();
+    loadTrialPrograms();
     loadSettings();
     loadSocialAccounts();
     loadDkimConfigs();
@@ -588,6 +591,38 @@ const Settings = () => {
       setUnassignedParticipants(response);
     } catch (error) {
       console.error('Failed to load unassigned participants:', error);
+    }
+  };
+
+  const loadTrialPrograms = async () => {
+    try {
+      setTrialPrograms(await api.get('/trial-programs'));
+    } catch (error) {
+      console.error('Failed to load trial programs:', error);
+    }
+  };
+
+  const handleAddTrialProgram = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newTrialProgram.trim();
+    if (!name) return;
+    try {
+      await api.post('/trial-programs', { name });
+      setNewTrialProgram('');
+      await loadTrialPrograms();
+      showSaveMessage('Trial program added!');
+    } catch (error: any) {
+      toast(error.message || 'Failed to add trial program', 'error');
+    }
+  };
+
+  const handleDeleteTrialProgram = async (id: number) => {
+    if (!await confirm({ title: 'Delete Trial Program', message: 'Trialers assigned to it will be unlinked. Continue?', confirmLabel: 'Delete', danger: true })) return;
+    try {
+      await api.delete(`/trial-programs/${id}`);
+      await loadTrialPrograms();
+    } catch (error: any) {
+      toast(error.message || 'Failed to delete trial program', 'error');
     }
   };
 
@@ -1310,6 +1345,7 @@ const Settings = () => {
         { id: 'locations', label: 'Locations' },
         { id: 'memberships', label: 'Membership Plans' },
         { id: 'programs', label: 'Programs' },
+        { id: 'trial-programs', label: 'Trial Programs' },
       ]
     },
     {
@@ -2060,6 +2096,55 @@ const Settings = () => {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Trial Programs Management */}
+          {activeTab === 'trial-programs' && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h2 className={styles.sectionTitle}>Trial Programs</h2>
+                  <p className={styles.sectionDesc}>
+                    The trial offerings a trialer can be enrolled in. Assign one on a contact's profile when their status is Trialer.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleAddTrialProgram} className={styles.formRow} style={{ gap: '0.5rem', alignItems: 'flex-end' }}>
+                <div className={styles.formGroup} style={{ flex: 1 }}>
+                  <label className={styles.label}>Add Trial Program</label>
+                  <input
+                    type="text"
+                    value={newTrialProgram}
+                    onChange={(e) => setNewTrialProgram(e.target.value)}
+                    className={styles.input}
+                    placeholder="e.g., 2-Week Intro Trial"
+                  />
+                </div>
+                <button type="submit" className={styles.primaryBtn}>
+                  <AddIcon size={20} />
+                  Add
+                </button>
+              </form>
+
+              <div className={styles.locationsList} style={{ marginTop: '1rem' }}>
+                {trialPrograms.map((tp) => (
+                  <div key={tp.id} className={styles.locationCard} style={{ padding: '0.75rem 1rem' }}>
+                    <div className={styles.locationInfo}>
+                      <span className={styles.locationName} style={{ fontSize: '0.95rem' }}>{tp.name}</span>
+                    </div>
+                    <button onClick={() => handleDeleteTrialProgram(tp.id)} className={styles.deleteBtn}>
+                      <DeleteIcon size={18} /> Remove
+                    </button>
+                  </div>
+                ))}
+                {trialPrograms.length === 0 && (
+                  <div className={styles.emptyState}>
+                    <p>No trial programs yet. Add your first one above.</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
