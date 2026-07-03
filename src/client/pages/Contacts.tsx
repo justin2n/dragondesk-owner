@@ -888,6 +888,7 @@ const Contacts = () => {
           className={styles.select}
         >
           <option value="">All Programs</option>
+          <option value="No Program Selected">No Program Selected (unassigned)</option>
           {programs.map(p => (
             <option key={p.id} value={p.name}>{p.name}</option>
           ))}
