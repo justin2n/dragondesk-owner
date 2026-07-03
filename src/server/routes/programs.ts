@@ -23,11 +23,12 @@ router.get('/active', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
-// Active member count per program, keyed by program name. Counts participants
-// assigned to each program (member_programs junction) whose household is an
-// active member — i.e. their account holder (or themselves) is accountStatus
-// 'member' — excluding cancelled participants. This is the new model's truth:
-// participants belong to programs; the paying member status lives on the holder.
+// Active member count per program, keyed by program name. Counts ANY active
+// member — account holder or participant — linked to the program either by the
+// member_programs junction (participants in multiple programs) OR by their
+// programType (solo adults / account holders who train). Trainees are a mix of
+// both, so both paths are needed. Counts active roster (members + trialers).
+// Location is resolved from the member, falling back to their account holder.
 router.get('/member-counts', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { locationId } = req.query;
@@ -38,14 +39,17 @@ router.get('/member-counts', authenticateToken, async (req: AuthRequest, res) =>
       locFilter = `AND COALESCE(m."locationId", ah."locationId") = $${params.length}::int`;
     }
     const result = await pool.query(`
-      SELECT p.name AS program, COUNT(*)::int AS count
-      FROM member_programs mp
-      JOIN members m ON m.id = mp."memberId"
-      JOIN programs p ON p.id = mp."programId"
+      SELECT p.name AS program, COUNT(DISTINCT m.id)::int AS count
+      FROM programs p
+      JOIN members m ON (
+        m."programType" = p.name
+        OR EXISTS (
+          SELECT 1 FROM member_programs mp
+          WHERE mp."memberId" = m.id AND mp."programId" = p.id
+        )
+      )
       LEFT JOIN members ah ON ah.id = m."accountHolderId"
-      WHERE m."memberType" = 'participant'
-        AND m."accountStatus" <> 'cancelled'
-        AND COALESCE(ah."accountStatus", m."accountStatus") = 'member'
+      WHERE m."accountStatus" IN ('member', 'trialer')
         ${locFilter}
       GROUP BY p.name
     `, params);
