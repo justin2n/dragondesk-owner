@@ -46,6 +46,46 @@ export function isSendgridConfigured(): boolean {
   return !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL);
 }
 
+// General-purpose SendGrid send (campaigns / test emails). Falls back to the
+// verified SENDGRID_FROM_EMAIL when no explicit from is given (SendGrid requires
+// a verified sender). Returns the SendGrid message id when available.
+export async function sendViaSendgrid(opts: {
+  to: string | string[];
+  subject: string;
+  html: string;
+  fromEmail?: string;
+  fromName?: string;
+  replyTo?: string;
+}): Promise<{ messageId?: string }> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const fromEmail = opts.fromEmail || process.env.SENDGRID_FROM_EMAIL;
+  const fromName = opts.fromName || process.env.SENDGRID_FROM_NAME || 'DragonDesk CRM';
+
+  if (!apiKey) throw new Error('SENDGRID_API_KEY is not set');
+  if (!fromEmail) throw new Error('SENDGRID_FROM_EMAIL is not set (SendGrid needs a verified sender)');
+
+  const toArray = Array.isArray(opts.to) ? opts.to : [opts.to];
+  const body = {
+    personalizations: toArray.map(email => ({ to: [{ email }] })),
+    from: { email: fromEmail, name: fromName },
+    subject: opts.subject,
+    content: [{ type: 'text/html', value: opts.html }],
+    ...(opts.replyTo ? { reply_to: { email: opts.replyTo } } : {}),
+  };
+
+  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`SendGrid error ${response.status}: ${errText}`);
+  }
+  return { messageId: response.headers.get('x-message-id') || undefined };
+}
+
 export function welcomeEmailHtml(opts: {
   firstName: string;
   username: string;

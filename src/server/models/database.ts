@@ -1121,6 +1121,15 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // Generic app settings (key/value). Used for the default email provider (ESP).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // ── Trial programs ─────────────────────────────────────────────────────────
     // Separate catalog of trial offerings (distinct from regular programs).
     // A trialer's profile points at one trial program.

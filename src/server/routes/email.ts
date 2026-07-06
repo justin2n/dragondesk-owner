@@ -4,11 +4,52 @@ import nodemailer from 'nodemailer';
 import { query, get } from '../models/database';
 import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth';
 import { getDKIMConfig, extractDomain } from '../utils/dkim-signer';
+import { sendViaSendgrid, isSendgridConfigured } from '../services/sendgrid';
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(authenticateToken);
+
+type Esp = 'smtp' | 'sendgrid';
+
+// The default email provider used for test/campaign sends, stored in app_settings.
+async function getDefaultEsp(): Promise<Esp> {
+  const row = await get(`SELECT value FROM app_settings WHERE key = 'email_default_esp'`);
+  return row?.value === 'sendgrid' ? 'sendgrid' : 'smtp';
+}
+
+async function setDefaultEsp(esp: Esp): Promise<void> {
+  await query(
+    `INSERT INTO app_settings (key, value, "updatedAt") VALUES ('email_default_esp', $1, CURRENT_TIMESTAMP)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = CURRENT_TIMESTAMP`,
+    [esp]
+  );
+}
+
+// Deliver one email through the chosen provider. SMTP builds a transporter;
+// SendGrid uses its HTTP API (needs a verified sender).
+async function deliver(
+  esp: Esp,
+  opts: { to: string; subject: string; html: string; fromEmail?: string; fromName?: string; emailSettings?: any },
+  reuseTransporter?: any
+): Promise<{ messageId?: string }> {
+  if (esp === 'sendgrid') {
+    return await sendViaSendgrid({
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      fromEmail: opts.fromEmail,
+      fromName: opts.fromName,
+    });
+  }
+  const transporter = reuseTransporter || await createTransporter(opts.emailSettings);
+  const fromField = opts.fromEmail
+    ? `"${opts.fromName || 'DragonDesk CRM'}" <${opts.fromEmail}>`
+    : `"${opts.fromName || 'DragonDesk CRM'}" <noreply@dragondesk.com>`;
+  const info = await transporter.sendMail({ from: fromField, to: opts.to, subject: opts.subject, html: opts.html });
+  return { messageId: info.messageId };
+}
 
 // Create email transporter (configure with your SMTP settings)
 const createTransporter = async (settings?: any) => {
@@ -70,6 +111,34 @@ router.get('/config-status', async (req: AuthRequest, res) => {
     fromName: process.env.SMTP_FROM_NAME || null,
     configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
   });
+});
+
+// Email provider status: current default ESP + whether each provider is configured
+router.get('/provider', async (req: AuthRequest, res) => {
+  res.json({
+    defaultEsp: await getDefaultEsp(),
+    smtp: {
+      configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    },
+    sendgrid: {
+      configured: isSendgridConfigured(),
+      fromEmail: process.env.SENDGRID_FROM_EMAIL || null,
+      fromName: process.env.SENDGRID_FROM_NAME || null,
+    },
+  });
+});
+
+// Set the default email provider (SMTP or SendGrid)
+router.put('/provider', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
+  const { defaultEsp } = req.body;
+  if (defaultEsp !== 'smtp' && defaultEsp !== 'sendgrid') {
+    return res.status(400).json({ error: "defaultEsp must be 'smtp' or 'sendgrid'" });
+  }
+  if (defaultEsp === 'sendgrid' && !isSendgridConfigured()) {
+    return res.status(400).json({ error: 'SendGrid is not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL first.' });
+  }
+  await setDefaultEsp(defaultEsp);
+  res.json({ defaultEsp });
 });
 
 // Test server-side SMTP connection (uses env vars only)
@@ -150,33 +219,31 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
       return res.status(400).json({ error: 'Missing required fields: to, subject, body' });
     }
 
-    const resolvedHost = emailSettings?.host || process.env.SMTP_HOST || '';
-    if (resolvedHost.includes('ethereal')) {
-      return res.status(400).json({
-        error: 'Ethereal (test) SMTP detected — emails will not be delivered.',
-        details: 'Your SMTP_HOST is set to smtp.ethereal.email, which is a development-only fake inbox. Replace SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables with a real email provider (e.g. SendGrid, Postmark, or Gmail SMTP).',
-      });
+    const esp = await getDefaultEsp();
+
+    // Ethereal only matters for SMTP (dev-only fake inbox).
+    if (esp === 'smtp') {
+      const resolvedHost = emailSettings?.host || process.env.SMTP_HOST || '';
+      if (resolvedHost.includes('ethereal')) {
+        return res.status(400).json({
+          error: 'Ethereal (test) SMTP detected — emails will not be delivered.',
+          details: 'Your SMTP_HOST is set to smtp.ethereal.email, which is a development-only fake inbox. Replace SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables with a real email provider (e.g. SendGrid, Postmark, or Gmail SMTP).',
+        });
+      }
     }
 
-    const transporter = await createTransporter(emailSettings);
+    const fromEmail = emailSettings?.fromEmail
+      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL : process.env.SMTP_FROM_EMAIL);
+    const fromName = emailSettings?.fromName
+      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_NAME : process.env.SMTP_FROM_NAME)
+      || 'DragonDesk CRM';
 
-    const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
-    const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
-    const fromField = fromEmail
-      ? `"${fromName}" <${fromEmail}>`
-      : `"${fromName}" <noreply@dragondesk.com>`;
+    const info = await deliver(esp, { to, subject, html: body, fromEmail, fromName, emailSettings });
 
-    const info = await transporter.sendMail({
-      from: fromField,
-      to,
-      subject,
-      html: body,
-    });
-
-    console.log('Test email sent:', info.messageId);
+    console.log(`Test email sent via ${esp}:`, info.messageId);
 
     res.json({
-      message: 'Test email sent successfully',
+      message: `Test email sent successfully via ${esp === 'sendgrid' ? 'SendGrid' : 'SMTP'}`,
       messageId: info.messageId,
     });
   } catch (error: any) {
@@ -251,14 +318,17 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
       return res.status(400).json({ error: 'No members found in audience' });
     }
 
-    const transporter = await createTransporter(emailSettings);
+    const esp = await getDefaultEsp();
 
-    // Build the "from" field: explicit settings > env vars > default
-    const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
-    const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
-    const fromField = fromEmail
-      ? `"${fromName}" <${fromEmail}>`
-      : `"${fromName}" <noreply@dragondesk.com>`;
+    // Build one SMTP transporter for the whole campaign (SendGrid is per-request HTTP).
+    const campaignTransporter = esp === 'smtp' ? await createTransporter(emailSettings) : null;
+
+    // Build the "from": explicit settings > provider env vars > default
+    const fromEmail = emailSettings?.fromEmail
+      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL : process.env.SMTP_FROM_EMAIL);
+    const fromName = emailSettings?.fromName
+      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_NAME : process.env.SMTP_FROM_NAME)
+      || 'DragonDesk CRM';
 
     let sent = 0;
     let failed = 0;
@@ -273,12 +343,14 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
           .replace(/\[Last Name\]/g, member.lastName || '')
           .replace(/\[Member Name\]/g, `${member.firstName} ${member.lastName}`.trim());
 
-        await transporter.sendMail({
-          from: fromField,
+        await deliver(esp, {
           to: member.email,
           subject: content.subject,
           html: personalizedBody,
-        });
+          fromEmail,
+          fromName,
+          emailSettings,
+        }, campaignTransporter);
 
         sent++;
       } catch (error: any) {
