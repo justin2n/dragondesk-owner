@@ -386,8 +386,10 @@ const Settings = () => {
   const [smtpTestStatus, setSmtpTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [smtpTestMessage, setSmtpTestMessage] = useState('');
 
-  // Default email provider (ESP) + per-provider configured status
-  const [emailProvider, setEmailProvider] = useState<any>(null);
+  // Editable email provider config (default provider, SendGrid key, from-address)
+  const [emailSettings, setEmailSettings] = useState<any>(null);
+  const [emailForm, setEmailForm] = useState({ provider: 'smtp', fromEmail: '', fromName: '', sendgridApiKey: '' });
+  const [emailSaving, setEmailSaving] = useState(false);
 
   // SendGrid Admin Email Settings
   const [sgStatus, setSgStatus] = useState<any>(null);
@@ -692,7 +694,10 @@ const Settings = () => {
 
     // Load server-side SMTP config status
     api.get('/email/config-status').then(setSmtpStatus).catch(() => {});
-    api.get('/email/provider').then(setEmailProvider).catch(() => {});
+    api.get('/email/settings').then((d: any) => {
+      setEmailSettings(d);
+      setEmailForm({ provider: d.provider || 'smtp', fromEmail: d.fromEmail || '', fromName: d.fromName || '', sendgridApiKey: '' });
+    }).catch(() => {});
     // Load SendGrid admin email config status
     api.get('/admin-emails/config-status').then(setSgStatus).catch(() => {});
   };
@@ -781,15 +786,25 @@ const Settings = () => {
     showSaveMessage('Database settings saved');
   };
 
-  const handleSetDefaultEsp = async (esp: 'smtp' | 'sendgrid') => {
-    const prev = emailProvider;
-    setEmailProvider({ ...emailProvider, defaultEsp: esp }); // optimistic
+  const handleSaveEmailSettings = async () => {
+    setEmailSaving(true);
     try {
-      await api.put('/email/provider', { defaultEsp: esp });
-      showSaveMessage(`Default email provider set to ${esp === 'sendgrid' ? 'SendGrid' : 'SMTP'}`);
+      // Only send the API key when the admin actually typed a new one.
+      const payload: any = {
+        provider: emailForm.provider,
+        fromEmail: emailForm.fromEmail,
+        fromName: emailForm.fromName,
+      };
+      if (emailForm.sendgridApiKey.trim()) payload.sendgridApiKey = emailForm.sendgridApiKey.trim();
+
+      const updated = await api.put('/email/settings', payload);
+      setEmailSettings(updated);
+      setEmailForm({ provider: updated.provider || 'smtp', fromEmail: updated.fromEmail || '', fromName: updated.fromName || '', sendgridApiKey: '' });
+      showSaveMessage('Email settings saved');
     } catch (error: any) {
-      setEmailProvider(prev); // revert
-      toast(error.message || 'Failed to set default provider', 'error');
+      toast(error.message || 'Failed to save email settings', 'error');
+    } finally {
+      setEmailSaving(false);
     }
   };
 
@@ -2247,48 +2262,87 @@ const Settings = () => {
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>Email Settings</h2>
               <p className={styles.sectionDesc}>
-                Choose which provider sends your campaigns and test emails, then configure it below. Credentials are managed via server environment variables (Railway) — keys never touch the browser.
+                Choose which provider sends your campaigns and test emails. SendGrid can be configured here with your own account and domain; SMTP credentials are managed via Railway environment variables.
               </p>
 
-              {/* Default provider selector */}
+              {/* Editable provider config */}
               <div className={styles.subsection} style={{ marginBottom: 24 }}>
-                <h3 className={styles.subsectionTitle}>Default Email Provider</h3>
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-                  {([
-                    { id: 'smtp', label: 'SMTP', configured: emailProvider?.smtp?.configured },
-                    { id: 'sendgrid', label: 'SendGrid', configured: emailProvider?.sendgrid?.configured },
-                  ] as const).map(opt => {
-                    const selected = emailProvider?.defaultEsp === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => handleSetDefaultEsp(opt.id)}
-                        disabled={!opt.configured && !selected}
-                        className={styles.locationCard}
-                        style={{
-                          cursor: (!opt.configured && !selected) ? 'not-allowed' : 'pointer',
-                          opacity: (!opt.configured && !selected) ? 0.55 : 1,
-                          border: selected ? '2px solid var(--color-accent)' : '1px solid var(--color-border)',
-                          padding: '0.75rem 1rem', minWidth: 200, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        }}
-                      >
-                        <span className={styles.locationName}>{opt.label}{selected ? ' (default)' : ''}</span>
-                        <span className={opt.configured ? styles.configured : styles.notSet}>
-                          {opt.configured ? 'configured' : 'not configured'}
-                        </span>
-                      </button>
-                    );
-                  })}
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Default Email Provider</label>
+                    <select
+                      value={emailForm.provider}
+                      onChange={(e) => setEmailForm({ ...emailForm, provider: e.target.value })}
+                      className={styles.input}
+                    >
+                      <option value="smtp">SMTP{emailSettings?.smtpConfigured ? '' : ' (not configured)'}</option>
+                      <option value="sendgrid">SendGrid{emailSettings?.sendgridConfigured ? '' : ' (needs API key + from)'}</option>
+                    </select>
+                  </div>
                 </div>
-                <p className={styles.sectionDesc} style={{ marginTop: 8 }}>
-                  A provider must be configured before it can be set as the default.
-                </p>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>From Email</label>
+                    <input
+                      type="email"
+                      value={emailForm.fromEmail}
+                      onChange={(e) => setEmailForm({ ...emailForm, fromEmail: e.target.value })}
+                      className={styles.input}
+                      placeholder="e.g., hello@yourgym.com (must be verified in SendGrid)"
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>From Name</label>
+                    <input
+                      type="text"
+                      value={emailForm.fromName}
+                      onChange={(e) => setEmailForm({ ...emailForm, fromName: e.target.value })}
+                      className={styles.input}
+                      placeholder="e.g., Your Gym"
+                    />
+                  </div>
+                </div>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>
+                      SendGrid API Key {emailSettings?.sendgridApiKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                    </label>
+                    <input
+                      type="password"
+                      value={emailForm.sendgridApiKey}
+                      onChange={(e) => setEmailForm({ ...emailForm, sendgridApiKey: e.target.value })}
+                      className={styles.input}
+                      placeholder={emailSettings?.sendgridApiKey ? '••••••••  (leave blank to keep current key)' : 'SG.xxxxx…'}
+                      autoComplete="off"
+                    />
+                    {emailSettings && !emailSettings.encryptionConfigured && (
+                      <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
+                        Set APP_ENCRYPTION_KEY (Railway) before saving an API key — it's encrypted at rest.
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className={styles.buttonGroup}>
+                  <button onClick={handleSaveEmailSettings} className={styles.saveBtn} disabled={emailSaving}>
+                    {emailSaving ? 'Saving…' : 'Save Email Settings'}
+                  </button>
+                </div>
               </div>
 
-              <h3 className={styles.subsectionTitle}>SMTP</h3>
+              {/* Use your own domain */}
+              <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                <h3 className={styles.subsectionTitle}>Use your own domain (SendGrid)</h3>
+                <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                  <li>In your SendGrid account: <strong>Settings → Sender Authentication → Authenticate Your Domain</strong>.</li>
+                  <li>Add the CNAME records SendGrid gives you to your domain's DNS, then verify.</li>
+                  <li>Create an API key (Mail Send permission) and paste it above.</li>
+                  <li>Set <strong>From Email</strong> to an address on that authenticated domain and set the provider to SendGrid.</li>
+                </ol>
+              </div>
+
+              <h3 className={styles.subsectionTitle}>SMTP (environment variables)</h3>
               <p className={styles.sectionDesc}>
-                Set these in your Railway project variables to configure SMTP sending.
+                SMTP credentials are set in your Railway project variables.
               </p>
 
               <div className={styles.envVarTable}>
@@ -2353,35 +2407,6 @@ const Settings = () => {
                 </div>
               )}
 
-              {/* SendGrid provider config */}
-              <h3 className={styles.subsectionTitle} style={{ marginTop: 32 }}>SendGrid</h3>
-              <p className={styles.sectionDesc}>
-                Set these in your Railway project variables to send via SendGrid. SendGrid requires a verified sender for the from address.
-              </p>
-              <div className={styles.envVarTable}>
-                <div className={styles.envVarRow}>
-                  <div className={styles.envVarName}>SENDGRID_API_KEY</div>
-                  <div className={styles.envVarValue}>
-                    {emailProvider?.sendgrid?.configured
-                      ? <span className={styles.configured}>configured</span>
-                      : <span className={styles.notSet}>not set</span>}
-                  </div>
-                </div>
-                <div className={styles.envVarRow}>
-                  <div className={styles.envVarName}>SENDGRID_FROM_EMAIL</div>
-                  <div className={styles.envVarValue}>{emailProvider?.sendgrid?.fromEmail || <span className={styles.notSet}>not set</span>}</div>
-                </div>
-                <div className={styles.envVarRow}>
-                  <div className={styles.envVarName}>SENDGRID_FROM_NAME</div>
-                  <div className={styles.envVarValue}>{emailProvider?.sendgrid?.fromName || <span className={styles.notSet}>DragonDesk CRM (default)</span>}</div>
-                </div>
-              </div>
-              {!emailProvider?.sendgrid?.configured && (
-                <div className={styles.warning} style={{ marginTop: 16 }}>
-                  <WarningIcon size={20} />
-                  <span>SendGrid is not configured. Add SENDGRID_API_KEY and SENDGRID_FROM_EMAIL to your Railway environment variables.</span>
-                </div>
-              )}
             </div>
           )}
 

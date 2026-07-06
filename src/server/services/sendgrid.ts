@@ -53,16 +53,17 @@ export async function sendViaSendgrid(opts: {
   to: string | string[];
   subject: string;
   html: string;
+  apiKey?: string;
   fromEmail?: string;
   fromName?: string;
   replyTo?: string;
 }): Promise<{ messageId?: string }> {
-  const apiKey = process.env.SENDGRID_API_KEY;
+  const apiKey = opts.apiKey || process.env.SENDGRID_API_KEY;
   const fromEmail = opts.fromEmail || process.env.SENDGRID_FROM_EMAIL;
   const fromName = opts.fromName || process.env.SENDGRID_FROM_NAME || 'DragonDesk CRM';
 
-  if (!apiKey) throw new Error('SENDGRID_API_KEY is not set');
-  if (!fromEmail) throw new Error('SENDGRID_FROM_EMAIL is not set (SendGrid needs a verified sender)');
+  if (!apiKey) throw new Error('SendGrid API key is not configured');
+  if (!fromEmail) throw new Error('SendGrid from address is not set (SendGrid needs a verified sender)');
 
   const toArray = Array.isArray(opts.to) ? opts.to : [opts.to];
   const body = {

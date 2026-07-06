@@ -1130,6 +1130,30 @@ async function initializeDatabase() {
       )
     `);
 
+    // Per-location email provider config (NULL locationId = org-wide default).
+    // Mirrors billing_settings. sendgridApiKey is stored encrypted (crypto util);
+    // env vars remain the fallback when a value is absent.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS email_settings (
+        id SERIAL PRIMARY KEY,
+        "locationId" INTEGER REFERENCES locations(id),
+        provider TEXT DEFAULT 'smtp' CHECK (provider IN ('smtp','sendgrid')),
+        "sendgridApiKey" TEXT,
+        "fromEmail" TEXT,
+        "fromName" TEXT,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    // Seed the org-wide row's provider from the legacy app_settings default (if any).
+    await client.query(`
+      INSERT INTO email_settings ("locationId", provider)
+      SELECT NULL, value FROM app_settings
+      WHERE key = 'email_default_esp' AND value IN ('smtp','sendgrid')
+        AND NOT EXISTS (SELECT 1 FROM email_settings WHERE "locationId" IS NULL)
+    `);
+
     // ── Trial programs ─────────────────────────────────────────────────────────
     // Separate catalog of trial offerings (distinct from regular programs).
     // A trialer's profile points at one trial program.
