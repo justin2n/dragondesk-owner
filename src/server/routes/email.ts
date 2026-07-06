@@ -232,11 +232,14 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
       }
     }
 
-    const fromEmail = emailSettings?.fromEmail
-      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL : process.env.SMTP_FROM_EMAIL);
-    const fromName = emailSettings?.fromName
-      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_NAME : process.env.SMTP_FROM_NAME)
-      || 'DragonDesk CRM';
+    // SendGrid must use its verified sender — never the SMTP-oriented from that
+    // the client may pass. SMTP can use the provided/env from.
+    const fromEmail = esp === 'sendgrid'
+      ? process.env.SENDGRID_FROM_EMAIL
+      : (emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL);
+    const fromName = esp === 'sendgrid'
+      ? (process.env.SENDGRID_FROM_NAME || 'DragonDesk CRM')
+      : (emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM');
 
     const info = await deliver(esp, { to, subject, html: body, fromEmail, fromName, emailSettings });
 
@@ -323,12 +326,13 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     // Build one SMTP transporter for the whole campaign (SendGrid is per-request HTTP).
     const campaignTransporter = esp === 'smtp' ? await createTransporter(emailSettings) : null;
 
-    // Build the "from": explicit settings > provider env vars > default
-    const fromEmail = emailSettings?.fromEmail
-      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL : process.env.SMTP_FROM_EMAIL);
-    const fromName = emailSettings?.fromName
-      || (esp === 'sendgrid' ? process.env.SENDGRID_FROM_NAME : process.env.SMTP_FROM_NAME)
-      || 'DragonDesk CRM';
+    // SendGrid must use its verified sender; SMTP can use the provided/env from.
+    const fromEmail = esp === 'sendgrid'
+      ? process.env.SENDGRID_FROM_EMAIL
+      : (emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL);
+    const fromName = esp === 'sendgrid'
+      ? (process.env.SENDGRID_FROM_NAME || 'DragonDesk CRM')
+      : (emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM');
 
     let sent = 0;
     let failed = 0;
