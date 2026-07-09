@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { useToast } from './Toast';
+import { api } from '../utils/api';
 import styles from './EmailEditor.module.css';
 
 interface EmailEditorProps {
@@ -11,23 +12,47 @@ interface EmailEditorProps {
 const EmailEditor: React.FC<EmailEditorProps> = ({ value, onChange }) => {
   const { toast } = useToast();
   const editorRef = useRef<HTMLDivElement>(null);
+  const savedRange = useRef<Range | null>(null);
   const [viewMode, setViewMode] = useState<'visual' | 'html'>('visual');
 
+  // Only push `value` into the DOM for EXTERNAL changes (loading a template /
+  // campaign, switching views). Doing it on every keystroke resets the caret to
+  // the start — which is what made typed text come out reversed.
   useEffect(() => {
-    if (editorRef.current && viewMode === 'visual') {
-      editorRef.current.innerHTML = value;
+    if (editorRef.current && viewMode === 'visual' && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value || '';
     }
   }, [value, viewMode]);
 
-  const executeCommand = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    updateContent();
+  // Remember the caret/selection inside the editor so toolbar controls (which
+  // steal focus — especially the color picker) can restore it before acting.
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedRange.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    const sel = window.getSelection();
+    if (savedRange.current && sel) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+    }
   };
 
   const updateContent = () => {
     if (editorRef.current) {
       onChange(editorRef.current.innerHTML);
     }
+  };
+
+  const executeCommand = (command: string, val?: string) => {
+    editorRef.current?.focus();
+    restoreSelection();
+    document.execCommand(command, false, val);
+    saveSelection();
+    updateContent();
   };
 
   const insertLink = () => {
@@ -47,23 +72,14 @@ const EmailEditor: React.FC<EmailEditorProps> = ({ value, onChange }) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // Create FormData for upload
       const formData = new FormData();
       formData.append('image', file);
 
       try {
-        const response = await fetch('http://localhost:5000/api/templates/upload-image', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
-          body: formData
-        });
-
-        if (!response.ok) throw new Error('Upload failed');
-
-        const data = await response.json();
-        const imageUrl = `http://localhost:5000${data.url}`;
+        // Use the auth-aware api wrapper (raw fetch to localhost broke in prod).
+        const data = await api.upload('/templates/upload-image', formData);
+        // Emails need an absolute URL; the server returns a relative /uploads path.
+        const imageUrl = data.url?.startsWith('http') ? data.url : `${window.location.origin}${data.url}`;
         executeCommand('insertImage', imageUrl);
       } catch (error) {
         console.error('Error uploading image:', error);
@@ -265,7 +281,10 @@ const EmailEditor: React.FC<EmailEditorProps> = ({ value, onChange }) => {
           contentEditable
           className={styles.editor}
           onInput={updateContent}
-          onBlur={updateContent}
+          onKeyUp={saveSelection}
+          onMouseUp={saveSelection}
+          onBlur={() => { saveSelection(); updateContent(); }}
+          suppressContentEditableWarning
         />
       ) : (
         <textarea
