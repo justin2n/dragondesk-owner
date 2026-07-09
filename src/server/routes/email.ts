@@ -1,6 +1,7 @@
 import { serverError } from '../utils/errors';
 import express from 'express';
 import nodemailer from 'nodemailer';
+import { randomBytes } from 'crypto';
 import { query, get } from '../models/database';
 import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth';
 import { getDKIMConfig, extractDomain } from '../utils/dkim-signer';
@@ -325,7 +326,7 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
       : audience.filters;
 
     // Build query to get members based on audience filters
-    let sql = 'SELECT email, firstName, lastName FROM members WHERE 1=1';
+    let sql = 'SELECT id, email, firstName, lastName, accountStatus FROM members WHERE 1=1';
     const params: any[] = [];
 
     if (filters.accountStatus && filters.accountStatus.length > 0) {
@@ -359,6 +360,9 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     // Build one SMTP transporter for the whole campaign (SendGrid is per-request HTTP).
     const campaignTransporter = cfg.provider === 'smtp' ? await createTransporter(emailSettings) : null;
 
+    // Absolute base for the open-tracking pixel (works behind Railway's proxy).
+    const base = `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
+
     let sent = 0;
     let failed = 0;
     const errors: string[] = [];
@@ -372,12 +376,23 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
           .replace(/\[Last Name\]/g, member.lastName || '')
           .replace(/\[Member Name\]/g, `${member.firstName} ${member.lastName}`.trim());
 
+        // Per-recipient open-tracking pixel.
+        const token = randomBytes(16).toString('hex');
+        personalizedBody += `<img src="${base}/api/tracking/open/${token}" width="1" height="1" style="display:none" alt="">`;
+
         await deliver(cfg, {
           to: member.email,
           subject: content.subject,
           html: personalizedBody,
           emailSettings,
         }, campaignTransporter);
+
+        // Record the recipient (baseline status drives conversion attribution).
+        await query(
+          `INSERT INTO campaign_recipients ("campaignId", "memberId", email, token, "statusAtSend")
+           VALUES (?, ?, ?, ?, ?)`,
+          [campaignId, member.id, member.email, token, member.accountStatus]
+        ).catch(() => {});
 
         sent++;
       } catch (error: any) {
@@ -386,6 +401,13 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
         console.error(`Failed to send email to member #${member.id}:`, error.message);
       }
     }
+
+    // Persist send totals + mark completed (opens accrue via the pixel endpoint).
+    await query(
+      `UPDATE campaigns SET sent = ?, delivered = ?, status = 'completed',
+         opens = 0, "openRate" = 0, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
+      [sent, sent, campaignId]
+    ).catch(() => {});
 
     res.json({
       message: 'Campaign sent',

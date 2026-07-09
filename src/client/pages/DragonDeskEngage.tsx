@@ -167,6 +167,23 @@ const DragonDeskEngage = () => {
     }
   };
 
+  const handleSendCampaign = async (campaign: Campaign) => {
+    const audience = audiences.find((a) => a.id === campaign.audienceId);
+    if (!await confirm({
+      title: 'Send Campaign',
+      message: `Send "${campaign.name}" to everyone in ${audience?.name || 'the selected audience'}? This emails real members and can't be undone.`,
+      confirmLabel: 'Send',
+    })) return;
+
+    try {
+      const result = await api.post(`/email/send-campaign/${campaign.id}`, {});
+      toast(`Campaign sent — ${result.sent} delivered${result.failed ? `, ${result.failed} failed` : ''}.`, 'success');
+      loadData();
+    } catch (error: any) {
+      toast(error.message || 'Failed to send campaign', 'error');
+    }
+  };
+
   const handleCreateTemplate = () => {
     setEditingTemplate(null);
     setTemplateFormData({
@@ -485,11 +502,22 @@ const DragonDeskEngage = () => {
                             <div className={styles.analyticsLabel}>Members</div>
                           </div>
                         )}
+                        {campaign.conversions !== undefined && campaign.conversions > 0 && (
+                          <div className={styles.analyticsItem}>
+                            <div className={styles.analyticsValue}>{campaign.conversions}</div>
+                            <div className={styles.analyticsLabel}>Conversions</div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
                 <div className={styles.cardFooter}>
+                  {!campaign.sent && (
+                    <button onClick={() => handleSendCampaign(campaign)} className={styles.sendBtn}>
+                      Send Campaign
+                    </button>
+                  )}
                   <button onClick={() => handleEditCampaign(campaign)} className={styles.editBtn}>
                     Edit
                   </button>

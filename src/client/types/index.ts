@@ -162,6 +162,7 @@ export interface Campaign {
   leads?: number;
   trialers?: number;
   members?: number;
+  conversions?: number;
 }
 
 export interface ABTest {

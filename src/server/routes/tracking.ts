@@ -5,6 +5,44 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+// ─── Email open tracking ────────────────────────────────────────────────────
+// 1x1 transparent GIF returned for every campaign open pixel. Records the open
+// (unique via openedAt) and recomputes the campaign's opens + open rate. Always
+// returns the image — never errors — so mail clients render it.
+const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+
+router.get('/open/:token', async (req: Request, res: Response) => {
+  const { token } = req.params;
+  try {
+    const r = await pool.query(
+      `UPDATE campaign_recipients
+         SET "openCount" = "openCount" + 1,
+             "openedAt" = COALESCE("openedAt", CURRENT_TIMESTAMP)
+       WHERE token = $1
+       RETURNING "campaignId"`,
+      [token]
+    );
+    const campaignId = r.rows[0]?.campaignId;
+    if (campaignId) {
+      await pool.query(
+        `UPDATE campaigns SET
+           opens = (SELECT COUNT(*) FROM campaign_recipients WHERE "campaignId" = $1 AND "openedAt" IS NOT NULL),
+           "openRate" = ROUND(100.0 * (SELECT COUNT(*) FROM campaign_recipients WHERE "campaignId" = $1 AND "openedAt" IS NOT NULL) / GREATEST(sent, 1)),
+           "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [campaignId]
+      );
+    }
+  } catch {
+    // swallow — the pixel must always render
+  }
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.end(OPEN_PIXEL);
+});
+
 // ─── Tracking script ────────────────────────────────────────────────────────
 
 // GET /api/tracking/script.js?token=TOKEN

@@ -1130,6 +1130,23 @@ async function initializeDatabase() {
       )
     `);
 
+    // Per-recipient rows for a sent email campaign — drives Engage analytics
+    // (unique opens via openedAt, conversions via statusAtSend vs current status).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS campaign_recipients (
+        id SERIAL PRIMARY KEY,
+        "campaignId" INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+        "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        email TEXT,
+        token TEXT UNIQUE,
+        "statusAtSend" TEXT,
+        "sentAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "openedAt" TIMESTAMP,
+        "openCount" INTEGER DEFAULT 0
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign ON campaign_recipients("campaignId")`);
+
     // Per-location email provider config (NULL locationId = org-wide default).
     // Mirrors billing_settings. sendgridApiKey is stored encrypted (crypto util);
     // env vars remain the fallback when a value is absent.

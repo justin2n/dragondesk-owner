@@ -1,10 +1,33 @@
 import { Router } from 'express';
-import { query, run, get } from '../models/database';
+import { query, run, get, pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
 router.use(authenticateToken);
+
+// Live conversion counts per campaign: recipients whose status advanced
+// (lead<trialer<member) after the send, keyed by current status. Computed on
+// read because member statuses change over time after a campaign goes out.
+const RANK = (col: string) => `(CASE ${col} WHEN 'trialer' THEN 1 WHEN 'member' THEN 2 ELSE 0 END)`;
+
+async function conversionCounts(campaignIds: number[]): Promise<Map<number, { trialers: number; members: number }>> {
+  const map = new Map<number, { trialers: number; members: number }>();
+  if (campaignIds.length === 0) return map;
+  const advanced = `${RANK('m."accountStatus"')} > ${RANK('cr."statusAtSend"')}`;
+  const result = await pool.query(
+    `SELECT cr."campaignId",
+       COUNT(*) FILTER (WHERE m."accountStatus" = 'trialer' AND ${advanced})::int AS trialers,
+       COUNT(*) FILTER (WHERE m."accountStatus" = 'member'  AND ${advanced})::int AS members
+     FROM campaign_recipients cr
+     JOIN members m ON m.id = cr."memberId"
+     WHERE cr."campaignId" = ANY($1::int[])
+     GROUP BY cr."campaignId"`,
+    [campaignIds]
+  );
+  for (const row of result.rows) map.set(row.campaignId, { trialers: row.trialers, members: row.members });
+  return map;
+}
 
 router.get('/', async (req: AuthRequest, res) => {
   try {
@@ -27,6 +50,14 @@ router.get('/', async (req: AuthRequest, res) => {
     sql += ' ORDER BY createdAt DESC';
 
     const campaigns = await query(sql, params);
+
+    // Merge live conversions (recipients who advanced status after the send).
+    const counts = await conversionCounts(campaigns.map((c: any) => c.id));
+    for (const c of campaigns) {
+      const cv = counts.get(c.id);
+      if (cv) { c.trialers = cv.trialers; c.members = cv.members; c.conversions = cv.trialers + cv.members; }
+    }
+
     res.json(campaigns);
   } catch (error) {
     console.error('Get campaigns error:', error);
@@ -41,6 +72,9 @@ router.get('/:id', async (req: AuthRequest, res) => {
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
+
+    const cv = (await conversionCounts([campaign.id])).get(campaign.id);
+    if (cv) { campaign.trialers = cv.trialers; campaign.members = cv.members; campaign.conversions = cv.trialers + cv.members; }
 
     res.json(campaign);
   } catch (error) {
