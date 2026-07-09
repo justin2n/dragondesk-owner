@@ -388,7 +388,10 @@ const Settings = () => {
 
   // Editable email provider config (default provider, SendGrid key, from-address)
   const [emailSettings, setEmailSettings] = useState<any>(null);
-  const [emailForm, setEmailForm] = useState({ provider: 'smtp', fromEmail: '', fromName: '', sendgridApiKey: '' });
+  const [emailForm, setEmailForm] = useState({
+    provider: 'smtp', fromEmail: '', fromName: '',
+    sendgridApiKey: '', mailgunApiKey: '', mailgunDomain: '', mailgunRegion: 'us',
+  });
   const [emailSaving, setEmailSaving] = useState(false);
 
   // SendGrid Admin Email Settings
@@ -696,7 +699,11 @@ const Settings = () => {
     api.get('/email/config-status').then(setSmtpStatus).catch(() => {});
     api.get('/email/settings').then((d: any) => {
       setEmailSettings(d);
-      setEmailForm({ provider: d.provider || 'smtp', fromEmail: d.fromEmail || '', fromName: d.fromName || '', sendgridApiKey: '' });
+      setEmailForm({
+        provider: d.provider || 'smtp', fromEmail: d.fromEmail || '', fromName: d.fromName || '',
+        sendgridApiKey: '', mailgunApiKey: '',
+        mailgunDomain: d.mailgunDomain || '', mailgunRegion: d.mailgunRegion || 'us',
+      });
     }).catch(() => {});
     // Load SendGrid admin email config status
     api.get('/admin-emails/config-status').then(setSgStatus).catch(() => {});
@@ -789,17 +796,24 @@ const Settings = () => {
   const handleSaveEmailSettings = async () => {
     setEmailSaving(true);
     try {
-      // Only send the API key when the admin actually typed a new one.
+      // Only send API keys when the admin actually typed a new one.
       const payload: any = {
         provider: emailForm.provider,
         fromEmail: emailForm.fromEmail,
         fromName: emailForm.fromName,
+        mailgunDomain: emailForm.mailgunDomain,
+        mailgunRegion: emailForm.mailgunRegion,
       };
       if (emailForm.sendgridApiKey.trim()) payload.sendgridApiKey = emailForm.sendgridApiKey.trim();
+      if (emailForm.mailgunApiKey.trim()) payload.mailgunApiKey = emailForm.mailgunApiKey.trim();
 
       const updated = await api.put('/email/settings', payload);
       setEmailSettings(updated);
-      setEmailForm({ provider: updated.provider || 'smtp', fromEmail: updated.fromEmail || '', fromName: updated.fromName || '', sendgridApiKey: '' });
+      setEmailForm({
+        provider: updated.provider || 'smtp', fromEmail: updated.fromEmail || '', fromName: updated.fromName || '',
+        sendgridApiKey: '', mailgunApiKey: '',
+        mailgunDomain: updated.mailgunDomain || '', mailgunRegion: updated.mailgunRegion || 'us',
+      });
       showSaveMessage('Email settings saved');
     } catch (error: any) {
       toast(error.message || 'Failed to save email settings', 'error');
@@ -2262,14 +2276,14 @@ const Settings = () => {
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>Email Settings</h2>
               <p className={styles.sectionDesc}>
-                Choose which provider sends your campaigns and test emails. SendGrid can be configured here with your own account and domain; SMTP credentials are managed via Railway environment variables.
+                Pick your email service provider, then fill in that provider's settings. SendGrid and Mailgun can be configured here with your own account and domain; SMTP credentials are managed via Railway environment variables.
               </p>
 
               {/* Editable provider config */}
               <div className={styles.subsection} style={{ marginBottom: 24 }}>
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
-                    <label className={styles.label}>Default Email Provider</label>
+                    <label className={styles.label}>Email Service Provider</label>
                     <select
                       value={emailForm.provider}
                       onChange={(e) => setEmailForm({ ...emailForm, provider: e.target.value })}
@@ -2277,6 +2291,7 @@ const Settings = () => {
                     >
                       <option value="smtp">SMTP{emailSettings?.smtpConfigured ? '' : ' (not configured)'}</option>
                       <option value="sendgrid">SendGrid{emailSettings?.sendgridConfigured ? '' : ' (needs API key + from)'}</option>
+                      <option value="mailgun">Mailgun{emailSettings?.mailgunConfigured ? '' : ' (needs API key + domain)'}</option>
                     </select>
                   </div>
                 </div>
@@ -2288,7 +2303,7 @@ const Settings = () => {
                       value={emailForm.fromEmail}
                       onChange={(e) => setEmailForm({ ...emailForm, fromEmail: e.target.value })}
                       className={styles.input}
-                      placeholder="e.g., hello@yourgym.com (must be verified in SendGrid)"
+                      placeholder="e.g., hello@yourgym.com (must be on your verified domain)"
                     />
                   </div>
                   <div className={styles.formGroup}>
@@ -2302,26 +2317,76 @@ const Settings = () => {
                     />
                   </div>
                 </div>
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.label}>
-                      SendGrid API Key {emailSettings?.sendgridApiKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
-                    </label>
-                    <input
-                      type="password"
-                      value={emailForm.sendgridApiKey}
-                      onChange={(e) => setEmailForm({ ...emailForm, sendgridApiKey: e.target.value })}
-                      className={styles.input}
-                      placeholder={emailSettings?.sendgridApiKey ? '••••••••  (leave blank to keep current key)' : 'SG.xxxxx…'}
-                      autoComplete="off"
-                    />
-                    {emailSettings && !emailSettings.encryptionConfigured && (
-                      <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
-                        Set APP_ENCRYPTION_KEY (Railway) before saving an API key — it's encrypted at rest.
-                      </span>
-                    )}
+
+                {/* SendGrid-specific */}
+                {emailForm.provider === 'sendgrid' && (
+                  <div className={styles.formRow}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label}>
+                        SendGrid API Key {emailSettings?.sendgridApiKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                      </label>
+                      <input
+                        type="password"
+                        value={emailForm.sendgridApiKey}
+                        onChange={(e) => setEmailForm({ ...emailForm, sendgridApiKey: e.target.value })}
+                        className={styles.input}
+                        placeholder={emailSettings?.sendgridApiKey ? '••••••••  (leave blank to keep current key)' : 'SG.xxxxx…'}
+                        autoComplete="off"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Mailgun-specific */}
+                {emailForm.provider === 'mailgun' && (
+                  <>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>
+                          Mailgun API Key {emailSettings?.mailgunApiKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                        </label>
+                        <input
+                          type="password"
+                          value={emailForm.mailgunApiKey}
+                          onChange={(e) => setEmailForm({ ...emailForm, mailgunApiKey: e.target.value })}
+                          className={styles.input}
+                          placeholder={emailSettings?.mailgunApiKey ? '••••••••  (leave blank to keep current key)' : 'key-xxxxx…'}
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>Mailgun Sending Domain</label>
+                        <input
+                          type="text"
+                          value={emailForm.mailgunDomain}
+                          onChange={(e) => setEmailForm({ ...emailForm, mailgunDomain: e.target.value })}
+                          className={styles.input}
+                          placeholder="e.g., mg.yourgym.com"
+                        />
+                      </div>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>Region</label>
+                        <select
+                          value={emailForm.mailgunRegion}
+                          onChange={(e) => setEmailForm({ ...emailForm, mailgunRegion: e.target.value })}
+                          className={styles.input}
+                        >
+                          <option value="us">US</option>
+                          <option value="eu">EU</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {emailSettings && !emailSettings.encryptionConfigured && emailForm.provider !== 'smtp' && (
+                  <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
+                    Set APP_ENCRYPTION_KEY (Railway) before saving an API key — it's encrypted at rest.
+                  </span>
+                )}
+
                 <div className={styles.buttonGroup}>
                   <button onClick={handleSaveEmailSettings} className={styles.saveBtn} disabled={emailSaving}>
                     {emailSaving ? 'Saving…' : 'Save Email Settings'}
@@ -2329,16 +2394,29 @@ const Settings = () => {
                 </div>
               </div>
 
-              {/* Use your own domain */}
-              <div className={styles.subsection} style={{ marginBottom: 24 }}>
-                <h3 className={styles.subsectionTitle}>Use your own domain (SendGrid)</h3>
-                <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
-                  <li>In your SendGrid account: <strong>Settings → Sender Authentication → Authenticate Your Domain</strong>.</li>
-                  <li>Add the CNAME records SendGrid gives you to your domain's DNS, then verify.</li>
-                  <li>Create an API key (Mail Send permission) and paste it above.</li>
-                  <li>Set <strong>From Email</strong> to an address on that authenticated domain and set the provider to SendGrid.</li>
-                </ol>
-              </div>
+              {/* Use your own domain — provider-specific steps */}
+              {emailForm.provider === 'sendgrid' && (
+                <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                  <h3 className={styles.subsectionTitle}>Use your own domain (SendGrid)</h3>
+                  <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>In your SendGrid account: <strong>Settings → Sender Authentication → Authenticate Your Domain</strong>.</li>
+                    <li>Add the CNAME records SendGrid gives you to your domain's DNS, then verify.</li>
+                    <li>Create an API key (Mail Send permission) and paste it above.</li>
+                    <li>Set <strong>From Email</strong> to an address on that authenticated domain.</li>
+                  </ol>
+                </div>
+              )}
+              {emailForm.provider === 'mailgun' && (
+                <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                  <h3 className={styles.subsectionTitle}>Use your own domain (Mailgun)</h3>
+                  <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>In Mailgun: <strong>Sending → Domains → Add New Domain</strong> (e.g. <code>mg.yourgym.com</code>).</li>
+                    <li>Add the DNS records Mailgun provides (TXT/SPF/DKIM + MX) to your domain, then verify.</li>
+                    <li>Copy your <strong>Sending API key</strong> (Mailgun → API Keys) and paste it above.</li>
+                    <li>Enter the sending domain, pick your region (US/EU), and set <strong>From Email</strong> to an address on that domain.</li>
+                  </ol>
+                </div>
+              )}
 
               <h3 className={styles.subsectionTitle}>SMTP (environment variables)</h3>
               <p className={styles.sectionDesc}>

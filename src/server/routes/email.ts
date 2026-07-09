@@ -6,6 +6,7 @@ import { query, get } from '../models/database';
 import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth';
 import { getDKIMConfig, extractDomain } from '../utils/dkim-signer';
 import { sendViaSendgrid } from '../services/sendgrid';
+import { sendViaMailgun } from '../services/mailgun';
 import { getEmailConfig, invalidateEmailConfigCache, EmailConfig } from '../services/emailConfig';
 import { encryptSecret, isEncryptionConfigured } from '../utils/crypto';
 
@@ -31,6 +32,18 @@ async function deliver(
       html: opts.html,
       apiKey: cfg.sendgrid.apiKey || undefined,
       fromEmail: cfg.fromEmail || undefined,
+      fromName: cfg.fromName || undefined,
+    });
+  }
+  if (cfg.provider === 'mailgun') {
+    return await sendViaMailgun({
+      apiKey: cfg.mailgun.apiKey || '',
+      domain: cfg.mailgun.domain || '',
+      region: cfg.mailgun.region,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      fromEmail: cfg.fromEmail || '',
       fromName: cfg.fromName || undefined,
     });
   }
@@ -115,6 +128,10 @@ async function settingsView(locationId?: number) {
     fromName: cfg.fromName,
     sendgridApiKey: cfg.sendgrid.apiKey ? MASK : null,
     sendgridConfigured: cfg.sendgrid.configured,
+    mailgunApiKey: cfg.mailgun.apiKey ? MASK : null,
+    mailgunDomain: cfg.mailgun.domain,
+    mailgunRegion: cfg.mailgun.region,
+    mailgunConfigured: cfg.mailgun.configured,
     smtpConfigured: cfg.smtp.configured,
     encryptionConfigured: isEncryptionConfigured(),
   };
@@ -129,51 +146,79 @@ router.get('/settings', async (req: AuthRequest, res) => {
 
 router.put('/settings', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
   try {
-    const { locationId, provider, fromEmail, fromName, sendgridApiKey } = req.body;
+    const { locationId, provider, fromEmail, fromName, sendgridApiKey,
+            mailgunApiKey, mailgunDomain, mailgunRegion } = req.body;
     const locId: number | null = locationId ? Number(locationId) : null;
 
-    if (provider && provider !== 'smtp' && provider !== 'sendgrid') {
-      return res.status(400).json({ error: "provider must be 'smtp' or 'sendgrid'" });
+    if (provider && !['smtp', 'sendgrid', 'mailgun'].includes(provider)) {
+      return res.status(400).json({ error: "provider must be 'smtp', 'sendgrid', or 'mailgun'" });
     }
 
     const existing = locId
       ? await get(`SELECT * FROM email_settings WHERE "locationId" = $1`, [locId])
       : await get(`SELECT * FROM email_settings WHERE "locationId" IS NULL`);
 
-    // Preserve the stored key when the incoming value is masked/empty; otherwise encrypt.
-    let keyToStore: string | null = existing?.sendgridApiKey ?? null;
-    if (typeof sendgridApiKey === 'string' && sendgridApiKey.trim() && !sendgridApiKey.includes('•')) {
-      if (!isEncryptionConfigured()) {
-        return res.status(400).json({ error: 'Set APP_ENCRYPTION_KEY (32-byte hex/base64) before storing a SendGrid API key.' });
+    // Preserve a stored key when the incoming value is masked/empty; otherwise encrypt.
+    const resolveKey = (incoming: any, stored: string | null): string | null => {
+      if (typeof incoming === 'string' && incoming.trim() && !incoming.includes('•')) {
+        if (!isEncryptionConfigured()) throw new Error('ENCRYPTION_REQUIRED');
+        return encryptSecret(incoming.trim());
       }
-      keyToStore = encryptSecret(sendgridApiKey.trim());
+      return stored;
+    };
+
+    let sendgridKeyToStore: string | null;
+    let mailgunKeyToStore: string | null;
+    try {
+      sendgridKeyToStore = resolveKey(sendgridApiKey, existing?.sendgridApiKey ?? null);
+      mailgunKeyToStore = resolveKey(mailgunApiKey, existing?.mailgunApiKey ?? null);
+    } catch {
+      return res.status(400).json({ error: 'Set APP_ENCRYPTION_KEY (32-byte hex/base64) before storing an API key.' });
     }
 
     const resolvedProvider = provider || existing?.provider || 'smtp';
     const resolvedFromEmail = fromEmail !== undefined ? (fromEmail || null) : (existing?.fromEmail ?? null);
     const resolvedFromName = fromName !== undefined ? (fromName || null) : (existing?.fromName ?? null);
+    const resolvedMgDomain = mailgunDomain !== undefined ? (mailgunDomain || null) : (existing?.mailgunDomain ?? null);
+    const resolvedMgRegion = mailgunRegion || existing?.mailgunRegion || 'us';
 
-    // Can't default to SendGrid without a resolvable key + from address.
+    // Validate the chosen provider has what it needs to actually send.
     if (resolvedProvider === 'sendgrid') {
-      if (!keyToStore && !process.env.SENDGRID_API_KEY) {
-        return res.status(400).json({ error: 'Add a SendGrid API key before setting SendGrid as the default provider.' });
+      if (!sendgridKeyToStore && !process.env.SENDGRID_API_KEY) {
+        return res.status(400).json({ error: 'Add a SendGrid API key before choosing SendGrid.' });
       }
       if (!resolvedFromEmail && !process.env.SENDGRID_FROM_EMAIL) {
         return res.status(400).json({ error: 'Set a From Email (verified in SendGrid) before using SendGrid.' });
       }
     }
+    if (resolvedProvider === 'mailgun') {
+      if (!mailgunKeyToStore && !process.env.MAILGUN_API_KEY) {
+        return res.status(400).json({ error: 'Add a Mailgun API key before choosing Mailgun.' });
+      }
+      if (!resolvedMgDomain && !process.env.MAILGUN_DOMAIN) {
+        return res.status(400).json({ error: 'Set your Mailgun sending domain before using Mailgun.' });
+      }
+      if (!resolvedFromEmail && !process.env.MAILGUN_FROM_EMAIL) {
+        return res.status(400).json({ error: 'Set a From Email on your Mailgun domain before using Mailgun.' });
+      }
+    }
 
     if (existing) {
       await query(
-        `UPDATE email_settings SET provider = $1, "sendgridApiKey" = $2, "fromEmail" = $3, "fromName" = $4,
-           "isActive" = true, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $5`,
-        [resolvedProvider, keyToStore, resolvedFromEmail, resolvedFromName, existing.id]
+        `UPDATE email_settings SET provider = $1, "sendgridApiKey" = $2,
+           "mailgunApiKey" = $3, "mailgunDomain" = $4, "mailgunRegion" = $5,
+           "fromEmail" = $6, "fromName" = $7, "isActive" = true, "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $8`,
+        [resolvedProvider, sendgridKeyToStore, mailgunKeyToStore, resolvedMgDomain, resolvedMgRegion,
+         resolvedFromEmail, resolvedFromName, existing.id]
       );
     } else {
       await query(
-        `INSERT INTO email_settings ("locationId", provider, "sendgridApiKey", "fromEmail", "fromName")
-         VALUES ($1, $2, $3, $4, $5)`,
-        [locId, resolvedProvider, keyToStore, resolvedFromEmail, resolvedFromName]
+        `INSERT INTO email_settings ("locationId", provider, "sendgridApiKey",
+           "mailgunApiKey", "mailgunDomain", "mailgunRegion", "fromEmail", "fromName")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [locId, resolvedProvider, sendgridKeyToStore, mailgunKeyToStore, resolvedMgDomain, resolvedMgRegion,
+         resolvedFromEmail, resolvedFromName]
       );
     }
 

@@ -1154,8 +1154,11 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS email_settings (
         id SERIAL PRIMARY KEY,
         "locationId" INTEGER REFERENCES locations(id),
-        provider TEXT DEFAULT 'smtp' CHECK (provider IN ('smtp','sendgrid')),
+        provider TEXT DEFAULT 'smtp' CHECK (provider IN ('smtp','sendgrid','mailgun')),
         "sendgridApiKey" TEXT,
+        "mailgunApiKey" TEXT,
+        "mailgunDomain" TEXT,
+        "mailgunRegion" TEXT DEFAULT 'us',
         "fromEmail" TEXT,
         "fromName" TEXT,
         "isActive" BOOLEAN DEFAULT true,
@@ -1163,11 +1166,22 @@ async function initializeDatabase() {
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // Migrations for existing email_settings tables: Mailgun columns + widen the
+    // provider CHECK to include 'mailgun'.
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "mailgunApiKey" TEXT`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "mailgunDomain" TEXT`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "mailgunRegion" TEXT DEFAULT 'us'`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE email_settings DROP CONSTRAINT IF EXISTS email_settings_provider_check;
+        ALTER TABLE email_settings ADD CONSTRAINT email_settings_provider_check CHECK (provider IN ('smtp','sendgrid','mailgun'));
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
     // Seed the org-wide row's provider from the legacy app_settings default (if any).
     await client.query(`
       INSERT INTO email_settings ("locationId", provider)
       SELECT NULL, value FROM app_settings
-      WHERE key = 'email_default_esp' AND value IN ('smtp','sendgrid')
+      WHERE key = 'email_default_esp' AND value IN ('smtp','sendgrid','mailgun')
         AND NOT EXISTS (SELECT 1 FROM email_settings WHERE "locationId" IS NULL)
     `);
 

@@ -5,15 +5,32 @@ import { decryptSecret, isEncrypted } from '../utils/crypto';
 // default). Mirrors services/stripe.ts. DB values win; env vars are the
 // fallback so single-tenant deployments keep working with no DB row.
 
+export type EmailProvider = 'smtp' | 'sendgrid' | 'mailgun';
+
 export interface EmailConfig {
-  provider: 'smtp' | 'sendgrid';
+  provider: EmailProvider;
   fromEmail: string | null;
   fromName: string | null;
   sendgrid: { apiKey: string | null; configured: boolean };
+  mailgun: { apiKey: string | null; domain: string | null; region: string; configured: boolean };
   smtp: {
     host?: string; port: number; secure: boolean;
     user?: string; pass?: string; configured: boolean;
   };
+}
+
+// Decrypt a stored secret value, tolerating plaintext/legacy values.
+function resolveSecret(stored: string | null | undefined, envFallback?: string): string | null {
+  let val: string | null = null;
+  if (stored) {
+    try {
+      val = isEncrypted(stored) ? decryptSecret(stored) : stored;
+    } catch (error) {
+      console.error('Failed to decrypt email secret — check APP_ENCRYPTION_KEY:', error);
+      val = null;
+    }
+  }
+  return val || envFallback || null;
 }
 
 // Small cache keyed by locationId ('global' for null). Invalidated on save.
@@ -47,26 +64,25 @@ export async function getEmailConfig(locationId?: number): Promise<EmailConfig> 
     console.error('Error loading email_settings:', error);
   }
 
-  // Resolve the SendGrid key: DB (decrypt if encrypted) → env.
-  let sendgridApiKey: string | null = null;
-  if (row?.sendgridApiKey) {
-    try {
-      sendgridApiKey = isEncrypted(row.sendgridApiKey) ? decryptSecret(row.sendgridApiKey) : row.sendgridApiKey;
-    } catch (error) {
-      console.error('Failed to decrypt SendGrid key — check APP_ENCRYPTION_KEY:', error);
-      sendgridApiKey = null;
-    }
-  }
-  if (!sendgridApiKey) sendgridApiKey = process.env.SENDGRID_API_KEY || null;
+  // Resolve provider secrets: DB (decrypt if encrypted) → env fallback.
+  const sendgridApiKey = resolveSecret(row?.sendgridApiKey, process.env.SENDGRID_API_KEY);
+  const mailgunApiKey = resolveSecret(row?.mailgunApiKey, process.env.MAILGUN_API_KEY);
+  const mailgunDomain = row?.mailgunDomain || process.env.MAILGUN_DOMAIN || null;
+  const mailgunRegion = row?.mailgunRegion || process.env.MAILGUN_REGION || 'us';
 
-  const provider: 'smtp' | 'sendgrid' = row?.provider === 'sendgrid' ? 'sendgrid' : 'smtp';
+  const provider: EmailProvider =
+    row?.provider === 'sendgrid' ? 'sendgrid' :
+    row?.provider === 'mailgun' ? 'mailgun' : 'smtp';
 
-  const fromEmail = row?.fromEmail
-    || (provider === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL : process.env.SMTP_FROM_EMAIL)
-    || null;
-  const fromName = row?.fromName
-    || (provider === 'sendgrid' ? process.env.SENDGRID_FROM_NAME : process.env.SMTP_FROM_NAME)
-    || null;
+  const fromEnv = provider === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL
+    : provider === 'mailgun' ? process.env.MAILGUN_FROM_EMAIL
+    : process.env.SMTP_FROM_EMAIL;
+  const fromNameEnv = provider === 'sendgrid' ? process.env.SENDGRID_FROM_NAME
+    : provider === 'mailgun' ? process.env.MAILGUN_FROM_NAME
+    : process.env.SMTP_FROM_NAME;
+
+  const fromEmail = row?.fromEmail || fromEnv || null;
+  const fromName = row?.fromName || fromNameEnv || null;
 
   const config: EmailConfig = {
     provider,
@@ -75,6 +91,12 @@ export async function getEmailConfig(locationId?: number): Promise<EmailConfig> 
     sendgrid: {
       apiKey: sendgridApiKey,
       configured: !!(sendgridApiKey && (row?.fromEmail || process.env.SENDGRID_FROM_EMAIL)),
+    },
+    mailgun: {
+      apiKey: mailgunApiKey,
+      domain: mailgunDomain,
+      region: mailgunRegion,
+      configured: !!(mailgunApiKey && mailgunDomain),
     },
     smtp: {
       host: process.env.SMTP_HOST,
