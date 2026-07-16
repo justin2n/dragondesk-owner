@@ -5,7 +5,7 @@ import { decryptSecret, isEncrypted } from '../utils/crypto';
 // default). Mirrors services/stripe.ts. DB values win; env vars are the
 // fallback so single-tenant deployments keep working with no DB row.
 
-export type EmailProvider = 'smtp' | 'sendgrid' | 'mailgun';
+export type EmailProvider = 'smtp' | 'sendgrid' | 'mailgun' | 'ses';
 
 export interface EmailConfig {
   provider: EmailProvider;
@@ -13,6 +13,7 @@ export interface EmailConfig {
   fromName: string | null;
   sendgrid: { apiKey: string | null; configured: boolean };
   mailgun: { apiKey: string | null; domain: string | null; region: string; configured: boolean };
+  ses: { accessKeyId: string | null; secretAccessKey: string | null; region: string | null; configured: boolean };
   smtp: {
     host?: string; port: number; secure: boolean;
     user?: string; pass?: string; configured: boolean;
@@ -70,15 +71,22 @@ export async function getEmailConfig(locationId?: number): Promise<EmailConfig> 
   const mailgunDomain = row?.mailgunDomain || process.env.MAILGUN_DOMAIN || null;
   const mailgunRegion = row?.mailgunRegion || process.env.MAILGUN_REGION || 'us';
 
+  const sesAccessKeyId = row?.sesAccessKeyId || process.env.AWS_ACCESS_KEY_ID || null;
+  const sesSecretAccessKey = resolveSecret(row?.sesSecretAccessKey, process.env.AWS_SECRET_ACCESS_KEY);
+  const sesRegion = row?.sesRegion || process.env.AWS_SES_REGION || process.env.AWS_REGION || null;
+
   const provider: EmailProvider =
     row?.provider === 'sendgrid' ? 'sendgrid' :
-    row?.provider === 'mailgun' ? 'mailgun' : 'smtp';
+    row?.provider === 'mailgun' ? 'mailgun' :
+    row?.provider === 'ses' ? 'ses' : 'smtp';
 
   const fromEnv = provider === 'sendgrid' ? process.env.SENDGRID_FROM_EMAIL
     : provider === 'mailgun' ? process.env.MAILGUN_FROM_EMAIL
+    : provider === 'ses' ? process.env.SES_FROM_EMAIL
     : process.env.SMTP_FROM_EMAIL;
   const fromNameEnv = provider === 'sendgrid' ? process.env.SENDGRID_FROM_NAME
     : provider === 'mailgun' ? process.env.MAILGUN_FROM_NAME
+    : provider === 'ses' ? process.env.SES_FROM_NAME
     : process.env.SMTP_FROM_NAME;
 
   const fromEmail = row?.fromEmail || fromEnv || null;
@@ -97,6 +105,12 @@ export async function getEmailConfig(locationId?: number): Promise<EmailConfig> 
       domain: mailgunDomain,
       region: mailgunRegion,
       configured: !!(mailgunApiKey && mailgunDomain),
+    },
+    ses: {
+      accessKeyId: sesAccessKeyId,
+      secretAccessKey: sesSecretAccessKey,
+      region: sesRegion,
+      configured: !!(sesAccessKeyId && sesSecretAccessKey && sesRegion),
     },
     smtp: {
       host: process.env.SMTP_HOST,

@@ -7,6 +7,7 @@ import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth'
 import { getDKIMConfig, extractDomain } from '../utils/dkim-signer';
 import { sendViaSendgrid } from '../services/sendgrid';
 import { sendViaMailgun } from '../services/mailgun';
+import { sendViaSes } from '../services/ses';
 import { getEmailConfig, invalidateEmailConfigCache, EmailConfig } from '../services/emailConfig';
 import { encryptSecret, isEncryptionConfigured } from '../utils/crypto';
 
@@ -40,6 +41,18 @@ async function deliver(
       apiKey: cfg.mailgun.apiKey || '',
       domain: cfg.mailgun.domain || '',
       region: cfg.mailgun.region,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      fromEmail: cfg.fromEmail || '',
+      fromName: cfg.fromName || undefined,
+    });
+  }
+  if (cfg.provider === 'ses') {
+    return await sendViaSes({
+      accessKeyId: cfg.ses.accessKeyId || '',
+      secretAccessKey: cfg.ses.secretAccessKey || '',
+      region: cfg.ses.region || '',
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
@@ -132,6 +145,10 @@ async function settingsView(locationId?: number) {
     mailgunDomain: cfg.mailgun.domain,
     mailgunRegion: cfg.mailgun.region,
     mailgunConfigured: cfg.mailgun.configured,
+    sesAccessKeyId: cfg.ses.accessKeyId,
+    sesSecretAccessKey: cfg.ses.secretAccessKey ? MASK : null,
+    sesRegion: cfg.ses.region,
+    sesConfigured: cfg.ses.configured,
     smtpConfigured: cfg.smtp.configured,
     encryptionConfigured: isEncryptionConfigured(),
   };
@@ -147,11 +164,12 @@ router.get('/settings', async (req: AuthRequest, res) => {
 router.put('/settings', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
   try {
     const { locationId, provider, fromEmail, fromName, sendgridApiKey,
-            mailgunApiKey, mailgunDomain, mailgunRegion } = req.body;
+            mailgunApiKey, mailgunDomain, mailgunRegion,
+            sesAccessKeyId, sesSecretAccessKey, sesRegion } = req.body;
     const locId: number | null = locationId ? Number(locationId) : null;
 
-    if (provider && !['smtp', 'sendgrid', 'mailgun'].includes(provider)) {
-      return res.status(400).json({ error: "provider must be 'smtp', 'sendgrid', or 'mailgun'" });
+    if (provider && !['smtp', 'sendgrid', 'mailgun', 'ses'].includes(provider)) {
+      return res.status(400).json({ error: "provider must be 'smtp', 'sendgrid', 'mailgun', or 'ses'" });
     }
 
     const existing = locId
@@ -169,9 +187,11 @@ router.put('/settings', requireRole(['super_admin', 'admin']), async (req: AuthR
 
     let sendgridKeyToStore: string | null;
     let mailgunKeyToStore: string | null;
+    let sesSecretToStore: string | null;
     try {
       sendgridKeyToStore = resolveKey(sendgridApiKey, existing?.sendgridApiKey ?? null);
       mailgunKeyToStore = resolveKey(mailgunApiKey, existing?.mailgunApiKey ?? null);
+      sesSecretToStore = resolveKey(sesSecretAccessKey, existing?.sesSecretAccessKey ?? null);
     } catch {
       return res.status(400).json({ error: 'Set APP_ENCRYPTION_KEY (32-byte hex/base64) before storing an API key.' });
     }
@@ -181,6 +201,9 @@ router.put('/settings', requireRole(['super_admin', 'admin']), async (req: AuthR
     const resolvedFromName = fromName !== undefined ? (fromName || null) : (existing?.fromName ?? null);
     const resolvedMgDomain = mailgunDomain !== undefined ? (mailgunDomain || null) : (existing?.mailgunDomain ?? null);
     const resolvedMgRegion = mailgunRegion || existing?.mailgunRegion || 'us';
+    // SES access key id + region are not secret (like a username) — stored plaintext.
+    const resolvedSesKeyId = sesAccessKeyId !== undefined ? (sesAccessKeyId || null) : (existing?.sesAccessKeyId ?? null);
+    const resolvedSesRegion = sesRegion !== undefined ? (sesRegion || null) : (existing?.sesRegion ?? null);
 
     // Validate the chosen provider has what it needs to actually send.
     if (resolvedProvider === 'sendgrid') {
@@ -202,23 +225,37 @@ router.put('/settings', requireRole(['super_admin', 'admin']), async (req: AuthR
         return res.status(400).json({ error: 'Set a From Email on your Mailgun domain before using Mailgun.' });
       }
     }
+    if (resolvedProvider === 'ses') {
+      if ((!resolvedSesKeyId && !process.env.AWS_ACCESS_KEY_ID) || (!sesSecretToStore && !process.env.AWS_SECRET_ACCESS_KEY)) {
+        return res.status(400).json({ error: 'Add your AWS access key ID and secret access key before choosing SES.' });
+      }
+      if (!resolvedSesRegion && !process.env.AWS_SES_REGION && !process.env.AWS_REGION) {
+        return res.status(400).json({ error: 'Set your SES region (e.g. us-east-1) before using SES.' });
+      }
+      if (!resolvedFromEmail && !process.env.SES_FROM_EMAIL) {
+        return res.status(400).json({ error: 'Set a From Email verified as an SES identity before using SES.' });
+      }
+    }
 
     if (existing) {
       await query(
         `UPDATE email_settings SET provider = $1, "sendgridApiKey" = $2,
            "mailgunApiKey" = $3, "mailgunDomain" = $4, "mailgunRegion" = $5,
-           "fromEmail" = $6, "fromName" = $7, "isActive" = true, "updatedAt" = CURRENT_TIMESTAMP
-         WHERE id = $8`,
+           "sesAccessKeyId" = $6, "sesSecretAccessKey" = $7, "sesRegion" = $8,
+           "fromEmail" = $9, "fromName" = $10, "isActive" = true, "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $11`,
         [resolvedProvider, sendgridKeyToStore, mailgunKeyToStore, resolvedMgDomain, resolvedMgRegion,
+         resolvedSesKeyId, sesSecretToStore, resolvedSesRegion,
          resolvedFromEmail, resolvedFromName, existing.id]
       );
     } else {
       await query(
         `INSERT INTO email_settings ("locationId", provider, "sendgridApiKey",
-           "mailgunApiKey", "mailgunDomain", "mailgunRegion", "fromEmail", "fromName")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+           "mailgunApiKey", "mailgunDomain", "mailgunRegion",
+           "sesAccessKeyId", "sesSecretAccessKey", "sesRegion", "fromEmail", "fromName")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [locId, resolvedProvider, sendgridKeyToStore, mailgunKeyToStore, resolvedMgDomain, resolvedMgRegion,
-         resolvedFromEmail, resolvedFromName]
+         resolvedSesKeyId, sesSecretToStore, resolvedSesRegion, resolvedFromEmail, resolvedFromName]
       );
     }
 
@@ -324,8 +361,9 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
 
     console.log(`Test email sent via ${cfg.provider}:`, info.messageId);
 
+    const providerLabel: Record<string, string> = { sendgrid: 'SendGrid', mailgun: 'Mailgun', ses: 'Amazon SES', smtp: 'SMTP' };
     res.json({
-      message: `Test email sent successfully via ${cfg.provider === 'sendgrid' ? 'SendGrid' : 'SMTP'}`,
+      message: `Test email sent successfully via ${providerLabel[cfg.provider] || cfg.provider}`,
       messageId: info.messageId,
     });
   } catch (error: any) {

@@ -391,6 +391,7 @@ const Settings = () => {
   const [emailForm, setEmailForm] = useState({
     provider: 'smtp', fromEmail: '', fromName: '',
     sendgridApiKey: '', mailgunApiKey: '', mailgunDomain: '', mailgunRegion: 'us',
+    sesAccessKeyId: '', sesSecretAccessKey: '', sesRegion: '',
   });
   const [emailSaving, setEmailSaving] = useState(false);
 
@@ -703,6 +704,7 @@ const Settings = () => {
         provider: d.provider || 'smtp', fromEmail: d.fromEmail || '', fromName: d.fromName || '',
         sendgridApiKey: '', mailgunApiKey: '',
         mailgunDomain: d.mailgunDomain || '', mailgunRegion: d.mailgunRegion || 'us',
+        sesAccessKeyId: d.sesAccessKeyId || '', sesSecretAccessKey: '', sesRegion: d.sesRegion || '',
       });
     }).catch(() => {});
     // Load SendGrid admin email config status
@@ -803,9 +805,12 @@ const Settings = () => {
         fromName: emailForm.fromName,
         mailgunDomain: emailForm.mailgunDomain,
         mailgunRegion: emailForm.mailgunRegion,
+        sesAccessKeyId: emailForm.sesAccessKeyId,
+        sesRegion: emailForm.sesRegion,
       };
       if (emailForm.sendgridApiKey.trim()) payload.sendgridApiKey = emailForm.sendgridApiKey.trim();
       if (emailForm.mailgunApiKey.trim()) payload.mailgunApiKey = emailForm.mailgunApiKey.trim();
+      if (emailForm.sesSecretAccessKey.trim()) payload.sesSecretAccessKey = emailForm.sesSecretAccessKey.trim();
 
       const updated = await api.put('/email/settings', payload);
       setEmailSettings(updated);
@@ -813,6 +818,7 @@ const Settings = () => {
         provider: updated.provider || 'smtp', fromEmail: updated.fromEmail || '', fromName: updated.fromName || '',
         sendgridApiKey: '', mailgunApiKey: '',
         mailgunDomain: updated.mailgunDomain || '', mailgunRegion: updated.mailgunRegion || 'us',
+        sesAccessKeyId: updated.sesAccessKeyId || '', sesSecretAccessKey: '', sesRegion: updated.sesRegion || '',
       });
       showSaveMessage('Email settings saved');
     } catch (error: any) {
@@ -2292,6 +2298,7 @@ const Settings = () => {
                       <option value="smtp">SMTP{emailSettings?.smtpConfigured ? '' : ' (not configured)'}</option>
                       <option value="sendgrid">SendGrid{emailSettings?.sendgridConfigured ? '' : ' (needs API key + from)'}</option>
                       <option value="mailgun">Mailgun{emailSettings?.mailgunConfigured ? '' : ' (needs API key + domain)'}</option>
+                      <option value="ses">Amazon SES{emailSettings?.sesConfigured ? '' : ' (needs access keys + region)'}</option>
                     </select>
                   </div>
                 </div>
@@ -2381,6 +2388,50 @@ const Settings = () => {
                   </>
                 )}
 
+                {/* Amazon SES-specific */}
+                {emailForm.provider === 'ses' && (
+                  <>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>AWS Access Key ID</label>
+                        <input
+                          type="text"
+                          value={emailForm.sesAccessKeyId}
+                          onChange={(e) => setEmailForm({ ...emailForm, sesAccessKeyId: e.target.value })}
+                          className={styles.input}
+                          placeholder="AKIA…"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>Region</label>
+                        <input
+                          type="text"
+                          value={emailForm.sesRegion}
+                          onChange={(e) => setEmailForm({ ...emailForm, sesRegion: e.target.value })}
+                          className={styles.input}
+                          placeholder="e.g., us-east-1"
+                        />
+                      </div>
+                    </div>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>
+                          AWS Secret Access Key {emailSettings?.sesSecretAccessKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                        </label>
+                        <input
+                          type="password"
+                          value={emailForm.sesSecretAccessKey}
+                          onChange={(e) => setEmailForm({ ...emailForm, sesSecretAccessKey: e.target.value })}
+                          className={styles.input}
+                          placeholder={emailSettings?.sesSecretAccessKey ? '••••••••  (leave blank to keep current key)' : 'wJalrXUtn…'}
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 {emailSettings && !emailSettings.encryptionConfigured && emailForm.provider !== 'smtp' && (
                   <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
                     Set APP_ENCRYPTION_KEY (Railway) before saving an API key — it's encrypted at rest.
@@ -2414,6 +2465,17 @@ const Settings = () => {
                     <li>Add the DNS records Mailgun provides (TXT/SPF/DKIM + MX) to your domain, then verify.</li>
                     <li>Copy your <strong>Sending API key</strong> (Mailgun → API Keys) and paste it above.</li>
                     <li>Enter the sending domain, pick your region (US/EU), and set <strong>From Email</strong> to an address on that domain.</li>
+                  </ol>
+                </div>
+              )}
+              {emailForm.provider === 'ses' && (
+                <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                  <h3 className={styles.subsectionTitle}>Use your own domain (Amazon SES)</h3>
+                  <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>In the AWS SES console (your chosen region): <strong>Verified identities → Create identity</strong> and verify your domain (add the DKIM CNAMEs to DNS) or a single email address.</li>
+                    <li>If your account is in the SES sandbox, request <strong>production access</strong> to send to unverified recipients.</li>
+                    <li>Create an IAM user with the <strong>ses:SendEmail</strong> permission and generate an access key. Paste the Access Key ID + Secret Access Key above and set the Region (e.g. <code>us-east-1</code>).</li>
+                    <li>Set <strong>From Email</strong> to a verified SES identity (an address on your verified domain).</li>
                   </ol>
                 </div>
               )}
