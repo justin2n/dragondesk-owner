@@ -400,6 +400,30 @@ router.get('/send-campaign/:campaignId/preview', requireRole(['super_admin', 'ad
   }
 });
 
+// Full recipient list a campaign would email — the exact set the send uses.
+// Powers the "Preview Recipients" view so you can eyeball who receives it.
+router.get('/send-campaign/:campaignId/recipients', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
+  try {
+    const campaign = await get(`SELECT * FROM campaigns WHERE id = ? AND type = 'email'`, [req.params.campaignId]);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const resolved = await resolveAudienceMembers(campaign.audienceId, {
+      columns: 'id, firstName, lastName, email, accountStatus, programType',
+    });
+    if (!resolved) return res.status(404).json({ error: 'Audience not found' });
+
+    const recipients = resolved.members.filter((m: any) => m.email && String(m.email).trim());
+    res.json({
+      recipientCount: recipients.length,
+      totalMatched: resolved.members.length,
+      filterCount: resolved.filterCount,
+      recipients,
+    });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
 // Send campaign to the campaign's audience
 router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
   try {

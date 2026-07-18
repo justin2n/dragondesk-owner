@@ -42,6 +42,12 @@ const DragonDeskEngage = () => {
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
   const [editingSMSCampaign, setEditingSMSCampaign] = useState<SMSCampaign | null>(null);
 
+  // "Preview Recipients" modal — shows exactly who a campaign would email.
+  const [previewCampaign, setPreviewCampaign] = useState<Campaign | null>(null);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewSearch, setPreviewSearch] = useState('');
+
   const [formData, setFormData] = useState({
     name: '',
     audienceId: '',
@@ -206,6 +212,22 @@ const DragonDeskEngage = () => {
       loadData();
     } catch (error: any) {
       toast(error.message || 'Failed to send campaign', 'error');
+    }
+  };
+
+  const openRecipientPreview = async (campaign: Campaign) => {
+    setPreviewCampaign(campaign);
+    setPreviewData(null);
+    setPreviewSearch('');
+    setPreviewLoading(true);
+    try {
+      const data = await api.get(`/email/send-campaign/${campaign.id}/recipients`);
+      setPreviewData(data);
+    } catch (error: any) {
+      toast(error.message || 'Failed to load recipients', 'error');
+      setPreviewCampaign(null);
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -538,6 +560,9 @@ const DragonDeskEngage = () => {
                   )}
                 </div>
                 <div className={styles.cardFooter}>
+                  <button onClick={() => openRecipientPreview(campaign)} className={styles.editBtn}>
+                    Preview Recipients
+                  </button>
                   {!campaign.sent && (
                     <button onClick={() => handleSendCampaign(campaign)} className={styles.sendBtn}>
                       Send Campaign
@@ -553,6 +578,92 @@ const DragonDeskEngage = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Preview Recipients modal — the exact set the send will email */}
+      {previewCampaign && (
+        <div
+          onClick={() => setPreviewCampaign(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--color-dark-grey, #1a1a2e)', border: '1px solid var(--color-border, #333)', borderRadius: 10, width: 'min(640px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', color: 'var(--color-text-primary, #eee)' }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Recipients — {previewCampaign.name}</h3>
+              <button onClick={() => setPreviewCampaign(null)} style={{ background: 'none', border: 'none', color: 'inherit', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+
+            {previewLoading ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-secondary, #999)' }}>Loading recipients…</div>
+            ) : previewData && (() => {
+              const audience = audiences.find((a) => a.id === previewCampaign.audienceId);
+              const all = previewData.recipients || [];
+              const q = previewSearch.trim().toLowerCase();
+              const filtered = q
+                ? all.filter((r: any) => `${r.firstName} ${r.lastName} ${r.email}`.toLowerCase().includes(q))
+                : all;
+              const skipped = (previewData.totalMatched || 0) - (previewData.recipientCount || 0);
+              return (
+                <>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--color-border, #333)' }}>
+                    <div style={{ fontSize: '0.95rem' }}>
+                      <strong>{previewData.recipientCount}</strong> will be emailed{audience ? <> in <strong>"{audience.name}"</strong></> : ''}.
+                    </div>
+                    {previewData.filterCount === 0 && (
+                      <div style={{ color: '#f59e0b', fontSize: '0.85rem', marginTop: 4 }}>⚠ This audience has NO filters — it targets EVERY member.</div>
+                    )}
+                    {skipped > 0 && (
+                      <div style={{ color: 'var(--color-text-secondary, #999)', fontSize: '0.85rem', marginTop: 4 }}>{skipped} matched but have no email and will be skipped.</div>
+                    )}
+                    <input
+                      value={previewSearch}
+                      onChange={(e) => setPreviewSearch(e.target.value)}
+                      placeholder="Search name or email…"
+                      style={{ marginTop: 10, width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--color-border, #333)', background: 'var(--color-bg, #12121f)', color: 'inherit', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {filtered.length === 0 ? (
+                      <div style={{ padding: 20, color: 'var(--color-text-secondary, #999)' }}>No matching recipients.</div>
+                    ) : (
+                      filtered.map((r: any) => (
+                        <div key={r.id} style={{ padding: '8px 20px', borderBottom: '1px solid var(--color-border, #222)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: '0.9rem' }}>{r.firstName} {r.lastName}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary, #999)' }}>{r.email}</div>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary, #999)', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            {r.accountStatus}{r.programType && r.programType !== 'No Program Selected' ? ` • ${r.programType}` : ''}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div style={{ padding: '12px 20px', borderTop: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary, #999)' }}>
+                      {q ? `${filtered.length} of ${all.length} shown` : `${all.length} total`}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => setPreviewCampaign(null)} className={styles.editBtn}>Close</button>
+                      {!previewCampaign.sent && (
+                        <button
+                          className={styles.sendBtn}
+                          onClick={() => { const c = previewCampaign; setPreviewCampaign(null); handleSendCampaign(c); }}
+                        >
+                          Send to {previewData.recipientCount}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
     </>
