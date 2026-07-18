@@ -448,15 +448,15 @@ const DragonDeskEngage = () => {
                     </>
                   )}
 
-                  {(campaign.sent || campaign.opens || campaign.clicks) && (
+                  {(campaign.status === 'completed' || campaign.sent || campaign.opens || campaign.clicks) && (
                     <div className={styles.analyticsSection}>
                       <div className={styles.analyticsHeader}>
                         <span className={styles.label}>Campaign Analytics</span>
                       </div>
                       <div className={styles.analyticsGrid}>
-                        {campaign.sent && (
+                        {(campaign.status === 'completed' || campaign.sent) && (
                           <div className={styles.analyticsItem}>
-                            <div className={styles.analyticsValue}>{campaign.sent}</div>
+                            <div className={styles.analyticsValue}>{campaign.sent || 0}</div>
                             <div className={styles.analyticsLabel}>Sent</div>
                           </div>
                         )}

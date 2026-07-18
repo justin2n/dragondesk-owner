@@ -490,7 +490,7 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
       `UPDATE campaigns SET sent = ?, delivered = ?, status = 'completed',
          opens = 0, "openRate" = 0, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
       [sent, sent, campaignId]
-    ).catch(() => {});
+    ).catch((e: any) => console.error('Failed to persist campaign send totals:', e?.message));
 
     res.json({
       message: 'Campaign sent',
