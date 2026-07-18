@@ -108,6 +108,160 @@ const PROGRAM_COLORS: Record<string, string> = {
 
 const CHART_COLORS = ['#dc2626', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899'];
 
+// Clicking a legend item hides/shows that series (or pie slice). Returns props to
+// spread onto a recharts <Legend> plus an isHidden(key) check.
+function useLegendToggle() {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const isHidden = (key?: string) => !!key && hidden.has(key);
+  const legendProps = (keyOf?: (o: any) => string | undefined) => ({
+    onClick: (o: any) => {
+      const key = (keyOf ? keyOf(o) : (o?.dataKey ?? o?.value)) as string | undefined;
+      if (!key) return;
+      setHidden(prev => {
+        const next = new Set(prev);
+        next.has(key) ? next.delete(key) : next.add(key);
+        return next;
+      });
+    },
+    formatter: (value: any, entry: any) => {
+      const key = (keyOf ? keyOf(entry) : (entry?.dataKey ?? entry?.value)) as string | undefined;
+      const off = isHidden(key);
+      return (
+        <span style={{ cursor: 'pointer', opacity: off ? 0.4 : 1, textDecoration: off ? 'line-through' : 'none' }}>
+          {value}
+        </span>
+      );
+    },
+    wrapperStyle: { cursor: 'pointer' } as React.CSSProperties,
+  });
+  return { isHidden, legendProps };
+}
+
+// Line/Bar/Area/Pie chart with legend-click filtering. Replaces the old inline
+// renderChart so every section's charts get selectable legends.
+const AnalyticsChart: React.FC<{
+  chartData: any[];
+  dataKeys: string[];
+  chartType: ChartType;
+  xAxisKey?: string;
+  isPercentage?: boolean;
+}> = ({ chartData, dataKeys, chartType, xAxisKey = 'month', isPercentage = false }) => {
+  const { isHidden, legendProps } = useLegendToggle();
+
+  if (chartType === 'pie') {
+    const aggregated = dataKeys.map((key, index) => ({
+      name: key.replace(/_/g, ' ').replace('volume', '').replace('active', ''),
+      value: chartData.reduce((sum, d) => sum + (d[key] || 0), 0),
+      color: CHART_COLORS[index % CHART_COLORS.length],
+    })).filter(item => item.value > 0);
+    const shown = aggregated.filter(a => !isHidden(a.name));
+    return (
+      <ResponsiveContainer width="100%" height={400}>
+        <PieChart>
+          <Pie
+            data={shown} cx="50%" cy="50%"
+            labelLine={(props: any) => (props.percent || 0) >= 0.05}
+            label={({ name, percent }) => (percent || 0) >= 0.05 ? `${name}: ${((percent || 0) * 100).toFixed(0)}%` : ''}
+            outerRadius={150} fill="#8884d8" dataKey="value"
+          >
+            {shown.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color} />))}
+          </Pie>
+          <Tooltip formatter={(value: any, name: any) => [value, name]} />
+          <Legend
+            payload={aggregated.map(a => ({ value: a.name, type: 'square', color: a.color, id: a.name }))}
+            {...legendProps((o: any) => o?.value ?? o?.id)}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  const ChartComponent = chartType === 'line' ? LineChart : chartType === 'bar' ? BarChart : AreaChart;
+  const DataComponent: any = chartType === 'line' ? Line : chartType === 'bar' ? Bar : Area;
+
+  return (
+    <ResponsiveContainer width="100%" height={400}>
+      <ChartComponent data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey={xAxisKey} stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }} />
+        <YAxis
+          stroke="var(--color-text-secondary)"
+          tick={{ fill: 'var(--color-text-secondary)' }}
+          tickFormatter={isPercentage ? (v) => `${v}%` : undefined}
+          domain={isPercentage ? [0, 100] : undefined}
+        />
+        <Tooltip
+          contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }}
+          formatter={isPercentage ? (value: any, name: any) => [`${Math.min(Number(value), 100).toFixed(1)}%`, name] : undefined}
+        />
+        <Legend {...legendProps()} />
+        {dataKeys.map((key, index) => (
+          <DataComponent
+            key={key}
+            type="monotone"
+            dataKey={key}
+            name={key.replace(/_conversionRate$/, '').replace(/_volume$/, '').replace(/_active$/, '').replace(/_/g, ' ')}
+            stroke={CHART_COLORS[index % CHART_COLORS.length]}
+            fill={CHART_COLORS[index % CHART_COLORS.length]}
+            fillOpacity={chartType === 'area' ? 0.3 : 1}
+            strokeWidth={2}
+            hide={isHidden(key)}
+          />
+        ))}
+      </ChartComponent>
+    </ResponsiveContainer>
+  );
+};
+
+// Pie with legend-click filtering, for the standalone (already-aggregated) pies.
+const TogglePie: React.FC<{
+  data: { name: string; value: number; color?: string }[];
+  height?: number;
+  showValueInLabel?: boolean;
+}> = ({ data, height = 300, showValueInLabel = false }) => {
+  const { isHidden, legendProps } = useLegendToggle();
+  const shown = data.filter(d => !isHidden(d.name));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <PieChart>
+        <Pie
+          data={shown} cx="50%" cy="50%"
+          labelLine={(props: any) => (props.percent || 0) >= 0.05}
+          label={({ name, value, percent }) => (percent || 0) >= 0.05
+            ? (showValueInLabel ? `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)` : `${name}: ${((percent || 0) * 100).toFixed(0)}%`)
+            : ''}
+          outerRadius={100} fill="#8884d8" dataKey="value"
+        >
+          {shown.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color || CHART_COLORS[index % CHART_COLORS.length]} />))}
+        </Pie>
+        <Tooltip />
+        <Legend
+          payload={data.map((d, i) => ({ value: d.name, type: 'square', color: d.color || CHART_COLORS[i % CHART_COLORS.length], id: d.name }))}
+          {...legendProps((o: any) => o?.value ?? o?.id)}
+        />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+};
+
+// Web "Daily Sessions" trend with legend-click filtering (sessions / new users).
+const DailySessionsChart: React.FC<{ data: any[] }> = ({ data }) => {
+  const { isHidden, legendProps } = useLegendToggle();
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey="date" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} tickFormatter={(d: any) => String(d).slice(5)} />
+        <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
+        <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+        <Legend {...legendProps()} />
+        <Area type="monotone" dataKey="sessions" name="Sessions" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} hide={isHidden('sessions')} />
+        <Area type="monotone" dataKey="newUsers" name="New Users" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} hide={isHidden('newUsers')} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+};
+
 const DragonDeskAnalytics = () => {
   const { selectedLocation, isAllLocations } = useLocation();
   const [data, setData] = useState<AnalyticsData | null>(null);
@@ -228,82 +382,15 @@ const DragonDeskAnalytics = () => {
     chartType: ChartType,
     xAxisKey: string = 'month',
     isPercentage: boolean = false
-  ) => {
-    if (chartType === 'pie') {
-      const aggregated = dataKeys.map((key, index) => ({
-        name: key.replace(/_/g, ' ').replace('volume', '').replace('active', ''),
-        value: chartData.reduce((sum, d) => sum + (d[key] || 0), 0),
-        color: CHART_COLORS[index % CHART_COLORS.length],
-      })).filter(item => item.value > 0);
-
-      return (
-        <ResponsiveContainer width="100%" height={400}>
-          <PieChart>
-            <Pie
-              data={aggregated}
-              cx="50%"
-              cy="50%"
-              labelLine={(props: any) => (props.percent || 0) >= 0.05}
-              label={({ name, percent }) => (percent || 0) >= 0.05 ? `${name}: ${((percent || 0) * 100).toFixed(0)}%` : ''}
-              outerRadius={150}
-              fill="#8884d8"
-              dataKey="value"
-            >
-              {aggregated.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value: any, name: any) => [value, name]} />
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    const ChartComponent = chartType === 'line' ? LineChart : chartType === 'bar' ? BarChart : AreaChart;
-    const DataComponent = chartType === 'line' ? Line : chartType === 'bar' ? Bar : Area;
-
-    return (
-      <ResponsiveContainer width="100%" height={400}>
-        <ChartComponent data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-          <XAxis
-            dataKey={xAxisKey}
-            stroke="var(--color-text-secondary)"
-            tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }}
-          />
-          <YAxis
-            stroke="var(--color-text-secondary)"
-            tick={{ fill: 'var(--color-text-secondary)' }}
-            tickFormatter={isPercentage ? (v) => `${v}%` : undefined}
-            domain={isPercentage ? [0, 100] : undefined}
-          />
-          <Tooltip
-            contentStyle={{
-              background: 'var(--color-dark-grey)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '6px',
-              color: 'var(--color-text-primary)',
-            }}
-            formatter={isPercentage ? (value: any, name: any) => [`${Math.min(Number(value), 100).toFixed(1)}%`, name] : undefined}
-          />
-          <Legend />
-          {dataKeys.map((key, index) => (
-            <DataComponent
-              key={key}
-              type="monotone"
-              dataKey={key}
-              name={key.replace(/_conversionRate$/, '').replace(/_volume$/, '').replace(/_active$/, '').replace(/_/g, ' ')}
-              stroke={CHART_COLORS[index % CHART_COLORS.length]}
-              fill={CHART_COLORS[index % CHART_COLORS.length]}
-              fillOpacity={chartType === 'area' ? 0.3 : 1}
-              strokeWidth={2}
-            />
-          ))}
-        </ChartComponent>
-      </ResponsiveContainer>
-    );
-  };
+  ) => (
+    <AnalyticsChart
+      chartData={chartData}
+      dataKeys={dataKeys}
+      chartType={chartType}
+      xAxisKey={xAxisKey}
+      isPercentage={isPercentage}
+    />
+  );
 
   const renderTrialsSection = () => {
     if (!data) return null;
@@ -492,29 +579,17 @@ const DragonDeskAnalytics = () => {
               <h3>Program Distribution</h3>
               <p>Active members by program</p>
             </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={data.programDistribution.filter((e: any) => e.value > 0)}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={(props: any) => (props.percent || 0) >= 0.05}
-                  label={({ name, value, percent }) => (percent || 0) >= 0.05 ? `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)` : ''}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {data.programDistribution.filter((e: any) => e.value > 0).map((entry: any, index: number) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={PROGRAM_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+            <TogglePie
+              height={300}
+              showValueInLabel
+              data={data.programDistribution
+                .filter((e: any) => e.value > 0)
+                .map((e: any, i: number) => ({
+                  name: e.name,
+                  value: e.value,
+                  color: PROGRAM_COLORS[e.name] || CHART_COLORS[i % CHART_COLORS.length],
+                }))}
+            />
           </div>
         )}
       </div>
@@ -700,18 +775,7 @@ const DragonDeskAnalytics = () => {
             <h3>Daily Sessions</h3>
             <p>Sessions and new users over the selected period</p>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={dailyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
-                tickFormatter={d => d.slice(5)} />
-              <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
-              <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
-              <Legend />
-              <Area type="monotone" dataKey="sessions" name="Sessions" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} />
-              <Area type="monotone" dataKey="newUsers" name="New Users" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+          <DailySessionsChart data={dailyTrend} />
         </div>
 
         <div className={styles.webTwoCol}>
