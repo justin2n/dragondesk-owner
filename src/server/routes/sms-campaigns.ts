@@ -2,6 +2,7 @@ import { serverError } from '../utils/errors';
 import express from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
+import { buildAudienceQuery } from '../utils/audienceMembers';
 
 const router = express.Router();
 
@@ -84,38 +85,13 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Audience not found' });
     }
 
-    // Parse filters and get members
+    // Resolve members via the shared audience resolver (same full filter set as
+    // email + the Audiences preview), then keep only those with a phone number.
     const filters = JSON.parse(audience.filters);
-    let whereConditions: string[] = [];
-    let params: any[] = [];
-
-    if (filters.accountStatus && filters.accountStatus.length > 0) {
-      whereConditions.push(`accountStatus IN (${filters.accountStatus.map(() => '?').join(',')})`);
-      params.push(...filters.accountStatus);
-    }
-    if (filters.programType && filters.programType.length > 0) {
-      whereConditions.push(`programType IN (${filters.programType.map(() => '?').join(',')})`);
-      params.push(...filters.programType);
-    }
-    if (filters.accountType && filters.accountType.length > 0) {
-      whereConditions.push(`accountType IN (${filters.accountType.map(() => '?').join(',')})`);
-      params.push(...filters.accountType);
-    }
-    if (filters.membershipAge && filters.membershipAge.length > 0) {
-      whereConditions.push(`membershipAge IN (${filters.membershipAge.map(() => '?').join(',')})`);
-      params.push(...filters.membershipAge);
-    }
-    if (filters.locationId) {
-      whereConditions.push('locationId = ?');
-      params.push(filters.locationId);
-    }
-
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-
-    // Only get members with phone numbers
+    const built = buildAudienceQuery(filters, { columns: 'id, phone, firstName, lastName', locationId });
     const members = await query(
-      `SELECT id, phone, firstName, lastName FROM members ${whereClause} AND phone IS NOT NULL AND phone != ''`,
-      params
+      `${built.sql} AND phone IS NOT NULL AND phone != ''`,
+      built.params
     );
 
     const recipientCount = members.length;

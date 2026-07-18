@@ -167,20 +167,35 @@ const DragonDeskEngage = () => {
     }
   };
 
-  const handleSendCampaign = async (campaign: Campaign) => {
-    const audience = audiences.find((a) => a.id === campaign.audienceId);
-    if (!await confirm({
-      title: 'Send Campaign',
-      message: `Send "${campaign.name}" to everyone in ${audience?.name || 'the selected audience'}? This emails real members and can't be undone.`,
-      confirmLabel: 'Send',
-    })) return;
+  const handleSendCampaign = async (campaign: Campaign, confirmAll = false) => {
+    if (!confirmAll) {
+      const audience = audiences.find((a) => a.id === campaign.audienceId);
+      if (!await confirm({
+        title: 'Send Campaign',
+        message: `Send "${campaign.name}" to the "${audience?.name || 'selected'}" audience? This emails real members and can't be undone.`,
+        confirmLabel: 'Send',
+      })) return;
+    }
 
     try {
-      const result = await api.post(`/email/send-campaign/${campaign.id}`, {});
+      const result = await api.post(`/email/send-campaign/${campaign.id}`, confirmAll ? { confirmSendAll: true } : {});
       toast(`Campaign sent — ${result.sent} delivered${result.failed ? `, ${result.failed} failed` : ''}.`, 'success');
       loadData();
     } catch (error: any) {
-      toast(error.message || 'Failed to send campaign', 'error');
+      const msg = error.message || 'Failed to send campaign';
+      // The server refuses a no-filter (all-members) audience unless confirmed.
+      if (!confirmAll && /email ALL|no filters|to everyone/i.test(msg)) {
+        if (await confirm({
+          title: 'Send to ALL members?',
+          message: `${msg} Are you absolutely sure you want to email every member?`,
+          confirmLabel: 'Send to everyone',
+          danger: true,
+        })) {
+          return handleSendCampaign(campaign, true);
+        }
+        return;
+      }
+      toast(msg, 'error');
     }
   };
 

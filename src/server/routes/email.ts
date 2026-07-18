@@ -9,6 +9,7 @@ import { sendViaSendgrid } from '../services/sendgrid';
 import { sendViaMailgun } from '../services/mailgun';
 import { sendViaSes } from '../services/ses';
 import { getEmailConfig, invalidateEmailConfigCache, EmailConfig } from '../services/emailConfig';
+import { resolveAudienceMembers } from '../utils/audienceMembers';
 import { encryptSecret, isEncryptionConfigured } from '../utils/crypto';
 
 const router = express.Router();
@@ -397,45 +398,32 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
       ? JSON.parse(campaign.content)
       : campaign.content;
 
-    // Get audience
-    const audience = await get('SELECT * FROM audiences WHERE id = ?', [campaign.audienceId]);
-
-    if (!audience) {
+    // Resolve the audience via the shared resolver so this ALWAYS applies the
+    // same full filter set as the Audiences preview (ranking, leadSource, tags,
+    // location, memberType, …) — never a partial filter that silently emails
+    // everyone.
+    const resolved = await resolveAudienceMembers(campaign.audienceId, {
+      columns: 'id, email, firstName, lastName, accountStatus',
+    });
+    if (!resolved) {
       return res.status(404).json({ error: 'Audience not found' });
     }
 
-    const filters = typeof audience.filters === 'string'
-      ? JSON.parse(audience.filters)
-      : audience.filters;
-
-    // Build query to get members based on audience filters
-    let sql = 'SELECT id, email, firstName, lastName, accountStatus FROM members WHERE 1=1';
-    const params: any[] = [];
-
-    if (filters.accountStatus && filters.accountStatus.length > 0) {
-      sql += ` AND accountStatus IN (${filters.accountStatus.map(() => '?').join(',')})`;
-      params.push(...filters.accountStatus);
+    // Fail closed: an audience with zero filters matches ALL members. Refuse
+    // unless the caller explicitly confirms an all-members send.
+    if (resolved.filterCount === 0 && !req.body.confirmSendAll) {
+      return res.status(400).json({
+        error: `This audience has no filters, so it would email ALL ${resolved.members.length} members. Refused — confirm to send to everyone.`,
+        requiresConfirmAll: true,
+        recipientCount: resolved.members.length,
+      });
     }
 
-    if (filters.accountType && filters.accountType.length > 0) {
-      sql += ` AND accountType IN (${filters.accountType.map(() => '?').join(',')})`;
-      params.push(...filters.accountType);
-    }
-
-    if (filters.programType && filters.programType.length > 0) {
-      sql += ` AND programType IN (${filters.programType.map(() => '?').join(',')})`;
-      params.push(...filters.programType);
-    }
-
-    if (filters.membershipAge && filters.membershipAge.length > 0) {
-      sql += ` AND membershipAge IN (${filters.membershipAge.map(() => '?').join(',')})`;
-      params.push(...filters.membershipAge);
-    }
-
-    const members = await query(sql, params);
+    // Only email members that actually have an address (participants may not).
+    const members = resolved.members.filter((m: any) => m.email && String(m.email).trim());
 
     if (members.length === 0) {
-      return res.status(400).json({ error: 'No members found in audience' });
+      return res.status(400).json({ error: 'No members with an email address matched this audience.' });
     }
 
     const cfg = await getEmailConfig();
