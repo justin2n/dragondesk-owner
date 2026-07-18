@@ -14,25 +14,15 @@ const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEA
 router.get('/open/:token', async (req: Request, res: Response) => {
   const { token } = req.params;
   try {
-    const r = await pool.query(
+    // Record the open on the recipient row. Campaign opens/open-rate are computed
+    // live from these rows on read (see routes/campaigns.ts), so nothing else to do.
+    await pool.query(
       `UPDATE campaign_recipients
          SET "openCount" = "openCount" + 1,
              "openedAt" = COALESCE("openedAt", CURRENT_TIMESTAMP)
-       WHERE token = $1
-       RETURNING "campaignId"`,
+       WHERE token = $1`,
       [token]
     );
-    const campaignId = r.rows[0]?.campaignId;
-    if (campaignId) {
-      await pool.query(
-        `UPDATE campaigns SET
-           opens = (SELECT COUNT(*) FROM campaign_recipients WHERE "campaignId" = $1 AND "openedAt" IS NOT NULL),
-           "openRate" = ROUND(100.0 * (SELECT COUNT(*) FROM campaign_recipients WHERE "campaignId" = $1 AND "openedAt" IS NOT NULL) / GREATEST(sent, 1)),
-           "updatedAt" = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [campaignId]
-      );
-    }
   } catch {
     // swallow — the pixel must always render
   }

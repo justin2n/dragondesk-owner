@@ -29,7 +29,7 @@ interface SMSCampaign {
 const DragonDeskEngage = () => {
   const { toast, confirm } = useToast();
   const { selectedLocation, isAllLocations } = useLocation();
-  const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'sms'>('campaigns');
+  const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'sms' | 'analytics'>('campaigns');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -1156,6 +1156,83 @@ const DragonDeskEngage = () => {
     );
   };
 
+  const renderAnalytics = () => {
+    const sentCampaigns = campaigns.filter((c) => (c.sent || 0) > 0 || c.status === 'completed');
+    const totalSent = sentCampaigns.reduce((s, c) => s + (c.sent || 0), 0);
+    const totalOpens = sentCampaigns.reduce((s, c) => s + (c.opens || 0), 0);
+    const totalConversions = sentCampaigns.reduce((s, c) => s + (c.conversions || 0), 0);
+    const avgOpenRate = totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0;
+
+    const kpis = [
+      { label: 'Campaigns Sent', value: String(sentCampaigns.length) },
+      { label: 'Emails Sent', value: totalSent.toLocaleString() },
+      { label: 'Total Opens', value: totalOpens.toLocaleString() },
+      { label: 'Avg Open Rate', value: `${avgOpenRate}%` },
+      { label: 'Conversions', value: totalConversions.toLocaleString() },
+    ];
+
+    const cardBg = 'var(--color-dark-grey, #1a1a2e)';
+    const border = '1px solid var(--color-border, #333)';
+    const dim = 'var(--color-text-secondary, #999)';
+    const th: React.CSSProperties = { padding: '8px 12px', fontWeight: 600, color: dim, fontSize: '0.8rem' };
+    const thR: React.CSSProperties = { ...th, textAlign: 'right' };
+    const td: React.CSSProperties = { padding: '10px 12px' };
+    const tdR: React.CSSProperties = { ...td, textAlign: 'right' };
+
+    return (
+      <div>
+        <h2 style={{ fontSize: '1.15rem', margin: '0 0 4px' }}>Email Performance</h2>
+        <p style={{ color: dim, fontSize: '0.9rem', margin: '0 0 20px' }}>Across all sent email campaigns.</p>
+
+        {sentCampaigns.length === 0 ? (
+          <div className={styles.emptyState}>
+            No sent campaigns yet — analytics appear here once you send a campaign.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 28 }}>
+              {kpis.map((k) => (
+                <div key={k.label} style={{ background: cardBg, border, borderRadius: 8, padding: '16px 18px' }}>
+                  <div style={{ fontSize: '1.7rem', fontWeight: 700, lineHeight: 1.1 }}>{k.value}</div>
+                  <div style={{ fontSize: '0.75rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>{k.label}</div>
+                </div>
+              ))}
+            </div>
+
+            <h3 style={{ fontSize: '1rem', margin: '0 0 10px' }}>Campaign Breakdown</h3>
+            <div style={{ overflowX: 'auto', border, borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: border, textAlign: 'left' }}>
+                    <th style={th}>Campaign</th>
+                    <th style={thR}>Sent</th>
+                    <th style={thR}>Opens</th>
+                    <th style={thR}>Open Rate</th>
+                    <th style={thR}>Conversions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sentCampaigns.map((c) => (
+                    <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border, #222)' }}>
+                      <td style={td}>{c.name}</td>
+                      <td style={tdR}>{(c.sent || 0).toLocaleString()}</td>
+                      <td style={tdR}>{(c.opens || 0).toLocaleString()}</td>
+                      <td style={tdR}>{c.openRate || 0}%</td>
+                      <td style={tdR}>{c.conversions || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: dim, marginTop: 12 }}>
+              Opens depend on the recipient's mail client loading images, so they're a floor, not exact. Click tracking (CTR) is not yet available.
+            </p>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -1185,6 +1262,12 @@ const DragonDeskEngage = () => {
           >
             Templates
           </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`${styles.tab} ${activeTab === 'analytics' ? styles.activeTab : ''}`}
+          >
+            Analytics
+          </button>
         </div>
       )}
 
@@ -1198,6 +1281,7 @@ const DragonDeskEngage = () => {
         {activeTab === 'templates' && (
           viewMode === 'list' ? renderTemplatesList() : renderTemplateEditor()
         )}
+        {activeTab === 'analytics' && renderAnalytics()}
       </div>
     </div>
   );
