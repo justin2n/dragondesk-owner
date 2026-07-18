@@ -167,35 +167,45 @@ const DragonDeskEngage = () => {
     }
   };
 
-  const handleSendCampaign = async (campaign: Campaign, confirmAll = false) => {
-    if (!confirmAll) {
-      const audience = audiences.find((a) => a.id === campaign.audienceId);
-      if (!await confirm({
-        title: 'Send Campaign',
-        message: `Send "${campaign.name}" to the "${audience?.name || 'selected'}" audience? This emails real members and can't be undone.`,
-        confirmLabel: 'Send',
-      })) return;
+  const handleSendCampaign = async (campaign: Campaign) => {
+    const audience = audiences.find((a) => a.id === campaign.audienceId);
+
+    // Resolve the EXACT recipient count the send will use, so the confirmation
+    // shows a real number (this is the safeguard against a wrong-audience blast).
+    let preview: any;
+    try {
+      preview = await api.get(`/email/send-campaign/${campaign.id}/preview`);
+    } catch (error: any) {
+      toast(error.message || 'Could not load the recipient count for this campaign', 'error');
+      return;
     }
 
+    const n = preview.recipientCount ?? 0;
+    if (n === 0) {
+      toast('No recipients with an email address match this audience.', 'error');
+      return;
+    }
+
+    const allMembers = preview.filterCount === 0;
+    const warn = allMembers
+      ? ' ⚠ This audience has NO filters, so it targets EVERY member.'
+      : '';
+    const skipped = preview.totalMatched > n ? ` (${preview.totalMatched - n} matched but have no email and will be skipped.)` : '';
+
+    if (!await confirm({
+      title: allMembers ? 'Send to ALL members?' : 'Send Campaign',
+      message: `This will email ${n} ${n === 1 ? 'person' : 'people'} in the "${audience?.name || 'selected'}" audience.${warn}${skipped} This sends real email and can't be undone.`,
+      confirmLabel: `Send to ${n}`,
+      danger: allMembers,
+    })) return;
+
     try {
-      const result = await api.post(`/email/send-campaign/${campaign.id}`, confirmAll ? { confirmSendAll: true } : {});
+      // Pass confirmSendAll only when the user knowingly confirmed a no-filter send.
+      const result = await api.post(`/email/send-campaign/${campaign.id}`, { confirmSendAll: allMembers });
       toast(`Campaign sent — ${result.sent} delivered${result.failed ? `, ${result.failed} failed` : ''}.`, 'success');
       loadData();
     } catch (error: any) {
-      const msg = error.message || 'Failed to send campaign';
-      // The server refuses a no-filter (all-members) audience unless confirmed.
-      if (!confirmAll && /email ALL|no filters|to everyone/i.test(msg)) {
-        if (await confirm({
-          title: 'Send to ALL members?',
-          message: `${msg} Are you absolutely sure you want to email every member?`,
-          confirmLabel: 'Send to everyone',
-          danger: true,
-        })) {
-          return handleSendCampaign(campaign, true);
-        }
-        return;
-      }
-      toast(msg, 'error');
+      toast(error.message || 'Failed to send campaign', 'error');
     }
   };
 

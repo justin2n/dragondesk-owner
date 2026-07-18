@@ -378,7 +378,29 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
   }
 });
 
-// Send campaign to all members in audience
+// Preview how many recipients a campaign would actually email — the exact set
+// the send uses (audience filters via the shared resolver + has an email). Used
+// to show the count in the send confirmation so it can never surprise you.
+router.get('/send-campaign/:campaignId/preview', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
+  try {
+    const campaign = await get(`SELECT * FROM campaigns WHERE id = ? AND type = 'email'`, [req.params.campaignId]);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const resolved = await resolveAudienceMembers(campaign.audienceId, { columns: 'id, email' });
+    if (!resolved) return res.status(404).json({ error: 'Audience not found' });
+
+    const withEmail = resolved.members.filter((m: any) => m.email && String(m.email).trim());
+    res.json({
+      recipientCount: withEmail.length,
+      totalMatched: resolved.members.length,
+      filterCount: resolved.filterCount, // 0 = audience has no filters (all members)
+    });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
+// Send campaign to the campaign's audience
 router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
   try {
     const { campaignId } = req.params;
