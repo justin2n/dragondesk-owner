@@ -674,4 +674,68 @@ router.get('/web/user/:clientId', authenticateToken, async (req: AuthRequest, re
   }
 });
 
+// Marketing attribution: leads/trialers/members grouped by channel and campaign,
+// from first-touch member_attribution. `leads` = attributed contacts acquired in
+// the window; convRate = members / leads.
+router.get('/attribution', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { locationId, months = '12' } = req.query;
+    const monthsBack = parseInt(months as string) || 12;
+    const start = new Date();
+    start.setMonth(start.getMonth() - monthsBack);
+
+    const params: any[] = [start.toISOString()];
+    let locFilter = '';
+    if (locationId && locationId !== 'all') {
+      params.push(locationId);
+      locFilter = `AND m."locationId" = $${params.length}::int`;
+    }
+    const base = `FROM member_attribution ma JOIN members m ON m.id = ma."memberId"
+                  WHERE m."createdAt" >= $1 ${locFilter}`;
+
+    const channelsRes = await pool.query(
+      `SELECT COALESCE(ma.channel, 'Direct') AS channel,
+         COUNT(*)::int AS leads,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'trialer')::int AS trialers,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'member')::int AS members
+       ${base}
+       GROUP BY COALESCE(ma.channel, 'Direct')
+       ORDER BY leads DESC`, params);
+
+    const campaignsRes = await pool.query(
+      `SELECT COALESCE(NULLIF(ma."utmCampaign", ''), '(no campaign)') AS campaign,
+         ma."utmSource" AS source, ma."utmMedium" AS medium,
+         COALESCE(ma.channel, 'Direct') AS channel,
+         COUNT(*)::int AS leads,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'trialer')::int AS trialers,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'member')::int AS members
+       ${base}
+       GROUP BY COALESCE(NULLIF(ma."utmCampaign", ''), '(no campaign)'), ma."utmSource", ma."utmMedium", COALESCE(ma.channel, 'Direct')
+       ORDER BY leads DESC`, params);
+
+    const withRate = (rows: any[]) => rows.map(r => ({
+      ...r, convRate: r.leads > 0 ? Math.round((r.members / r.leads) * 1000) / 10 : 0,
+    }));
+    const channels = withRate(channelsRes.rows);
+    const campaigns = withRate(campaignsRes.rows);
+
+    const attributedLeads = channels.reduce((s, c) => s + c.leads, 0);
+    const totalMembers = channels.reduce((s, c) => s + c.members, 0);
+
+    res.json({
+      kpis: {
+        attributedLeads,
+        members: totalMembers,
+        leadToMemberRate: attributedLeads > 0 ? Math.round((totalMembers / attributedLeads) * 1000) / 10 : 0,
+        topChannel: channels[0]?.channel || null,
+        topCampaign: campaigns.find(c => c.campaign !== '(no campaign)')?.campaign || null,
+      },
+      channels,
+      campaigns,
+    });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
 export default router;

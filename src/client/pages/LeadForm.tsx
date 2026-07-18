@@ -33,6 +33,26 @@ const LeadForm = () => {
   const textColor = urlParams.get('text') || '';
   const accentColor = urlParams.get('accent') || '';
 
+  // First-touch attribution: UTMs from this URL, else the _dd_attr cookie set by
+  // the tracking script on the visitor's first landing.
+  const cookieAttr: any = (() => {
+    try {
+      const m = document.cookie.match(/(?:^|; )_dd_attr=([^;]*)/);
+      return m ? JSON.parse(decodeURIComponent(m[1])) : {};
+    } catch { return {}; }
+  })();
+  const attribution = {
+    utmSource: urlParams.get('utm_source') || cookieAttr.utm_source || null,
+    utmMedium: urlParams.get('utm_medium') || cookieAttr.utm_medium || null,
+    utmCampaign: urlParams.get('utm_campaign') || cookieAttr.utm_campaign || null,
+    utmTerm: urlParams.get('utm_term') || cookieAttr.utm_term || null,
+    utmContent: urlParams.get('utm_content') || cookieAttr.utm_content || null,
+    gclid: urlParams.get('gclid') || cookieAttr.gclid || null,
+    fbclid: urlParams.get('fbclid') || cookieAttr.fbclid || null,
+    landingPage: window.location.href,
+    referrer: document.referrer || cookieAttr.referrer || null,
+  };
+
   useEffect(() => {
     loadConfig();
 
@@ -100,6 +120,7 @@ const LeadForm = () => {
           ...formData,
           locationId: formData.locationId ? parseInt(formData.locationId) : null,
           source: 'Web Form',
+          attribution,
           ...(ddVid && { visitorId: ddVid }),
           ...(ddToken && { token: ddToken }),
         })

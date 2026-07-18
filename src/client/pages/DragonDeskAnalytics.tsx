@@ -37,7 +37,7 @@ import {
 import styles from './DragonDeskAnalytics.module.css';
 
 type ChartType = 'line' | 'bar' | 'area' | 'pie';
-type ActiveSection = 'trials' | 'leads' | 'members' | 'value' | 'web';
+type ActiveSection = 'trials' | 'leads' | 'members' | 'value' | 'web' | 'marketing';
 
 interface ValueData {
   acv: number;
@@ -122,6 +122,8 @@ const DragonDeskAnalytics = () => {
   const [webData, setWebData] = useState<any | null>(null);
   const [webLoading, setWebLoading] = useState(false);
   const [webDays, setWebDays] = useState(30);
+  const [marketingData, setMarketingData] = useState<any | null>(null);
+  const [marketingLoading, setMarketingLoading] = useState(false);
 
   // Chart type preferences for each section
   const [chartTypes, setChartTypes] = useState<Record<ActiveSection, ChartType>>({
@@ -130,6 +132,7 @@ const DragonDeskAnalytics = () => {
     members: 'line',
     value: 'bar',
     web: 'bar',
+    marketing: 'bar',
   });
 
   const locationId = isAllLocations ? 'all' : String(selectedLocation?.id || '');
@@ -170,6 +173,24 @@ const DragonDeskAnalytics = () => {
     };
     fetchValue();
   }, [activeSection, selectedLocation, isAllLocations, selectedProgram, selectedMembershipAge]);
+
+  useEffect(() => {
+    if (activeSection !== 'marketing') return;
+    const fetchMarketing = async () => {
+      try {
+        setMarketingLoading(true);
+        const monthsParam = timePeriod === '30d' ? '1' : timePeriod;
+        const response = await api.get(`/analytics/attribution?months=${monthsParam}&locationId=${locationId}`);
+        setMarketingData(response);
+      } catch (error) {
+        console.error('Failed to load marketing analytics:', error);
+        setMarketingData(null);
+      } finally {
+        setMarketingLoading(false);
+      }
+    };
+    fetchMarketing();
+  }, [activeSection, selectedLocation, isAllLocations, timePeriod]);
 
   useEffect(() => {
     if (activeSection !== 'web') return;
@@ -504,6 +525,109 @@ const DragonDeskAnalytics = () => {
     const m = Math.floor(secs / 60);
     const s = Math.round(secs % 60);
     return `${m}m ${s}s`;
+  };
+
+  const renderMarketingSection = () => {
+    if (marketingLoading) return <div className={styles.loading}>Loading marketing analytics...</div>;
+    if (!marketingData) {
+      return (
+        <div className={styles.empty}>
+          <p>No attribution data yet. It populates as leads come in with UTM parameters — from ads, email links, and tracked forms.</p>
+        </div>
+      );
+    }
+
+    const { kpis, channels = [], campaigns = [] } = marketingData;
+    const rightAlign: React.CSSProperties = { textAlign: 'right' };
+
+    return (
+      <div className={styles.sectionContent}>
+        <div className={styles.webKpiGrid}>
+          {[
+            { label: 'Attributed Leads', value: (kpis.attributedLeads || 0).toLocaleString() },
+            { label: 'Members Won', value: (kpis.members || 0).toLocaleString() },
+            { label: 'Lead → Member', value: `${kpis.leadToMemberRate || 0}%` },
+            { label: 'Top Channel', value: kpis.topChannel || '—' },
+            { label: 'Top Campaign', value: kpis.topCampaign || '—' },
+          ].map((k) => (
+            <div key={k.label} className={styles.webKpiCard}>
+              <div className={styles.webKpiValue}>{k.value}</div>
+              <div className={styles.webKpiLabel}>{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {channels.length === 0 ? (
+          <div className={styles.empty}><p>No attributed leads in this period yet.</p></div>
+        ) : (
+          <>
+            <div className={styles.chartContainer}>
+              <div className={styles.chartHeader}>
+                <h3>Channel Breakdown</h3>
+                <p>Leads and conversions by acquisition channel (first-touch)</p>
+              </div>
+              <table className={styles.dataTable}>
+                <thead>
+                  <tr>
+                    <th>Channel</th>
+                    <th style={rightAlign}>Leads</th>
+                    <th style={rightAlign}>Trialers</th>
+                    <th style={rightAlign}>Members</th>
+                    <th style={rightAlign}>Conv. Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {channels.map((c: any) => (
+                    <tr key={c.channel}>
+                      <td>{c.channel}</td>
+                      <td style={rightAlign}>{c.leads}</td>
+                      <td style={rightAlign}>{c.trialers}</td>
+                      <td style={rightAlign}>{c.members}</td>
+                      <td style={rightAlign}>{c.convRate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
+              <div className={styles.chartHeader}>
+                <h3>Campaign Performance</h3>
+                <p>Leads and conversions by UTM campaign</p>
+              </div>
+              <table className={styles.dataTable}>
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Source / Medium</th>
+                    <th style={rightAlign}>Leads</th>
+                    <th style={rightAlign}>Trialers</th>
+                    <th style={rightAlign}>Members</th>
+                    <th style={rightAlign}>Conv. Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaigns.map((c: any, i: number) => (
+                    <tr key={i}>
+                      <td>{c.campaign}</td>
+                      <td style={{ color: 'var(--color-text-secondary)' }}>{[c.source, c.medium].filter(Boolean).join(' / ') || '—'}</td>
+                      <td style={rightAlign}>{c.leads}</td>
+                      <td style={rightAlign}>{c.trialers}</td>
+                      <td style={rightAlign}>{c.members}</td>
+                      <td style={rightAlign}>{c.convRate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
+              First-touch attribution — a lead is credited to the source that first brought them in. Uses the Time Period selector above.
+            </p>
+          </>
+        )}
+      </div>
+    );
   };
 
   const renderWebSection = () => {
@@ -970,6 +1094,12 @@ const DragonDeskAnalytics = () => {
                 <MdLanguage size={16} style={{ marginRight: 4, verticalAlign: 'middle' }} />
                 Web
               </button>
+              <button
+                className={`${styles.tab} ${activeSection === 'marketing' ? styles.activeTab : ''}`}
+                onClick={() => setActiveSection('marketing')}
+              >
+                Marketing
+              </button>
             </div>
 
             {activeSection === 'web' && (
@@ -992,6 +1122,7 @@ const DragonDeskAnalytics = () => {
               {activeSection === 'members' && renderMembersSection()}
               {activeSection === 'value' && renderValueSection()}
               {activeSection === 'web' && renderWebSection()}
+              {activeSection === 'marketing' && renderMarketingSection()}
             </div>
           </>
         )}

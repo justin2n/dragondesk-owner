@@ -19,6 +19,18 @@ router.use(authenticateToken);
 
 const MASK = '••••••••';
 
+// Append UTM params to absolute links in campaign HTML so email-driven form
+// fills attribute back to the campaign. Skips relative/mailto/anchor links and
+// links that already carry a utm_source.
+function addUtmsToLinks(html: string, utm: Record<string, string>): string {
+  const qs = Object.entries(utm).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  if (!qs || !html) return html;
+  return html.replace(/href\s*=\s*"([^"]*)"/gi, (m, url) => {
+    if (!/^https?:\/\//i.test(url) || /[?&]utm_source=/i.test(url)) return m;
+    return `href="${url}${url.includes('?') ? '&' : '?'}${qs}"`;
+  });
+}
+
 // Deliver one email through the resolved provider. SendGrid uses its own verified
 // sender + API key; SMTP builds a transporter (the test panel may pass per-request
 // SMTP settings). Returns the provider message id when available.
@@ -480,6 +492,14 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     // Absolute base for the open-tracking pixel (works behind Railway's proxy).
     const base = `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
 
+    // Tag every link with campaign UTMs once, so email-driven form fills attribute
+    // back to this campaign (utm_medium=email).
+    const campaignSlug = String(campaign.name || `campaign-${campaignId}`)
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `campaign-${campaignId}`;
+    const bodyWithUtms = addUtmsToLinks(content.body || '', {
+      utm_source: 'email', utm_medium: 'email', utm_campaign: campaignSlug,
+    });
+
     let sent = 0;
     let failed = 0;
     const errors: string[] = [];
@@ -488,7 +508,7 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     for (const member of members) {
       try {
         // Personalize email body
-        let personalizedBody = content.body
+        let personalizedBody = bodyWithUtms
           .replace(/\[First Name\]/g, member.firstName || '')
           .replace(/\[Last Name\]/g, member.lastName || '')
           .replace(/\[Member Name\]/g, `${member.firstName} ${member.lastName}`.trim());

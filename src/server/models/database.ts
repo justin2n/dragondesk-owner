@@ -1147,6 +1147,38 @@ async function initializeDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign ON campaign_recipients("campaignId")`);
 
+    // ── Marketing attribution (first-touch) ────────────────────────────────────
+    // One row per member, written once (first touch) and never overwritten, so a
+    // lead/member is credited to the campaign/channel that first brought them in.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS member_attribution (
+        "memberId" INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        "utmSource" TEXT,
+        "utmMedium" TEXT,
+        "utmCampaign" TEXT,
+        "utmTerm" TEXT,
+        "utmContent" TEXT,
+        gclid TEXT,
+        fbclid TEXT,
+        channel TEXT,
+        "landingPage" TEXT,
+        referrer TEXT,
+        "firstTouchAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_attribution_channel ON member_attribution(channel)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_attribution_campaign ON member_attribution("utmCampaign")`);
+
+    // First-touch attribution captured on the visitor (from the first pageview),
+    // used to attribute a form fill even when the form URL has no UTMs.
+    for (const col of ['utmSource', 'utmMedium', 'utmCampaign', 'utmTerm', 'utmContent', 'gclid', 'fbclid', 'landingPage', 'referrer']) {
+      await client.query(`ALTER TABLE tracking_visitors ADD COLUMN IF NOT EXISTS "${col}" TEXT`).catch(() => {});
+    }
+
+    // Per-form toggle for UTM capture (capture is automatic; this governs the
+    // hidden fields on the rendered form).
+    await client.query(`ALTER TABLE lead_forms ADD COLUMN IF NOT EXISTS "captureUtm" BOOLEAN DEFAULT true`).catch(() => {});
+
     // Per-location email provider config (NULL locationId = org-wide default).
     // Mirrors billing_settings. sendgridApiKey is stored encrypted (crypto util);
     // env vars remain the fallback when a value is absent.

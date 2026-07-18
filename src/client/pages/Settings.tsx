@@ -4254,6 +4254,17 @@ const Settings = () => {
                 </p>
               </div>
 
+              <div className={styles.infoBox}>
+                <h4>Campaign attribution (automatic)</h4>
+                <p>
+                  UTM parameters are captured automatically for first-touch attribution. Add
+                  <code> utm_source</code>, <code>utm_medium</code>, and <code>utm_campaign</code> to your ad and
+                  email links (e.g. <code>?utm_source=meta&amp;utm_medium=paid-social&amp;utm_campaign=summer_bjj</code>).
+                  When a prospect fills out the form, DragonDesk records where they came from and reports it under
+                  DragonDesk: Analytics → <strong>Marketing</strong>. Email campaigns tag their own links automatically.
+                </p>
+              </div>
+
               <div className={styles.formGroup}>
                 <label className={styles.label}>Direct Form Link</label>
                 <div className={styles.inputGroup}>

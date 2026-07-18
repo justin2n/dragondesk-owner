@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { parseUtms } from '../utils/attribution';
 
 const router = Router();
 
@@ -80,6 +81,16 @@ function buildTrackingScript(token: string, endpoint: string): string {
   /* ── Expose IDs for lead form identity stitching ── */
   w.__ddVid=vid;w.__ddToken=TOKEN;w.__ddEP=EP;
 
+  /* ── First-touch attribution cookie (read by embedded lead forms) ── */
+  try{
+    if(!getCookie('_dd_attr')){
+      var qp=new URLSearchParams(location.search),attr={};
+      ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'].forEach(function(k){var v=qp.get(k);if(v)attr[k]=v;});
+      if(d.referrer)attr.referrer=d.referrer;
+      if(Object.keys(attr).length){setCookie('_dd_attr',encodeURIComponent(JSON.stringify(attr)),90);}
+    }
+  }catch(e){}
+
   /* ── Event queue ── */
   var queue=[];
   function push(evt){queue.push(Object.assign({ts:Date.now(),url:location.href,path:location.pathname,title:d.title},evt));}
@@ -108,7 +119,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
   }
 
   /* ── Auto tracking ── */
-  push({type:'pageview'});
+  push({type:'pageview',ref:d.referrer});
 
   d.addEventListener('click',function(e){
     var el=e.target;
@@ -226,6 +237,26 @@ router.post('/collect', async (req: Request, res: Response) => {
           JSON.stringify({ tag: evt.tag, depth: evt.depth, formId: evt.formId, email: evt.email || undefined }),
           evt.ts || Date.now(),
         ]);
+      }
+
+      // First-touch attribution: capture UTMs/referrer from the pageview URL,
+      // only filling columns that are still null (never overwrite first touch).
+      const pv = events.find((e: any) => e.type === 'pageview' && e.url);
+      if (pv) {
+        const u = parseUtms(pv.url);
+        await client.query(`
+          UPDATE tracking_visitors SET
+            "utmSource" = COALESCE("utmSource", $3),
+            "utmMedium" = COALESCE("utmMedium", $4),
+            "utmCampaign" = COALESCE("utmCampaign", $5),
+            "utmTerm" = COALESCE("utmTerm", $6),
+            "utmContent" = COALESCE("utmContent", $7),
+            gclid = COALESCE(gclid, $8),
+            fbclid = COALESCE(fbclid, $9),
+            "landingPage" = COALESCE("landingPage", $10),
+            referrer = COALESCE(referrer, $11)
+          WHERE "visitorId" = $1 AND token = $2
+        `, [vid, token, u.utmSource, u.utmMedium, u.utmCampaign, u.utmTerm, u.utmContent, u.gclid, u.fbclid, u.landingPage, pv.ref || null]);
       }
 
       await client.query('COMMIT');
