@@ -3,6 +3,11 @@ import express from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
 import { buildAudienceQuery } from '../utils/audienceMembers';
+import { getSmsConfig, invalidateSmsConfigCache } from '../services/smsConfig';
+import { sendSMS, sendSMSCampaign, processDeliveryStatus } from '../services/twilio';
+import { encryptSecret, isEncryptionConfigured } from '../utils/crypto';
+
+const MASK = '••••••••';
 
 const router = express.Router();
 
@@ -23,6 +28,101 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
   } catch (error: any) {
     console.error('Error fetching SMS campaigns:', error);
     serverError(res, error);
+  }
+});
+
+// Twilio SMS config (DB-encrypted). Auth token is never returned — only masked.
+// NOTE: must be registered before '/:id' so 'config' isn't treated as an id.
+router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
+  const cfg = await getSmsConfig();
+  res.json({
+    accountSid: cfg.accountSid,
+    fromNumber: cfg.fromNumber,
+    messagingServiceSid: cfg.messagingServiceSid,
+    authToken: cfg.authToken ? MASK : null,
+    configured: cfg.configured,
+    encryptionConfigured: isEncryptionConfigured(),
+  });
+});
+
+router.put('/config', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { accountSid, authToken, fromNumber, messagingServiceSid } = req.body;
+    const existing = await get(`SELECT * FROM sms_settings WHERE "locationId" IS NULL`);
+
+    let tokenToStore: string | null = existing?.authToken ?? null;
+    if (typeof authToken === 'string' && authToken.trim() && !authToken.includes('•')) {
+      if (!isEncryptionConfigured()) {
+        return res.status(400).json({ error: 'Set APP_ENCRYPTION_KEY (32-byte hex/base64) before storing the Twilio auth token.' });
+      }
+      tokenToStore = encryptSecret(authToken.trim());
+    }
+
+    const vals = [
+      accountSid !== undefined ? (accountSid || null) : (existing?.accountSid ?? null),
+      tokenToStore,
+      fromNumber !== undefined ? (fromNumber || null) : (existing?.fromNumber ?? null),
+      messagingServiceSid !== undefined ? (messagingServiceSid || null) : (existing?.messagingServiceSid ?? null),
+    ];
+
+    if (existing) {
+      await run(
+        `UPDATE sms_settings SET "accountSid" = ?, "authToken" = ?, "fromNumber" = ?, "messagingServiceSid" = ?,
+           "isActive" = true, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
+        [...vals, existing.id]
+      );
+    } else {
+      await run(
+        `INSERT INTO sms_settings ("locationId", "accountSid", "authToken", "fromNumber", "messagingServiceSid")
+         VALUES (NULL, ?, ?, ?, ?)`,
+        vals
+      );
+    }
+    invalidateSmsConfigCache();
+    const cfg = await getSmsConfig();
+    res.json({
+      accountSid: cfg.accountSid, fromNumber: cfg.fromNumber, messagingServiceSid: cfg.messagingServiceSid,
+      authToken: cfg.authToken ? MASK : null, configured: cfg.configured, encryptionConfigured: isEncryptionConfigured(),
+    });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
+// ── Twilio webhooks (public — Twilio posts form-urlencoded, no auth) ─────────
+
+// Inbound SMS: handle STOP/START keywords to keep our opt-out state in sync.
+router.post('/inbound', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const from: string = (req.body.From || '').trim();
+    const text: string = (req.body.Body || '').trim().toUpperCase();
+    const STOP = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'];
+    const START = ['START', 'YES', 'UNSTOP'];
+    const last10 = from.replace(/\D/g, '').slice(-10);
+    if (last10) {
+      if (STOP.includes(text)) {
+        await run(`UPDATE members SET "smsOptOut" = true, "smsOptOutAt" = CURRENT_TIMESTAMP WHERE regexp_replace(phone, '\\D', '', 'g') LIKE ?`, [`%${last10}`]);
+      } else if (START.includes(text)) {
+        await run(`UPDATE members SET "smsOptOut" = false, "smsOptOutAt" = NULL WHERE regexp_replace(phone, '\\D', '', 'g') LIKE ?`, [`%${last10}`]);
+      }
+    }
+    res.set('Content-Type', 'text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  } catch (e) {
+    res.set('Content-Type', 'text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
+});
+
+// Delivery status callbacks from Twilio.
+router.post('/status', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const sid = req.body.MessageSid || req.body.SmsSid;
+    const status = String(req.body.MessageStatus || req.body.SmsStatus || '').toLowerCase();
+    if (sid && ['delivered', 'undelivered', 'failed'].includes(status)) {
+      await processDeliveryStatus(sid, status as any, req.body.ErrorMessage);
+    }
+    res.sendStatus(204);
+  } catch {
+    res.sendStatus(204);
   }
 });
 
@@ -86,18 +186,28 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
     }
 
     // Resolve members via the shared audience resolver (same full filter set as
-    // email + the Audiences preview), then keep only those with a phone number.
+    // email + the Audiences preview); keep only those with a phone AND who have
+    // not opted out of SMS.
     const filters = JSON.parse(audience.filters);
     const built = buildAudienceQuery(filters, { columns: 'id, phone, firstName, lastName', locationId });
     const members = await query(
-      `${built.sql} AND phone IS NOT NULL AND phone != ''`,
+      `${built.sql} AND phone IS NOT NULL AND phone != '' AND ("smsOptOut" IS NULL OR "smsOptOut" = false)`,
       built.params
     );
 
     const recipientCount = members.length;
 
     if (recipientCount === 0) {
-      return res.status(400).json({ error: 'No recipients with phone numbers found in the selected audience' });
+      return res.status(400).json({ error: 'No opted-in recipients with phone numbers found in the selected audience' });
+    }
+
+    // Fail closed: a no-filter audience texts everyone. Require explicit confirm.
+    if (built.filterCount === 0 && !req.body.confirmSendAll) {
+      return res.status(400).json({
+        error: `This audience has no filters, so it would text ALL ${recipientCount} members with a phone. Refused — confirm to text everyone.`,
+        requiresConfirmAll: true,
+        recipientCount,
+      });
     }
 
     // Create campaign
@@ -201,38 +311,45 @@ router.post('/:id/send', authenticateToken, authorizeAdmin, async (req: AuthRequ
       return res.status(400).json({ error: 'Campaign is already sending' });
     }
 
-    // Update status to sending
-    await run(
-      `UPDATE sms_campaigns SET status = 'sending', updatedAt = CURRENT_TIMESTAMP WHERE id = ?`,
+    // Must have Twilio configured before we can send anything real.
+    const cfg = await getSmsConfig();
+    if (!cfg.configured) {
+      return res.status(400).json({ error: 'Twilio is not configured. Add your credentials in Settings → SMS.' });
+    }
+
+    const pending = await query(
+      `SELECT COUNT(*)::int AS n FROM sms_campaign_recipients WHERE campaignId = ? AND status = 'pending'`,
       [id]
     );
+    const recipientCount = pending[0]?.n || 0;
+    if (recipientCount === 0) {
+      return res.status(400).json({ error: 'No pending recipients to send to.' });
+    }
 
-    // Get recipients
-    const recipients = await query(
-      `SELECT * FROM sms_campaign_recipients WHERE campaignId = ? AND status = 'pending'`,
-      [id]
-    );
+    // Mark sending, then process in the background (service updates per-recipient
+    // status + campaign totals; the UI polls /:id/stats).
+    await run(`UPDATE sms_campaigns SET status = 'sending', updatedAt = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
+    sendSMSCampaign(Number(id)).catch((e) => console.error(`SMS campaign ${id} send failed:`, e?.message));
 
-    // In a real implementation, this would be handled by a queue/background job
-    // For now, we'll just mark it as sent
-    // The actual SMS sending will be handled by the Twilio service
-
-    res.json({
-      message: 'SMS campaign sending initiated',
-      recipientCount: recipients.length,
-      campaignId: id
-    });
-
-    // Note: The actual sending logic would be in a separate service/worker
-    // This would typically:
-    // 1. Get Twilio credentials from settings
-    // 2. Send messages in batches
-    // 3. Update recipient status
-    // 4. Update campaign statistics
-    // 5. Mark campaign as sent when complete
-
+    res.json({ message: 'SMS campaign sending initiated', recipientCount, campaignId: id });
   } catch (error: any) {
     console.error('Error sending SMS campaign:', error);
+    serverError(res, error);
+  }
+});
+
+// Recipients a campaign will text (for the Preview Recipients view).
+router.get('/:id/recipients', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const recipients = await query(
+      `SELECT r.id, r."phoneNumber", r.status, m."firstName", m."lastName"
+       FROM sms_campaign_recipients r
+       LEFT JOIN members m ON m.id = r."memberId"
+       WHERE r."campaignId" = ? ORDER BY m."lastName" ASC NULLS LAST`,
+      [req.params.id]
+    );
+    res.json({ recipientCount: recipients.length, recipients });
+  } catch (error: any) {
     serverError(res, error);
   }
 });
@@ -271,49 +388,18 @@ router.get('/:id/stats', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
-// Send a test SMS via Twilio REST API
+// Send a test SMS through the configured Twilio account.
 router.post('/send-test', authenticateToken, async (req: AuthRequest, res) => {
   const { to, message } = req.body;
-
   if (!to || !message) {
     return res.status(400).json({ error: 'to and message are required' });
   }
-
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken  = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
-
-  if (!accountSid || !authToken || !fromNumber) {
-    return res.status(400).json({
-      error: 'Twilio is not configured.',
-      details: 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in your Railway environment variables.',
-    });
-  }
-
-  // Normalise to E.164
-  let toNumber = to.replace(/[\s\-\(\)]/g, '');
-  if (!toNumber.startsWith('+')) toNumber = '+1' + toNumber;
-
   try {
-    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-    const body = new URLSearchParams({ To: toNumber, From: fromNumber, Body: message });
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
-
-    const data: any = await response.json();
-
-    if (!response.ok) {
-      return res.status(400).json({ error: data.message || 'Twilio error', details: data });
+    const result = await sendSMS(to, message);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to send test SMS' });
     }
-
-    res.json({ success: true, messageId: data.sid, to: toNumber });
+    res.json({ success: true, messageId: result.messageId, to });
   } catch (error: any) {
     console.error('SMS send-test error:', error);
     serverError(res, error);

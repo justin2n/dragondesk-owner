@@ -1,10 +1,5 @@
 import { query, run, get } from '../models/database';
-
-interface TwilioConfig {
-  accountSid: string;
-  authToken: string;
-  phoneNumber: string;
-}
+import { getSmsConfig } from './smsConfig';
 
 interface SMSResult {
   success: boolean;
@@ -13,21 +8,10 @@ interface SMSResult {
   cost?: number;
 }
 
-/**
- * Get Twilio configuration from database/settings
- */
-async function getTwilioConfig(): Promise<TwilioConfig | null> {
-  // In a real implementation, this would fetch from a settings table
-  // For now, use environment variables
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const phoneNumber = process.env.TWILIO_PHONE_NUMBER;
-
-  if (!accountSid || !authToken || !phoneNumber) {
-    return null;
-  }
-
-  return { accountSid, authToken, phoneNumber };
+// Public base URL for Twilio status callbacks (set on outbound messages).
+function publicBaseUrl(): string {
+  return process.env.APP_URL
+    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
 }
 
 /**
@@ -35,68 +19,49 @@ async function getTwilioConfig(): Promise<TwilioConfig | null> {
  */
 export async function sendSMS(to: string, message: string): Promise<SMSResult> {
   try {
-    const config = await getTwilioConfig();
-
-    if (!config) {
-      return {
-        success: false,
-        error: 'Twilio is not configured. Please add your Twilio credentials in Settings.'
-      };
+    const config = await getSmsConfig();
+    if (!config.configured || !config.accountSid || !config.authToken) {
+      return { success: false, error: 'Twilio is not configured. Add your Twilio credentials in Settings → SMS.' };
     }
 
-    // Validate phone number format (basic validation)
-    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
-    if (!phoneRegex.test(to.replace(/[\s\-\(\)]/g, ''))) {
-      return {
-        success: false,
-        error: 'Invalid phone number format'
-      };
+    // Basic validation + E.164 formatting (assume US when no country code).
+    const cleaned = to.replace(/[\s\-()]/g, '');
+    if (!/^\+?[1-9]\d{1,14}$/.test(cleaned)) {
+      return { success: false, error: 'Invalid phone number format' };
     }
+    const formattedPhone = cleaned.startsWith('+') ? cleaned : '+1' + cleaned;
 
-    // Format phone number to E.164 format if not already
-    let formattedPhone = to.replace(/[\s\-\(\)]/g, '');
-    if (!formattedPhone.startsWith('+')) {
-      // Assume US number if no country code
-      formattedPhone = '+1' + formattedPhone;
-    }
+    // Twilio REST API (no SDK dependency — same fetch approach as the email providers).
+    const body = new URLSearchParams();
+    body.set('To', formattedPhone);
+    body.set('Body', message);
+    if (config.messagingServiceSid) body.set('MessagingServiceSid', config.messagingServiceSid);
+    else body.set('From', config.fromNumber || '');
+    const cbBase = publicBaseUrl();
+    if (cbBase) body.set('StatusCallback', `${cbBase}/api/sms-campaigns/status`);
 
-    // In a real implementation, this would use the Twilio SDK
-    // For now, this is a placeholder that simulates the API call
-    // To use real Twilio, install: npm install twilio
-    // Then uncomment and use the code below:
-
-    /*
-    const twilio = require('twilio');
-    const client = twilio(config.accountSid, config.authToken);
-
-    const result = await client.messages.create({
-      body: message,
-      from: config.phoneNumber,
-      to: formattedPhone
+    const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic ' + Buffer.from(`${config.accountSid}:${config.authToken}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
     });
 
+    const data: any = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      return { success: false, error: data?.message || `Twilio error ${resp.status}` };
+    }
     return {
       success: true,
-      messageId: result.sid,
-      cost: parseFloat(result.price) * -1 // Twilio returns negative price
+      messageId: data.sid,
+      // Twilio returns price as a negative string once billed; often null at create time.
+      cost: data.price ? Math.abs(parseFloat(data.price)) : 0,
     };
-    */
-
-    // Placeholder response for development
-    console.log(`[Twilio Simulation] Sending SMS to ${formattedPhone}: ${message}`);
-
-    return {
-      success: true,
-      messageId: `SM${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
-      cost: 0.0075 // Typical cost per SMS
-    };
-
   } catch (error: any) {
     console.error('Error sending SMS:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to send SMS'
-    };
+    return { success: false, error: error.message || 'Failed to send SMS' };
   }
 }
 
@@ -117,13 +82,27 @@ export async function sendSMSCampaign(campaignId: number): Promise<void> {
       [campaignId]
     );
 
+    // Compliance: ensure the message carries opt-out language.
+    const message = /\bstop\b/i.test(campaign.message)
+      ? campaign.message
+      : `${campaign.message} Reply STOP to opt out.`;
+
     let successCount = 0;
     let failureCount = 0;
     let totalCost = 0;
 
     // Send to each recipient
     for (const recipient of recipients) {
-      const result = await sendSMS(recipient.phoneNumber, campaign.message);
+      // Defensive: never text someone who has opted out (belt-and-suspenders;
+      // opted-out members are already excluded when recipients are snapshotted).
+      const optedOut = recipient.memberId
+        ? await get('SELECT "smsOptOut" FROM members WHERE id = ?', [recipient.memberId])
+        : null;
+      if (optedOut?.smsOptOut) {
+        await run(`UPDATE sms_campaign_recipients SET status = 'unsubscribed' WHERE id = ?`, [recipient.id]);
+        continue;
+      }
+      const result = await sendSMS(recipient.phoneNumber, message);
 
       if (result.success) {
         // Update recipient status

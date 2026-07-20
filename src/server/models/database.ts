@@ -1223,6 +1223,26 @@ async function initializeDatabase() {
         AND NOT EXISTS (SELECT 1 FROM email_settings WHERE "locationId" IS NULL)
     `);
 
+    // Per-location Twilio SMS config (NULL locationId = org-wide default).
+    // authToken is stored encrypted (crypto util); env vars are the fallback.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sms_settings (
+        id SERIAL PRIMARY KEY,
+        "locationId" INTEGER REFERENCES locations(id),
+        "accountSid" TEXT,
+        "authToken" TEXT,
+        "fromNumber" TEXT,
+        "messagingServiceSid" TEXT,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // SMS consent / opt-out on members (TCPA + carrier compliance).
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "smsOptOut" BOOLEAN DEFAULT false`).catch(() => {});
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "smsOptOutAt" TIMESTAMP`).catch(() => {});
+
     // ── Trial programs ─────────────────────────────────────────────────────────
     // Separate catalog of trial offerings (distinct from regular programs).
     // A trialer's profile points at one trial program.

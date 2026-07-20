@@ -47,6 +47,8 @@ const DragonDeskEngage = () => {
   const [previewData, setPreviewData] = useState<any>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewSearch, setPreviewSearch] = useState('');
+  const [previewSms, setPreviewSms] = useState<SMSCampaign | null>(null);
+  const [previewSmsData, setPreviewSmsData] = useState<any>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -396,15 +398,44 @@ const DragonDeskEngage = () => {
     }
   };
 
-  const handleSendSMSCampaign = async (id: number) => {
-    if (!await confirm({ title: 'Send SMS Campaign', message: 'Are you sure you want to send this SMS campaign? This action cannot be undone.', confirmLabel: 'Send Now', danger: true })) return;
+  const handleSendSMSCampaign = async (campaign: SMSCampaign) => {
+    // Show the exact number of texts (pending recipients) before sending.
+    let count = campaign.recipientCount ?? 0;
+    try {
+      const preview = await api.get(`/sms-campaigns/${campaign.id}/recipients`);
+      const pending = (preview.recipients || []).filter((r: any) => r.status === 'pending');
+      count = pending.length || preview.recipientCount || count;
+    } catch { /* fall back to the stored recipientCount */ }
+
+    if (count === 0) {
+      toast('No pending recipients to text for this campaign.', 'error');
+      return;
+    }
+    if (!await confirm({
+      title: 'Send SMS Campaign',
+      message: `This will text ${count} ${count === 1 ? 'person' : 'people'}. Standard messaging rates and carrier/TCPA rules apply, and this can't be undone.`,
+      confirmLabel: `Send to ${count}`,
+      danger: true,
+    })) return;
 
     try {
-      await api.post(`/sms-campaigns/${id}/send`);
-      toast('SMS campaign is being sent!', 'success');
+      const result = await api.post(`/sms-campaigns/${campaign.id}/send`, {});
+      toast(`SMS campaign sending to ${result.recipientCount ?? count}…`, 'success');
       loadData();
     } catch (error: any) {
       toast(error.message || 'Failed to send SMS campaign', 'error');
+    }
+  };
+
+  const openSmsRecipientPreview = async (campaign: SMSCampaign) => {
+    setPreviewSms(campaign);
+    setPreviewSmsData(null);
+    setPreviewSearch('');
+    try {
+      setPreviewSmsData(await api.get(`/sms-campaigns/${campaign.id}/recipients`));
+    } catch (error: any) {
+      toast(error.message || 'Failed to load recipients', 'error');
+      setPreviewSms(null);
     }
   };
 
@@ -998,12 +1029,15 @@ const DragonDeskEngage = () => {
                   </div>
                 </div>
                 <div className={styles.cardFooter}>
+                  <button onClick={() => openSmsRecipientPreview(campaign)} className={styles.editBtn}>
+                    Preview Recipients
+                  </button>
                   {campaign.status === 'draft' && (
                     <>
                       <button onClick={() => handleEditSMSCampaign(campaign)} className={styles.editBtn}>
                         Edit
                       </button>
-                      <button onClick={() => handleSendSMSCampaign(campaign.id)} className={styles.sendBtn}>
+                      <button onClick={() => handleSendSMSCampaign(campaign)} className={styles.sendBtn}>
                         Send Now
                       </button>
                     </>
@@ -1019,6 +1053,57 @@ const DragonDeskEngage = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* SMS Preview Recipients modal */}
+      {previewSms && (
+        <div
+          onClick={() => setPreviewSms(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--color-dark-grey, #1a1a2e)', border: '1px solid var(--color-border, #333)', borderRadius: 10, width: 'min(600px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', color: 'var(--color-text-primary, #eee)' }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Recipients — {previewSms.name}</h3>
+              <button onClick={() => setPreviewSms(null)} style={{ background: 'none', border: 'none', color: 'inherit', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+            {!previewSmsData ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-secondary, #999)' }}>Loading recipients…</div>
+            ) : (() => {
+              const all = previewSmsData.recipients || [];
+              const q = previewSearch.trim().toLowerCase();
+              const filtered = q ? all.filter((r: any) => `${r.firstName || ''} ${r.lastName || ''} ${r.phoneNumber}`.toLowerCase().includes(q)) : all;
+              const pending = all.filter((r: any) => r.status === 'pending').length;
+              return (
+                <>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--color-border, #333)' }}>
+                    <div style={{ fontSize: '0.95rem' }}><strong>{pending}</strong> will be texted ({all.length} total in this campaign).</div>
+                    <input value={previewSearch} onChange={(e) => setPreviewSearch(e.target.value)} placeholder="Search name or phone…"
+                      style={{ marginTop: 10, width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--color-border, #333)', background: 'var(--color-bg, #12121f)', color: 'inherit', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {filtered.length === 0 ? (
+                      <div style={{ padding: 20, color: 'var(--color-text-secondary, #999)' }}>No matching recipients.</div>
+                    ) : filtered.map((r: any) => (
+                      <div key={r.id} style={{ padding: '8px 20px', borderBottom: '1px solid var(--color-border, #222)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: '0.9rem' }}>{[r.firstName, r.lastName].filter(Boolean).join(' ') || '—'}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary, #999)' }}>{r.phoneNumber}</div>
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary, #999)' }}>{r.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ padding: '12px 20px', borderTop: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={() => setPreviewSms(null)} className={styles.editBtn}>Close</button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
     </>

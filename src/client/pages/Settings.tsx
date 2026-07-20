@@ -364,8 +364,7 @@ const Settings = () => {
 
   // API Integrations
   const [integrations, setIntegrations] = useState<ApiIntegration[]>([
-    // SendGrid lives under Email Settings now (not here).
-    { id: 'twilio', name: 'Twilio (SMS/Voice)', enabled: false, apiKey: '', apiSecret: '', endpoint: '' },
+    // SendGrid lives under Email Settings, Twilio under SMS (Twilio) — not here.
     { id: 'stripe', name: 'Stripe (Payments)', enabled: false, apiKey: '', apiSecret: '' },
     { id: 'google-analytics', name: 'Google Analytics', enabled: false, apiKey: '' },
   ]);
@@ -385,6 +384,11 @@ const Settings = () => {
   const [smtpStatus, setSmtpStatus] = useState<any>(null);
   const [smtpTestStatus, setSmtpTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [smtpTestMessage, setSmtpTestMessage] = useState('');
+
+  // Twilio SMS config (DB-encrypted, self-serve)
+  const [smsSettings, setSmsSettings] = useState<any>(null);
+  const [smsForm, setSmsForm] = useState({ accountSid: '', authToken: '', fromNumber: '', messagingServiceSid: '' });
+  const [smsSaving, setSmsSaving] = useState(false);
 
   // Editable email provider config (default provider, SendGrid key, from-address)
   const [emailSettings, setEmailSettings] = useState<any>(null);
@@ -688,7 +692,7 @@ const Settings = () => {
     const savedIntegrations = localStorage.getItem('integrations');
     if (savedIntegrations) {
       // Drop any legacy SendGrid entry — it now lives under Email Settings.
-      setIntegrations(JSON.parse(savedIntegrations).filter((i: ApiIntegration) => i.id !== 'sendgrid'));
+      setIntegrations(JSON.parse(savedIntegrations).filter((i: ApiIntegration) => i.id !== 'sendgrid' && i.id !== 'twilio'));
     }
 
     const savedDatabase = localStorage.getItem('databaseConfig');
@@ -698,6 +702,10 @@ const Settings = () => {
 
     // Load server-side SMTP config status
     api.get('/email/config-status').then(setSmtpStatus).catch(() => {});
+    api.get('/sms-campaigns/config').then((d: any) => {
+      setSmsSettings(d);
+      setSmsForm({ accountSid: d.accountSid || '', authToken: '', fromNumber: d.fromNumber || '', messagingServiceSid: d.messagingServiceSid || '' });
+    }).catch(() => {});
     api.get('/email/settings').then((d: any) => {
       setEmailSettings(d);
       setEmailForm({
@@ -793,6 +801,26 @@ const Settings = () => {
   const handleDatabaseSave = () => {
     localStorage.setItem('databaseConfig', JSON.stringify(databaseConfig));
     showSaveMessage('Database settings saved');
+  };
+
+  const handleSaveSmsSettings = async () => {
+    setSmsSaving(true);
+    try {
+      const payload: any = {
+        accountSid: smsForm.accountSid,
+        fromNumber: smsForm.fromNumber,
+        messagingServiceSid: smsForm.messagingServiceSid,
+      };
+      if (smsForm.authToken.trim()) payload.authToken = smsForm.authToken.trim();
+      const updated = await api.put('/sms-campaigns/config', payload);
+      setSmsSettings(updated);
+      setSmsForm({ accountSid: updated.accountSid || '', authToken: '', fromNumber: updated.fromNumber || '', messagingServiceSid: updated.messagingServiceSid || '' });
+      showSaveMessage('SMS settings saved');
+    } catch (error: any) {
+      toast(error.message || 'Failed to save SMS settings', 'error');
+    } finally {
+      setSmsSaving(false);
+    }
   };
 
   const handleSaveEmailSettings = async () => {
@@ -1405,6 +1433,7 @@ const Settings = () => {
       tabs: [
         { id: 'mystudio', label: 'MyStudio API' },
         { id: 'email', label: 'Email Settings' },
+        { id: 'sms', label: 'SMS (Twilio)' },
         { id: 'admin-email', label: 'Admin Email' },
         { id: 'dkim', label: 'DKIM Authentication' },
         { id: 'social', label: 'Social Settings' },
@@ -2547,6 +2576,64 @@ const Settings = () => {
                 </div>
               )}
 
+            </div>
+          )}
+
+          {/* SMS (Twilio) */}
+          {activeTab === 'sms' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>SMS (Twilio)</h2>
+              <p className={styles.sectionDesc}>
+                Configure your own Twilio account to send SMS campaigns. Credentials are encrypted at rest.
+              </p>
+
+              <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Account SID</label>
+                    <input type="text" value={smsForm.accountSid} onChange={(e) => setSmsForm({ ...smsForm, accountSid: e.target.value })}
+                      className={styles.input} placeholder="AC…" autoComplete="off" />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>
+                      Auth Token {smsSettings?.authToken && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                    </label>
+                    <input type="password" value={smsForm.authToken} onChange={(e) => setSmsForm({ ...smsForm, authToken: e.target.value })}
+                      className={styles.input} placeholder={smsSettings?.authToken ? '••••••••  (leave blank to keep)' : 'Twilio auth token'} autoComplete="off" />
+                  </div>
+                </div>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>From Number</label>
+                    <input type="text" value={smsForm.fromNumber} onChange={(e) => setSmsForm({ ...smsForm, fromNumber: e.target.value })}
+                      className={styles.input} placeholder="+15551234567" />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Messaging Service SID <span className={styles.helpText}>(optional)</span></label>
+                    <input type="text" value={smsForm.messagingServiceSid} onChange={(e) => setSmsForm({ ...smsForm, messagingServiceSid: e.target.value })}
+                      className={styles.input} placeholder="MG… (overrides From Number)" />
+                  </div>
+                </div>
+                {smsSettings && !smsSettings.encryptionConfigured && (
+                  <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
+                    Set APP_ENCRYPTION_KEY (Railway) before saving the auth token — it's encrypted at rest.
+                  </span>
+                )}
+                <div className={styles.buttonGroup}>
+                  <button onClick={handleSaveSmsSettings} className={styles.saveBtn} disabled={smsSaving}>
+                    {smsSaving ? 'Saving…' : 'Save SMS Settings'}
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.infoBox}>
+                <h4>Compliance &amp; setup</h4>
+                <ul style={{ paddingLeft: 18, lineHeight: 1.7, margin: 0 }}>
+                  <li>Campaigns automatically append "Reply STOP to opt out" and suppress anyone who has opted out.</li>
+                  <li>In Twilio, point your number's <strong>Messaging → inbound webhook</strong> to <code>{`${window.location.origin}/api/sms-campaigns/inbound`}</code> so STOP/START stay in sync.</li>
+                  <li>US A2P 10DLC brand/campaign registration is required by carriers — complete it in your Twilio console.</li>
+                </ul>
+              </div>
             </div>
           )}
 
