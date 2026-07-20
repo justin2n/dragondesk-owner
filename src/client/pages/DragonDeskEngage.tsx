@@ -5,6 +5,9 @@ import { Campaign, Audience, EmailTemplate } from '../types';
 import EmailEditor from '../components/EmailEditor';
 import { useLocation } from '../contexts/LocationContext';
 import { useToast } from '../components/Toast';
+import {
+  ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend,
+} from 'recharts';
 import styles from './DragonDeskEngage.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit';
@@ -1256,6 +1259,35 @@ const DragonDeskEngage = () => {
       { label: 'Conversions', value: totalConversions.toLocaleString() },
     ];
 
+    // Trends over time: group sent campaigns by calendar month. sentAt is the true
+    // send date; fall back to updatedAt/createdAt for older rows without one.
+    const monthly = new Map<string, { sent: number; opens: number; conversions: number }>();
+    for (const c of sentCampaigns) {
+      const when = c.sentAt || c.updatedAt || c.createdAt;
+      if (!when) continue;
+      const d = new Date(when);
+      if (isNaN(d.getTime())) continue;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const row = monthly.get(key) || { sent: 0, opens: 0, conversions: 0 };
+      row.sent += c.sent || 0;
+      row.opens += c.opens || 0;
+      row.conversions += c.conversions || 0;
+      monthly.set(key, row);
+    }
+    const trend = Array.from(monthly.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, v]) => {
+        const [y, m] = key.split('-').map(Number);
+        const label = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+        return {
+          month: label,
+          sent: v.sent,
+          opens: v.opens,
+          conversions: v.conversions,
+          openRate: v.sent > 0 ? Math.round((v.opens / v.sent) * 100) : 0,
+        };
+      });
+
     const cardBg = 'var(--color-dark-grey, #1a1a2e)';
     const border = '1px solid var(--color-border, #333)';
     const dim = 'var(--color-text-secondary, #999)';
@@ -1263,6 +1295,7 @@ const DragonDeskEngage = () => {
     const thR: React.CSSProperties = { ...th, textAlign: 'right' };
     const td: React.CSSProperties = { padding: '10px 12px' };
     const tdR: React.CSSProperties = { ...td, textAlign: 'right' };
+    const tooltipStyle: React.CSSProperties = { background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' };
 
     return (
       <div>
@@ -1283,6 +1316,55 @@ const DragonDeskEngage = () => {
                 </div>
               ))}
             </div>
+
+            <h3 style={{ fontSize: '1rem', margin: '0 0 4px' }}>Trends Over Time</h3>
+            <p style={{ color: dim, fontSize: '0.85rem', margin: '0 0 14px' }}>Email marketing performance by month.</p>
+            {trend.length < 2 ? (
+              <div style={{ background: cardBg, border, borderRadius: 8, padding: '20px', color: dim, fontSize: '0.9rem', marginBottom: 28 }}>
+                Trends appear once you've sent campaigns across at least two different months.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 28 }}>
+                <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Volume — Sent vs Opens</div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="month" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                      <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} allowDecimals={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
+                      <Line type="monotone" dataKey="sent" name="Emails Sent" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="opens" name="Opens" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Open Rate</div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="month" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                      <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} unit="%" domain={[0, 100]} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => [`${v}%`, 'Open Rate']} />
+                      <Line type="monotone" dataKey="openRate" name="Open Rate" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Conversions</div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="month" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                      <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} allowDecimals={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Line type="monotone" dataKey="conversions" name="Conversions" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
 
             <h3 style={{ fontSize: '1rem', margin: '0 0 10px' }}>Campaign Breakdown</h3>
             <div style={{ overflowX: 'auto', border, borderRadius: 8 }}>

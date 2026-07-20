@@ -542,7 +542,7 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     // Persist send totals + mark completed (opens accrue via the pixel endpoint).
     await query(
       `UPDATE campaigns SET sent = ?, delivered = ?, status = 'completed',
-         opens = 0, "openRate" = 0, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
+         opens = 0, "openRate" = 0, "sentAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
       [sent, sent, campaignId]
     ).catch((e: any) => console.error('Failed to persist campaign send totals:', e?.message));
 

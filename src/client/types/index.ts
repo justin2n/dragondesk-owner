@@ -152,6 +152,7 @@ export interface Campaign {
   createdBy: number;
   createdAt: string;
   updatedAt: string;
+  sentAt?: string | null;
   // Analytics fields
   sent?: number;
   delivered?: number;

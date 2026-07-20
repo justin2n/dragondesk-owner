@@ -1275,6 +1275,12 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastCheckInAt" TIMESTAMP`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "attendanceStreak" INTEGER DEFAULT 0`);
 
+    // Campaign send timestamp — powers email-marketing trends over time in the
+    // Engage analytics tab. Distinct from updatedAt, which changes on any edit.
+    // Backfill existing completed campaigns from updatedAt so history still charts.
+    await client.query(`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS "sentAt" TIMESTAMP`).catch(() => {});
+    await client.query(`UPDATE campaigns SET "sentAt" = "updatedAt" WHERE "sentAt" IS NULL AND status = 'completed'`).catch(() => {});
+
     // Ensure event_attendees unique constraint exists (needed for ON CONFLICT upsert in kiosk check-in)
     await client.query(`
       DO $$ BEGIN
