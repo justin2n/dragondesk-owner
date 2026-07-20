@@ -55,6 +55,22 @@ router.get('/:id/members', async (req: AuthRequest, res) => {
   }
 });
 
+// Preview matching members for a set of filters WITHOUT saving an audience.
+// Powers the live preview in the create/edit modal — uses the same
+// buildAudienceQuery as the saved-audience members endpoint and campaign
+// sending, so the preview always matches the eventual send.
+router.post('/preview', async (req: AuthRequest, res) => {
+  try {
+    const { filters, locationId } = req.body;
+    const { sql, params } = buildAudienceQuery(filters, { locationId: locationId as string | undefined });
+    const members = await query(sql, params);
+    res.json(members);
+  } catch (error) {
+    console.error('Preview audience error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/', async (req: AuthRequest, res) => {
   try {
     const { name, description, filters } = req.body;

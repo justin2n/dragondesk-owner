@@ -41,10 +41,13 @@ const Audiences = () => {
   const [selectedAudience, setSelectedAudience] = useState<Audience | null>(null);
   const [audienceMembers, setAudienceMembers] = useState<Member[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [rankingOpen, setRankingOpen] = useState(false);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
+  const [previewMembers, setPreviewMembers] = useState<Member[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const emptyFilters = {
     accountStatus: [] as AccountStatus[],
@@ -90,9 +93,35 @@ const Audiences = () => {
   };
 
   const handleOpenModal = () => {
+    setEditingId(null);
     setFormData({ name: '', description: '', filters: emptyFilters });
     setRankingOpen(false);
     setTagInput('');
+    setPreviewMembers([]);
+    setIsModalOpen(true);
+    api.get('/members/tags').then(setAvailableTags).catch(() => {});
+  };
+
+  const handleEditAudience = (audience: Audience) => {
+    const af = audience.filters || {};
+    setEditingId(audience.id);
+    setFormData({
+      name: audience.name,
+      description: audience.description || '',
+      filters: {
+        accountStatus: af.accountStatus ?? [],
+        accountType: af.accountType ?? [],
+        programType: af.programType ?? [],
+        membershipAge: af.membershipAge ?? [],
+        ranking: af.ranking ?? [],
+        leadSource: af.leadSource ?? [],
+        locationIds: af.locationIds ?? [],
+        tags: af.tags ?? [],
+      },
+    });
+    setRankingOpen((af.ranking?.length || 0) > 0);
+    setTagInput('');
+    setPreviewMembers([]);
     setIsModalOpen(true);
     api.get('/members/tags').then(setAvailableTags).catch(() => {});
   };
@@ -114,12 +143,22 @@ const Audiences = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post('/audiences', formData);
+      if (editingId !== null) {
+        await api.put(`/audiences/${editingId}`, formData);
+      } else {
+        await api.post('/audiences', formData);
+      }
+      const savedId = editingId;
       setIsModalOpen(false);
-      loadAudiences();
-      toast('Audience created successfully', 'success');
+      await loadAudiences();
+      // Keep the edited audience selected, refreshing its header and member list.
+      if (savedId !== null && selectedAudience?.id === savedId) {
+        setSelectedAudience({ ...selectedAudience, name: formData.name, description: formData.description, filters: formData.filters });
+        loadAudienceMembers(savedId);
+      }
+      toast(savedId !== null ? 'Audience updated successfully' : 'Audience created successfully', 'success');
     } catch (error: any) {
-      toast(error.message || 'Failed to create audience', 'error');
+      toast(error.message || 'Failed to save audience', 'error');
     }
   };
 
@@ -133,6 +172,20 @@ const Audiences = () => {
       toast(error.message || 'Failed to delete audience', 'error');
     }
   };
+
+  // Live preview: whenever the modal's filters change, fetch matching members
+  // (debounced) so the user sees who the audience targets before saving.
+  useEffect(() => {
+    if (!isModalOpen) return;
+    setPreviewLoading(true);
+    const handle = setTimeout(() => {
+      api.post('/audiences/preview', { filters: formData.filters })
+        .then((members: Member[]) => setPreviewMembers(members))
+        .catch(() => setPreviewMembers([]))
+        .finally(() => setPreviewLoading(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [isModalOpen, formData.filters]);
 
   const f = formData.filters;
   const setFilter = (patch: Partial<typeof emptyFilters>) =>
@@ -185,8 +238,13 @@ const Audiences = () => {
           {selectedAudience ? (
             <>
               <div className={styles.audienceHeader}>
-                <h2>{selectedAudience.name}</h2>
-                <p>{selectedAudience.description}</p>
+                <div>
+                  <h2>{selectedAudience.name}</h2>
+                  <p>{selectedAudience.description}</p>
+                </div>
+                <button className={styles.editBtn} onClick={() => handleEditAudience(selectedAudience)}>
+                  Edit Audience
+                </button>
               </div>
               <div className={styles.membersSection}>
                 <h3 className={styles.sectionTitle}>Members in Audience ({audienceMembers.length})</h3>
@@ -215,7 +273,7 @@ const Audiences = () => {
           <div className={styles.modalContent}>
             <div className={styles.modalHeader}>
               <div>
-                <h2>Create Audience</h2>
+                <h2>{editingId !== null ? 'Edit Audience' : 'Create Audience'}</h2>
                 <p className={styles.modalSubtitle}>Define filters to automatically match members</p>
               </div>
               <button onClick={() => setIsModalOpen(false)} className={styles.closeBtn}>✕</button>
@@ -417,9 +475,36 @@ const Audiences = () => {
                 )}
               </div>
 
+              {/* Live preview */}
+              <div className={styles.previewBlock}>
+                <div className={styles.previewHeader}>
+                  <span className={styles.filterLabel} style={{ margin: 0 }}>Preview</span>
+                  <span className={styles.previewCount}>
+                    {previewLoading ? 'Updating...' : `${previewMembers.length} matching member${previewMembers.length === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                {previewMembers.length === 0 ? (
+                  <div className={styles.previewEmpty}>
+                    {previewLoading ? 'Calculating...' : 'No members match these filters'}
+                  </div>
+                ) : (
+                  <div className={styles.previewList}>
+                    {previewMembers.slice(0, 50).map((member) => (
+                      <div key={member.id} className={styles.previewItem}>
+                        <span className={styles.previewName}>{member.firstName} {member.lastName}</span>
+                        <span className={styles.previewMeta}>{member.email}{member.programType ? ` • ${member.programType}` : ''}</span>
+                      </div>
+                    ))}
+                    {previewMembers.length > 50 && (
+                      <div className={styles.previewMore}>+ {previewMembers.length - 50} more</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className={styles.modalFooter}>
                 <button type="button" onClick={() => setIsModalOpen(false)} className={styles.cancelBtn}>Cancel</button>
-                <button type="submit" className={styles.saveBtn}>Create Audience</button>
+                <button type="submit" className={styles.saveBtn}>{editingId !== null ? 'Save Changes' : 'Create Audience'}</button>
               </div>
             </form>
           </div>
