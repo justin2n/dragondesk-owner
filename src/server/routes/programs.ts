@@ -61,17 +61,35 @@ router.get('/member-counts', authenticateToken, async (req: AuthRequest, res) =>
   }
 });
 
+const AGE_GROUPS = ['Kids', 'Adult', 'All'];
+
+function normalizeAgeGroup(value: any): string {
+  return AGE_GROUPS.includes(value) ? value : 'All';
+}
+
+function normalizeCents(value: any, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback;
+}
+
 router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
-    const { name, description, membershipId } = req.body;
+    const { name, description, ageGroup, quickStartPriceAmount, quickStartDurationDays } = req.body;
     if (!name) return res.status(400).json({ error: 'Program name is required' });
 
     const existing = await pool.query('SELECT id FROM programs WHERE name = $1', [name]);
     if (existing.rows.length > 0) return res.status(409).json({ error: 'Program with this name already exists' });
 
     const result = await pool.query(
-      `INSERT INTO programs (name, description, "membershipId", "isActive") VALUES ($1, $2, $3, true) RETURNING *`,
-      [name, description || null, membershipId || null]
+      `INSERT INTO programs (name, description, "ageGroup", "quickStartPriceAmount", "quickStartDurationDays", "isActive")
+       VALUES ($1, $2, $3, $4, $5, true) RETURNING *`,
+      [
+        name,
+        description || null,
+        normalizeAgeGroup(ageGroup),
+        normalizeCents(quickStartPriceAmount, 0),
+        normalizeCents(quickStartDurationDays, 30),
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (error: any) {
@@ -82,7 +100,7 @@ router.post('/', authenticateToken, authorizeAdmin, async (req: AuthRequest, res
 router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive, membershipId } = req.body;
+    const { name, description, isActive, ageGroup, quickStartPriceAmount, quickStartDurationDays } = req.body;
 
     const existing = await pool.query('SELECT * FROM programs WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Program not found' });
@@ -92,16 +110,38 @@ router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, r
       if (conflict.rows.length > 0) return res.status(409).json({ error: 'Program with this name already exists' });
     }
 
+    const prev = existing.rows[0];
     const result = await pool.query(
       `UPDATE programs SET
         name = COALESCE($1, name),
         description = COALESCE($2, description),
         "isActive" = COALESCE($3, "isActive"),
-        "membershipId" = $4,
+        "ageGroup" = $4,
+        "quickStartPriceAmount" = $5,
+        "quickStartDurationDays" = $6,
         "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $5 RETURNING *`,
-      [name || null, description || null, isActive !== undefined ? isActive : null, membershipId || null, id]
+      WHERE id = $7 RETURNING *`,
+      [
+        name || null,
+        description || null,
+        isActive !== undefined ? isActive : null,
+        ageGroup !== undefined ? normalizeAgeGroup(ageGroup) : (prev.ageGroup || 'All'),
+        quickStartPriceAmount !== undefined
+          ? normalizeCents(quickStartPriceAmount, 0)
+          : normalizeCents(prev.quickStartPriceAmount, 0),
+        quickStartDurationDays !== undefined
+          ? normalizeCents(quickStartDurationDays, 30)
+          : normalizeCents(prev.quickStartDurationDays, 30),
+        id,
+      ]
     );
+
+    // Renaming a program must carry the denormalized primary-program name on
+    // member rows with it, or program-segmented analytics silently drops them.
+    if (name && name !== prev.name) {
+      await pool.query(`UPDATE members SET "programType" = $1 WHERE "programType" = $2`, [name, prev.name]);
+    }
+
     res.json(result.rows[0]);
   } catch (error: any) {
     serverError(res, error);
@@ -115,13 +155,18 @@ router.delete('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest
     const existing = await pool.query('SELECT * FROM programs WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Program not found' });
 
+    // Enrollment lives in member_programs; "programType" is the denormalized
+    // primary program. Check both, or a multi-program participant slips through.
     const membersCount = await pool.query(
-      `SELECT COUNT(*) as count FROM members WHERE "programType" = $1`,
-      [existing.rows[0].name]
+      `SELECT COUNT(DISTINCT m.id)::int AS count FROM members m
+       WHERE m."programType" = $1
+          OR EXISTS (SELECT 1 FROM member_programs mp WHERE mp."memberId" = m.id AND mp."programId" = $2)
+          OR m."programInterestId" = $2`,
+      [existing.rows[0].name, id]
     );
-    if (parseInt(membersCount.rows[0].count) > 0) {
+    if (membersCount.rows[0].count > 0) {
       return res.status(400).json({
-        error: `Cannot delete program. ${membersCount.rows[0].count} member(s) are currently enrolled.`,
+        error: `Cannot delete program. ${membersCount.rows[0].count} contact(s) are enrolled or interested.`,
       });
     }
 

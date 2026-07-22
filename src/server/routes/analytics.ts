@@ -52,26 +52,34 @@ router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
 
     const params: any[] = [];
     let sql = `SELECT
-        id,
-        "accountStatus",
-        "programType",
-        "locationId",
-        "createdAt",
-        "updatedAt"
-      FROM members
+        m.id,
+        m."accountStatus",
+        m."programType",
+        m."locationId",
+        m."createdAt",
+        m."updatedAt",
+        COALESCE((
+          SELECT array_agg(p.name) FROM member_programs mp
+          JOIN programs p ON p.id = mp."programId"
+          WHERE mp."memberId" = m.id
+        ), ARRAY[]::text[]) AS "programNames"
+      FROM members m
       WHERE 1=1`;
 
     if (locationId && locationId !== 'all') {
       params.push(locationId);
-      sql += ` AND "locationId" = $${params.length}`;
+      sql += ` AND m."locationId" = $${params.length}`;
     }
 
-    sql += ' ORDER BY "createdAt" ASC';
+    sql += ' ORDER BY m."createdAt" ASC';
 
     let members: any[] = (await pool.query(sql, params)).rows;
 
+    // Match on actual enrollment (member_programs) as well as the denormalized
+    // primary program, so participants training in several aren't dropped.
     if (program && program !== 'all') {
-      members = members.filter(m => m.programType === program);
+      members = members.filter(m =>
+        (Array.isArray(m.programNames) && m.programNames.includes(program)) || m.programType === program);
     }
 
     const now = new Date();
@@ -187,15 +195,36 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         m."updatedAt",
         m."pricingPlanId",
         m."memberType",
-        m."membershipId",
-        ms."priceAmount" AS "membershipPrice",
+        m."accountHolderId",
         pp.amount AS "planAmount",
         pp."billingInterval",
         pp."intervalCount",
-        pp.name AS "planName"
+        pp.name AS "planName",
+        -- Recurring revenue is the sum of the ACTIVE SEATS this contact pays
+        -- for, not a single plan price: an account holder buys one seat per
+        -- participant they cover, so 2 kids on the same plan bill twice.
+        COALESCE((
+          SELECT SUM(s."priceAmount") FROM membership_seats s
+          WHERE s."accountHolderId" = m.id AND s.status = 'active'
+        ), 0) AS "seatRevenue",
+        COALESCE((
+          SELECT COUNT(*) FROM membership_seats s
+          WHERE s."accountHolderId" = m.id AND s.status = 'active'
+        ), 0) AS "seatCount",
+        -- Quick Starts are one-time trial revenue, counted where they were sold.
+        COALESCE((
+          SELECT SUM(q."priceAmount") FROM quick_start_enrollments q
+          WHERE q."memberId" = m.id AND q.status IN ('active', 'converted')
+        ), 0) AS "quickStartRevenue",
+        -- Programs a contact actually trains in (member_programs is the source
+        -- of truth; a participant may be in several).
+        COALESCE((
+          SELECT array_agg(p.name) FROM member_programs mp
+          JOIN programs p ON p.id = mp."programId"
+          WHERE mp."memberId" = m.id
+        ), ARRAY[]::text[]) AS "programNames"
       FROM members m
       LEFT JOIN pricing_plans pp ON m."pricingPlanId" = pp.id
-      LEFT JOIN memberships ms ON m."membershipId" = ms.id
       WHERE 1=1`;
 
     if (locationId && locationId !== 'all') {
@@ -204,6 +233,12 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     }
 
     const allMembers: any[] = (await pool.query(sql, params)).rows;
+
+    // A contact counts toward a program if they train in it (member_programs,
+    // which supports several) or it's their denormalized primary program.
+    // Using programType alone under-counts every multi-program participant.
+    const inProgram = (m: any, program: string) =>
+      (Array.isArray(m.programNames) && m.programNames.includes(program)) || m.programType === program;
     const membersByStatus = {
       member: allMembers.filter(m => m.accountStatus === 'member').length,
       trialer: allMembers.filter(m => m.accountStatus === 'trialer').length,
@@ -238,7 +273,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       const dataPoint: any = { month: period.label };
 
       programs.forEach(program => {
-        const programMembers = allMembers.filter(m => m.programType === program);
+        const programMembers = allMembers.filter(m => inProgram(m, program));
 
         // Count trials started in this month
         const trialsStarted = programMembers.filter(m => {
@@ -282,7 +317,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       programs.forEach(program => {
         const newLeads = allMembers.filter(m => {
           const createdAt = new Date(m.createdAt);
-          return m.programType === program &&
+          return inProgram(m, program) &&
             createdAt >= period.start && createdAt <= period.end;
         }).length;
 
@@ -313,7 +348,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         // Active members at end of period
         const activeMembers = allMembers.filter(m => {
           const memberDate = m.memberStartDate ? new Date(m.memberStartDate) : new Date(m.createdAt);
-          return m.programType === program &&
+          return inProgram(m, program) &&
             m.accountStatus === 'member' &&
             memberDate <= period.end;
         }).length;
@@ -342,19 +377,21 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
-    // Monthly recurring revenue for a member: only active account holders carry
-    // a priced membership. Participants belong to programs (no price) and add $0.
-    const memberMonthly = (m: any): number =>
-      m.accountStatus === 'member'
-        && (m.memberType || 'account_holder') === 'account_holder'
-        && m.membershipPrice
-        ? m.membershipPrice / 100
-        : 0;
+    // Monthly recurring revenue for a contact: the sum of the active membership
+    // seats they pay for. Seats hang off account holders, so participants add $0
+    // here — their cost is already counted on their account holder's row and
+    // double-counting it would inflate MRR by the size of every family.
+    const memberMonthly = (m: any): number => Number(m.seatRevenue || 0) / 100;
+
+    // One-time Quick Start revenue. Held by account holders and participants
+    // alike, and never recurring, so it's reported separately from MRR.
+    const quickStartRevenue = allMembers.reduce(
+      (sum, m) => sum + Number(m.quickStartRevenue || 0) / 100, 0);
 
     // Summary statistics
     const summary = {
       programs: programs.map(program => {
-        const programMembers = allMembers.filter(m => m.programType === program);
+        const programMembers = allMembers.filter(m => inProgram(m, program));
         const activeMembers = programMembers.filter(m => m.accountStatus === 'member');
         const currentTrials = programMembers.filter(m => m.accountStatus === 'trialer').length;
         const currentLeads = programMembers.filter(m => m.accountStatus === 'lead').length;
@@ -384,13 +421,25 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         }).length,
         mrr: Math.round(allMembers.reduce((sum, m) => sum + memberMonthly(m), 0) * 100) / 100,
         arr: Math.round(allMembers.reduce((sum, m) => sum + memberMonthly(m), 0) * 12 * 100) / 100,
+        // One-time Quick Start revenue, reported apart from MRR so recurring and
+        // non-recurring money are never conflated.
+        quickStartRevenue: Math.round(quickStartRevenue * 100) / 100,
+        activeSeats: allMembers.reduce((sum, m) => sum + Number(m.seatCount || 0), 0),
+        // What the average paying account actually costs — the number that makes
+        // "2 kids on Basic" visible rather than averaging it away per contact.
+        avgRevenuePerAccount: (() => {
+          const paying = allMembers.filter(m => Number(m.seatRevenue || 0) > 0);
+          if (paying.length === 0) return 0;
+          const total = paying.reduce((sum, m) => sum + memberMonthly(m), 0);
+          return Math.round((total / paying.length) * 100) / 100;
+        })(),
       },
     };
 
     // Program distribution for pie chart
     const programDistribution = programs.map(program => ({
       name: program,
-      value: allMembers.filter(m => m.programType === program && m.accountStatus === 'member').length,
+      value: allMembers.filter(m => inProgram(m, program) && m.accountStatus === 'member').length,
     }));
 
     // Zapier webhook activity by month — from log table so duplicates are tracked too

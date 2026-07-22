@@ -108,7 +108,9 @@ async function initializeDatabase() {
         email TEXT UNIQUE NOT NULL,
         phone TEXT,
         "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member', 'cancelled')),
-        "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
+        -- DEPRECATED: superseded by membership_seats. Kept nullable because the
+        -- CSV importer and lead intake paths still write it.
+        "accountType" TEXT DEFAULT 'basic',
         "programType" TEXT,
         "membershipAge" TEXT NOT NULL CHECK("membershipAge" IN ('Adult', 'Kids')),
         ranking TEXT NOT NULL,
@@ -929,12 +931,14 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`);
+    // DEPRECATED (see the membership_seats block below): retained only because
+    // the MyStudio CSV importer still writes them. Not a source of revenue.
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipName" TEXT`);
-    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
     // Memberships carry the recurring price (monthly, in cents). Account holders
-    // hold a membership; this is the single source of MRR/ARR. Programs are part
-    // of a membership and have no price of their own.
+    // buy one seat per participant they're covering; membership_seats is the
+    // single source of MRR/ARR. Programs have no price of their own beyond their
+    // Quick Start.
     await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "priceAmount" INTEGER DEFAULT 0`);
 
     // Drop all programType CHECK constraints and NOT NULL on members — validation handled in application layer
@@ -1243,24 +1247,103 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "smsOptOut" BOOLEAN DEFAULT false`).catch(() => {});
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "smsOptOutAt" TIMESTAMP`).catch(() => {});
 
-    // ── Trial programs ─────────────────────────────────────────────────────────
-    // Separate catalog of trial offerings (distinct from regular programs).
-    // A trialer's profile points at one trial program.
+    // ── Stage / product model ──────────────────────────────────────────────────
+    // Contacts move through three stages (members."accountStatus"): lead →
+    // trialer → member. Each stage exposes exactly one product:
+    //
+    //   Lead    → Program Interest        (members."programInterestId")
+    //   Trial   → Quick Start             (quick_start_enrollments)
+    //   Member  → Membership Type ($)     (membership_seats, held by the account
+    //             holder) and Programs    (member_programs, per participant)
+    //
+    // Every martial art IS a program, and every program has a Quick Start — so a
+    // Quick Start is a property of a program rather than a separate catalog. The
+    // old trial_programs table is retired here.
+    await client.query(`ALTER TABLE members DROP COLUMN IF EXISTS "trialProgramId"`).catch(() => {});
+    await client.query(`DROP TABLE IF EXISTS trial_programs`).catch(() => {});
+
+    // Programs: age grouping (Kids/Adult programs) + the program's Quick Start.
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "ageGroup" TEXT DEFAULT 'All'`).catch(() => {});
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartPriceAmount" INTEGER DEFAULT 0`).catch(() => {});
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartDurationDays" INTEGER DEFAULT 30`).catch(() => {});
+    // programs."membershipId" encoded program→membership, which is the wrong
+    // direction now: a membership grants a NUMBER of programs, not specific ones.
+    await client.query(`ALTER TABLE programs DROP COLUMN IF EXISTS "membershipId"`).catch(() => {});
+
+    // Membership types are the priced "licenses" an account holder buys.
+    // "maxProgramsPerParticipant" NULL = unlimited; "isFamilyPlan" means a single
+    // seat covers every participant on the account rather than just one.
+    await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "isFamilyPlan" BOOLEAN DEFAULT false`).catch(() => {});
+    await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "maxProgramsPerParticipant" INTEGER DEFAULT 1`).catch(() => {});
+
+    // Leads express interest in a program (captured from the lead form field).
     await client.query(`
-      CREATE TABLE IF NOT EXISTS trial_programs (
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "programInterestId" INTEGER
+          REFERENCES programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
+    // ── Membership seats ───────────────────────────────────────────────────────
+    // One row = one purchased seat/license. The account holder pays for it; the
+    // participant occupying it trains under it. A family-plan seat leaves
+    // "participantId" NULL and covers everyone on the account.
+    //
+    // "priceAmount" is snapshotted at purchase so that editing a price in
+    // Settings never silently rewrites historical revenue.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS membership_seats (
         id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        "isActive" BOOLEAN DEFAULT true,
+        "accountHolderId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "membershipId" INTEGER NOT NULL REFERENCES memberships(id) ON DELETE RESTRICT,
+        "participantId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        "priceAmount" INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'cancelled')),
+        "startDate" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "endDate" TIMESTAMP,
+        "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_membership_seats_holder ON membership_seats("accountHolderId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_membership_seats_participant ON membership_seats("participantId")`);
+    // A participant can occupy at most one active seat.
     await client.query(`
-      DO $$ BEGIN
-        ALTER TABLE members ADD COLUMN IF NOT EXISTS "trialProgramId" INTEGER
-          REFERENCES trial_programs(id) ON DELETE SET NULL;
-      EXCEPTION WHEN others THEN NULL; END $$;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_membership_seats_one_active_per_participant
+        ON membership_seats("participantId") WHERE "participantId" IS NOT NULL AND status = 'active'
+    `).catch(() => {});
+
+    // ── Quick Start enrollments ────────────────────────────────────────────────
+    // A trialer's paid Quick Start into one program. Held by account holders and
+    // participants alike. Price is snapshotted from the program at enrollment.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quick_start_enrollments (
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "programId" INTEGER REFERENCES programs(id) ON DELETE SET NULL,
+        "priceAmount" INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'converted', 'expired')),
+        "startDate" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "endDate" TIMESTAMP,
+        "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
     `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_member ON quick_start_enrollments("memberId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_program ON quick_start_enrollments("programId")`);
+
+    // DEPRECATED, retained deliberately: "accountType", "membershipId" and
+    // "membershipName" are superseded by membership_seats — a contact's plan is
+    // no longer a single value, since an account holder buys one seat per
+    // participant. Nothing reads them for money any more (see analytics.ts).
+    //
+    // They are NOT dropped because the MyStudio CSV importer and several lead
+    // intake paths still write them via positional SQL; dropping would break
+    // those inserts. Relax the constraints instead so new code can ignore them.
+    await client.query(`ALTER TABLE members ALTER COLUMN "accountType" DROP NOT NULL`).catch(() => {});
+    await client.query(`ALTER TABLE members ALTER COLUMN "accountType" SET DEFAULT 'basic'`).catch(() => {});
 
     // "Student Details" export fields (payments / portal / contact recency)
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalPayments" NUMERIC DEFAULT 0`);

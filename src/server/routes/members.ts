@@ -3,25 +3,48 @@ import { auditLog } from '../utils/audit';
 import { Router } from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { SEAT_SELECT, programLimitFor } from './membership-seats';
 
 const router = Router();
 
 const TRACKED_FIELDS = [
   'firstName', 'lastName', 'email', 'phone',
-  'accountStatus', 'accountType', 'programType', 'membershipAge',
+  'accountStatus', 'programType', 'membershipAge',
   'ranking', 'leadSource', 'notes', 'locationId',
-  'pricingPlanId', 'membershipId', 'membershipName',
+  'pricingPlanId', 'programInterestId',
   'trialStartDate', 'memberStartDate', 'companyName',
 ] as const;
+
+// Stage → which product a contact may carry. Leads express interest only;
+// trialers hold a Quick Start; members hold seats (account holders) and program
+// enrollments (participants). Enforced server-side so the greyed-out UI can't
+// simply be bypassed by posting the field directly.
+export const STAGE_ORDER = ['lead', 'trialer', 'member'] as const;
+export type Stage = typeof STAGE_ORDER[number];
+
+export function stageAllows(stage: string, product: 'programInterest' | 'quickStart' | 'membership' | 'programs') {
+  switch (product) {
+    case 'programInterest': return true;                       // interest survives the whole journey
+    case 'quickStart':      return stage === 'trialer' || stage === 'member';
+    case 'membership':
+    case 'programs':        return stage === 'member';
+    default:                return false;
+  }
+}
 
 async function logHistory(
   memberId: number,
   action: string,
   changes: Record<string, { from: any; to: any }> | null,
-  user: { id: number; firstName: string; lastName: string } | null | undefined,
+  // Matches AuthRequest['user'] (middleware/auth.ts) — it carries `username`,
+  // not first/last name. firstName/lastName are accepted for callers that pass a
+  // fuller record. Previously this only read firstName/lastName, so every row
+  // logged from req.user recorded the actor as "undefined undefined".
+  user: { id: number; username?: string; firstName?: string; lastName?: string } | null | undefined,
   userName?: string,
 ) {
-  const name = userName ?? (user ? `${user.firstName} ${user.lastName}`.trim() : 'System');
+  const fullName = user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : '';
+  const name = userName ?? (fullName || user?.username || 'System');
   await pool.query(
     `INSERT INTO member_history ("memberId", "userId", "userName", action, changes)
      VALUES ($1, $2, $3, $4, $5)`,
@@ -72,6 +95,48 @@ async function syncParticipantPrograms(
      WHERE id = $2`,
     [primaryId, memberId],
   );
+}
+
+// Participants must hang off a real account holder — and only off an account
+// holder, never another participant (which would build an unbillable chain).
+async function validateAccountHolderLink(
+  memberType: string,
+  accountHolderId: any,
+  selfId?: number,
+): Promise<string | null> {
+  if (memberType !== 'participant') return null;
+
+  const holderId = accountHolderId ? parseInt(String(accountHolderId)) : null;
+  if (!holderId) return 'Participants must be linked to an account holder';
+  if (selfId && holderId === selfId) return 'A participant cannot be their own account holder';
+
+  const holder = await pool.query(
+    `SELECT id, "memberType" FROM members WHERE id = $1`,
+    [holderId],
+  );
+  if (holder.rows.length === 0) return 'Account holder not found';
+  if ((holder.rows[0].memberType || 'account_holder') !== 'account_holder') {
+    return 'Participants must be linked to an account holder, not another participant';
+  }
+  return null;
+}
+
+// A seat grants a fixed number of programs (NULL = unlimited, e.g. a family
+// plan). Enforce it here so the entitlement can't be exceeded by direct POST.
+async function enforceProgramLimit(member: any, programIds: number[] | undefined): Promise<string | null> {
+  if (!Array.isArray(programIds) || programIds.length === 0) return null;
+
+  // An account holder training on their own seat has no accountHolderId, so
+  // their own id is the account to look up family-plan coverage against.
+  const accountId = member.accountHolderId ?? member.id;
+  const { hasSeat, limit } = await programLimitFor(member.id, accountId);
+  if (!hasSeat) {
+    return 'This contact has no active membership seat. Assign one before enrolling them in programs.';
+  }
+  if (limit !== null && programIds.length > limit) {
+    return `Their membership covers ${limit} program${limit === 1 ? '' : 's'}. Upgrade the seat to enroll in ${programIds.length}.`;
+  }
+  return null;
 }
 
 function diffMember(oldRow: any, newValues: Record<string, any>) {
@@ -241,6 +306,26 @@ router.get('/:id', async (req: AuthRequest, res) => {
       member.accountHolder = ahResult.rows[0] || null;
     }
 
+    // Seats: what an account holder pays for, and which seat covers a
+    // participant. This is what drives the cost shown on the profile.
+    const accountId = member.accountHolderId ?? member.id;
+    member.seats = (await pool.query(
+      `${SEAT_SELECT} WHERE s."accountHolderId" = $1 AND s.status = 'active' ORDER BY s."createdAt" ASC`,
+      [accountId],
+    )).rows;
+    member.monthlyCost = member.seats.reduce((sum: number, s: any) => sum + (s.priceAmount || 0), 0);
+    member.programLimit = await programLimitFor(member.id, accountId);
+
+    // Active Quick Start (the Trial-stage product), if any.
+    member.quickStart = (await pool.query(
+      `SELECT q.*, p.name AS "programName"
+       FROM quick_start_enrollments q
+       LEFT JOIN programs p ON p.id = q."programId"
+       WHERE q."memberId" = $1 AND q.status = 'active'
+       ORDER BY q."createdAt" DESC LIMIT 1`,
+      [member.id],
+    )).rows[0] || null;
+
     res.json(member);
   } catch (error) {
     console.error('Get member error:', error);
@@ -274,7 +359,7 @@ router.post('/', async (req: AuthRequest, res) => {
       memberType,
       accountHolderId,
       programIds,
-      trialProgramId,
+      programInterestId,
     } = req.body;
 
     const resolvedMemberType = memberType || 'account_holder';
@@ -287,6 +372,12 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Email is required for account holders' });
     }
 
+    // A participant is always attached to an account holder — that's what makes
+    // them a participant. Without this, orphaned participants never roll up into
+    // an account's cost and quietly vanish from revenue.
+    const holderCheck = await validateAccountHolderLink(resolvedMemberType, accountHolderId);
+    if (holderCheck) return res.status(400).json({ error: holderCheck });
+
     if (email) {
       const existing = await pool.query('SELECT id FROM members WHERE email = $1', [email]);
       if (existing.rows.length > 0) {
@@ -296,20 +387,21 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const insertResult = await pool.query(
       `INSERT INTO members (
-        "firstName", "lastName", email, phone, "accountStatus", "accountType",
+        "firstName", "lastName", email, phone, "accountStatus",
         "programType", "membershipAge", ranking, "leadSource", "dateOfBirth", "emergencyContact",
         "emergencyPhone", notes, tags, "locationId", "trialStartDate", "memberStartDate",
-        "pricingPlanId", "companyName", "memberType", "accountHolderId"
+        "pricingPlanId", "companyName", "memberType", "accountHolderId", "programInterestId"
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
       RETURNING *`,
       [
-        firstName, lastName, email || null, phone || null, accountStatus, accountType || 'basic',
+        firstName, lastName, email || null, phone || null, accountStatus,
         programType || 'No Program Selected', membershipAge || 'Adult', ranking || 'White',
         leadSource || null, dateOfBirth || null, emergencyContact || null,
         emergencyPhone || null, notes || null, tags || null, locationId || null,
         trialStartDate || null, memberStartDate || null,
         pricingPlanId || null, companyName || null,
         resolvedMemberType, accountHolderId ? parseInt(accountHolderId) : null,
+        programInterestId ? parseInt(programInterestId) : null,
       ]
     );
 
@@ -324,13 +416,10 @@ router.post('/', async (req: AuthRequest, res) => {
       [created.id, created.email]
     ).catch(() => {});
 
-    // Sync the participant's program assignments (many-to-many)
-    await syncParticipantPrograms(created.id, resolvedMemberType, programIds, created.programType).catch(() => {});
-
-    // Trial program (for trialers)
-    if (trialProgramId !== undefined) {
-      await pool.query(`UPDATE members SET "trialProgramId" = $1 WHERE id = $2`, [trialProgramId || null, created.id]).catch(() => {});
-      created.trialProgramId = trialProgramId || null;
+    // Sync the participant's program assignments (many-to-many). Only members
+    // enroll in programs; earlier stages carry a Program Interest instead.
+    if (stageAllows(created.accountStatus, 'programs')) {
+      await syncParticipantPrograms(created.id, resolvedMemberType, programIds, created.programType).catch(() => {});
     }
 
     res.status(201).json(created);
@@ -364,12 +453,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
       memberStartDate,
       pricingPlanId,
       companyName,
-      membershipId,
-      membershipName,
       memberType,
       accountHolderId,
       programIds,
-      trialProgramId,
+      programInterestId,
     } = req.body;
 
     const existing = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
@@ -378,37 +465,45 @@ router.put('/:id', async (req: AuthRequest, res) => {
     }
     const oldRow = existing.rows[0];
 
+    const nextMemberType = memberType || oldRow.memberType || 'account_holder';
+    const nextHolderId = accountHolderId !== undefined
+      ? (accountHolderId ? parseInt(accountHolderId) : null)
+      : oldRow.accountHolderId;
+
+    const holderCheck = await validateAccountHolderLink(nextMemberType, nextHolderId, Number(id));
+    if (holderCheck) return res.status(400).json({ error: holderCheck });
+
     const updateResult = await pool.query(
       `UPDATE members SET
         "firstName" = $1, "lastName" = $2, email = $3, phone = $4,
-        "accountStatus" = $5, "accountType" = $6, "programType" = $7,
-        "membershipAge" = $8, ranking = $9, "leadSource" = $10, "dateOfBirth" = $11,
-        "emergencyContact" = $12, "emergencyPhone" = $13, notes = $14, tags = $15,
-        "locationId" = $16, "trialStartDate" = $17, "memberStartDate" = $18,
-        "pricingPlanId" = $19, "companyName" = $20,
-        "membershipId" = $21, "membershipName" = $22,
-        "memberType" = $23, "accountHolderId" = $24,
+        "accountStatus" = $5, "programType" = $6,
+        "membershipAge" = $7, ranking = $8, "leadSource" = $9, "dateOfBirth" = $10,
+        "emergencyContact" = $11, "emergencyPhone" = $12, notes = $13, tags = $14,
+        "locationId" = $15, "trialStartDate" = $16, "memberStartDate" = $17,
+        "pricingPlanId" = $18, "companyName" = $19,
+        "memberType" = $20, "accountHolderId" = $21, "programInterestId" = $22,
         "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $25
+      WHERE id = $23
       RETURNING *`,
       [
-        firstName, lastName, email || null, phone, accountStatus, accountType || 'basic',
+        firstName, lastName, email || null, phone, accountStatus,
         programType, membershipAge, ranking, leadSource || null, dateOfBirth || null,
         emergencyContact || null, emergencyPhone || null, notes || null, tags || null,
         locationId || null, trialStartDate || null, memberStartDate || null,
         pricingPlanId || null, companyName || null,
-        membershipId || null, membershipName || null,
-        memberType || oldRow.memberType || 'account_holder',
-        accountHolderId !== undefined ? (accountHolderId ? parseInt(accountHolderId) : null) : oldRow.accountHolderId,
+        nextMemberType, nextHolderId,
+        programInterestId !== undefined
+          ? (programInterestId ? parseInt(programInterestId) : null)
+          : oldRow.programInterestId,
         id,
       ]
     );
 
     const updated = updateResult.rows[0];
     const changes = diffMember(oldRow, {
-      firstName, lastName, email, phone, accountStatus, accountType,
+      firstName, lastName, email, phone, accountStatus,
       programType, membershipAge, ranking, leadSource, notes, locationId,
-      pricingPlanId, companyName, membershipId, membershipName,
+      pricingPlanId, companyName, programInterestId,
       trialStartDate, memberStartDate,
     });
     if (changes) {
@@ -416,19 +511,182 @@ router.put('/:id', async (req: AuthRequest, res) => {
       await logHistory(updated.id, action, changes, req.user).catch(() => {});
     }
 
-    // Sync the participant's program assignments (many-to-many)
-    await syncParticipantPrograms(updated.id, updated.memberType, programIds, updated.programType).catch(() => {});
+    // Program enrollment is a Member-stage product. Dropping back to Lead/Trial
+    // clears it so a downgraded contact can't keep training on a lapsed seat.
+    if (stageAllows(updated.accountStatus, 'programs')) {
+      const limitProblem = await enforceProgramLimit(updated, programIds);
+      if (limitProblem) return res.status(400).json({ error: limitProblem });
+      await syncParticipantPrograms(updated.id, updated.memberType, programIds, updated.programType).catch(() => {});
+    } else {
+      await pool.query(`DELETE FROM member_programs WHERE "memberId" = $1`, [updated.id]).catch(() => {});
+    }
 
-    // Trial program (for trialers)
-    if (trialProgramId !== undefined) {
-      await pool.query(`UPDATE members SET "trialProgramId" = $1 WHERE id = $2`, [trialProgramId || null, updated.id]).catch(() => {});
-      updated.trialProgramId = trialProgramId || null;
+    // Leaving the Member stage ends any active seats — otherwise a cancelled
+    // contact keeps contributing to MRR forever.
+    if (oldRow.accountStatus === 'member' && updated.accountStatus !== 'member') {
+      await pool.query(
+        `UPDATE membership_seats
+         SET status = 'cancelled', "endDate" = COALESCE("endDate", CURRENT_TIMESTAMP), "updatedAt" = CURRENT_TIMESTAMP
+         WHERE status = 'active' AND ("accountHolderId" = $1 OR "participantId" = $1)`,
+        [updated.id],
+      ).catch(() => {});
     }
 
     res.json(updated);
   } catch (error: any) {
     console.error('Update member error:', error);
     serverError(res, error);
+  }
+});
+
+// One-click stage advance: lead → trialer → member.
+//
+// Each step needs the product for the stage it lands on, so the whole thing runs
+// in one transaction: a half-converted contact (Member stage, no seat) would sit
+// in the roster contributing nothing to MRR and be invisible to reconcile.
+//
+//   lead → trialer : requires programId; opens a priced Quick Start
+//   trialer → member: requires membershipId; buys a seat and closes the Quick Start
+router.post('/:id/convert', async (req: AuthRequest, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { programId, membershipId, programIds } = req.body;
+
+    const existing = await client.query('SELECT * FROM members WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
+    const member = existing.rows[0];
+
+    const currentIndex = STAGE_ORDER.indexOf(member.accountStatus);
+    if (currentIndex === -1) {
+      return res.status(400).json({ error: `A ${member.accountStatus} contact cannot be converted` });
+    }
+    if (currentIndex >= STAGE_ORDER.length - 1) {
+      return res.status(400).json({ error: 'This contact is already at the Member stage' });
+    }
+    const nextStage = STAGE_ORDER[currentIndex + 1];
+    const isParticipant = (member.memberType || 'account_holder') === 'participant';
+
+    await client.query('BEGIN');
+
+    if (nextStage === 'trialer') {
+      if (!programId) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Pick a Quick Start program to convert this lead to Trial' });
+      }
+      const prog = await client.query(`SELECT * FROM programs WHERE id = $1`, [programId]);
+      if (prog.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Program not found' });
+      }
+      const program = prog.rows[0];
+      const days = Number(program.quickStartDurationDays) || 30;
+
+      await client.query(
+        `INSERT INTO quick_start_enrollments
+           ("memberId", "programId", "priceAmount", status, "startDate", "endDate", "locationId")
+         VALUES ($1, $2, $3, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + ($4 || ' days')::interval, $5)`,
+        [member.id, program.id, program.quickStartPriceAmount || 0, String(days), member.locationId || null],
+      );
+
+      await client.query(
+        `UPDATE members SET "accountStatus" = 'trialer',
+           "trialStartDate" = COALESCE("trialStartDate", CURRENT_TIMESTAMP),
+           "programType" = $2,
+           "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [member.id, program.name],
+      );
+    }
+
+    if (nextStage === 'member') {
+      // Only account holders buy seats. A participant converting to Member is
+      // covered by a seat on their account holder, which must already exist.
+      if (isParticipant) {
+        const seat = await client.query(
+          `SELECT s.id FROM membership_seats s
+           JOIN memberships ms ON ms.id = s."membershipId"
+           WHERE s.status = 'active'
+             AND (s."participantId" = $1 OR (ms."isFamilyPlan" = true AND s."accountHolderId" = $2))
+           LIMIT 1`,
+          [member.id, member.accountHolderId],
+        );
+        if (seat.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: 'No membership seat covers this participant. Add a seat on their account holder first.',
+          });
+        }
+      } else {
+        if (!membershipId) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Pick a Membership Type to convert this trial to Member' });
+        }
+        const ms = await client.query(`SELECT * FROM memberships WHERE id = $1`, [membershipId]);
+        if (ms.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Membership type not found' });
+        }
+        const membership = ms.rows[0];
+
+        await client.query(
+          `INSERT INTO membership_seats
+             ("accountHolderId", "membershipId", "participantId", "priceAmount", status, "locationId")
+           VALUES ($1, $2, $3, $4, 'active', $5)`,
+          [
+            member.id,
+            membership.id,
+            // A family seat covers the account, so it binds to nobody. A regular
+            // seat bought during conversion is for the account holder themself.
+            membership.isFamilyPlan ? null : member.id,
+            membership.priceAmount || 0,
+            member.locationId || null,
+          ],
+        );
+      }
+
+      await client.query(
+        `UPDATE quick_start_enrollments SET status = 'converted', "updatedAt" = CURRENT_TIMESTAMP
+         WHERE "memberId" = $1 AND status = 'active'`,
+        [member.id],
+      );
+
+      await client.query(
+        `UPDATE members SET "accountStatus" = 'member',
+           "memberStartDate" = COALESCE("memberStartDate", CURRENT_TIMESTAMP),
+           "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [member.id],
+      );
+
+      if (Array.isArray(programIds) && programIds.length > 0) {
+        await client.query(`DELETE FROM member_programs WHERE "memberId" = $1`, [member.id]);
+        for (const pid of programIds.map(Number).filter(Number.isFinite)) {
+          await client.query(
+            `INSERT INTO member_programs ("memberId", "programId") VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [member.id, pid],
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+
+    await logHistory(
+      member.id,
+      'status_changed',
+      { accountStatus: { from: member.accountStatus, to: nextStage } },
+      req.user,
+    ).catch(() => {});
+
+    const updated = await pool.query('SELECT * FROM members WHERE id = $1', [member.id]);
+    res.json(updated.rows[0]);
+  } catch (error: any) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Convert member error:', error);
+    serverError(res, error);
+  } finally {
+    client.release();
   }
 });
 

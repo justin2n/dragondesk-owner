@@ -24,8 +24,8 @@ import abAnalyticsRoutes from './routes/ab-analytics';
 import dkimRoutes from './routes/dkim';
 import analyticsRoutes from './routes/analytics';
 import programsRoutes from './routes/programs';
-import trialProgramsRoutes from './routes/trial-programs';
 import membershipsRoutes from './routes/memberships';
+import membershipSeatsRoutes from './routes/membership-seats';
 import smsCampaignsRoutes from './routes/sms-campaigns';
 import leadFormsRoutes from './routes/lead-forms';
 import churnMetricsRoutes from './routes/churn-metrics';
@@ -323,8 +323,8 @@ app.use('/api/ab-analytics', abAnalyticsRoutes);
 app.use('/api/dkim', dkimRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/programs', programsRoutes);
-app.use('/api/trial-programs', trialProgramsRoutes);
 app.use('/api/memberships', membershipsRoutes);
+app.use('/api/membership-seats', membershipSeatsRoutes);
 app.use('/api/sms-campaigns', smsCampaignsRoutes);
 app.use('/api/lead-forms', leadFormsRoutes);
 app.use('/api/churn-metrics', churnMetricsRoutes);
@@ -387,10 +387,28 @@ app.post('/api/public/lead', publicLeadLimiter, async (req, res) => {
     if (!firstName || !email) return res.status(400).json({ error: 'Name and email required' });
     if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
 
+    // Program Interest is the Lead-stage product, and the lead form's program
+    // field is where it comes from. Match it to a configured program so the
+    // lead lands with a real interest instead of an unusable free-text string.
+    let programInterestId: number | null = null;
+    let programName = 'No Program Selected';
+    if (program && String(program).trim()) {
+      const match = await pool.query(
+        `SELECT id, name FROM programs WHERE lower(name) = lower($1) LIMIT 1`,
+        [String(program).trim()],
+      );
+      if (match.rows[0]) {
+        programInterestId = match.rows[0].id;
+        programName = match.rows[0].name;
+      }
+    }
+
     await pool.query(
-      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "accountType", "programType", "membershipAge", ranking, "companyName", notes, "gaClientId")
-       VALUES ($1, $2, $3, $4, 'lead', 'basic', 'No Program Selected', 'Adult', 'White', $5, $6, $7)
-       ON CONFLICT (email) DO UPDATE SET "gaClientId" = EXCLUDED."gaClientId" WHERE members."gaClientId" IS NULL`,
+      `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "programType", "membershipAge", ranking, "companyName", notes, "gaClientId", "programInterestId")
+       VALUES ($1, $2, $3, $4, 'lead', $8, 'Adult', 'White', $5, $6, $7, $9)
+       ON CONFLICT (email) DO UPDATE SET
+         "gaClientId" = COALESCE(members."gaClientId", EXCLUDED."gaClientId"),
+         "programInterestId" = COALESCE(members."programInterestId", EXCLUDED."programInterestId")`,
       [
         firstName.trim(),
         (lastName || '').trim(),
@@ -399,6 +417,8 @@ app.post('/api/public/lead', publicLeadLimiter, async (req, res) => {
         studio || null,
         message || null,
         gaClientId || null,
+        programName,
+        programInterestId,
       ]
     );
     res.json({ success: true });
