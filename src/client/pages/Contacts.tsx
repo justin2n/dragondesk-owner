@@ -95,7 +95,7 @@ interface ProgramOption {
   name: string;
   ageGroup?: 'Kids' | 'Adult' | 'All';
   quickStartPriceAmount?: number | null;
-  quickStartDurationDays?: number | null;
+  quickStartClassCount?: number | null;
 }
 
 interface MembershipOption {
@@ -126,6 +126,9 @@ interface QuickStart {
   programId: number | null;
   programName: string | null;
   priceAmount: number;
+  classesIncluded: number;
+  classesUsed: number;
+  status: 'active' | 'converted' | 'expired';
   startDate: string;
   endDate: string | null;
 }
@@ -1477,10 +1480,19 @@ const Contacts = () => {
                     label="Quick Start"
                   >
                     {quickStart ? (
-                      <div className={styles.input} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <span>{quickStart.programName || 'Program removed'}</span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>{money(quickStart.priceAmount)}</span>
-                      </div>
+                      <>
+                        <div className={styles.input} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span>{quickStart.programName || 'Program removed'}</span>
+                          <span style={{ color: 'var(--color-text-secondary)' }}>{money(quickStart.priceAmount)}</span>
+                        </div>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                          {quickStart.status === 'converted'
+                            ? `Converted after ${quickStart.classesUsed} of ${quickStart.classesIncluded} classes.`
+                            : quickStart.classesUsed >= quickStart.classesIncluded
+                              ? `All ${quickStart.classesIncluded} classes used \u2014 ready to convert.`
+                              : `${quickStart.classesUsed} of ${quickStart.classesIncluded} classes used, ${quickStart.classesIncluded - quickStart.classesUsed} remaining.`}
+                        </span>
+                      </>
                     ) : (
                       <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                         {stageAllows(formData.accountStatus, 'quickStart')
@@ -2023,7 +2035,7 @@ const Contacts = () => {
                     <option value="">Select a program...</option>
                     {programs.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.name} — {money(p.quickStartPriceAmount)} for {p.quickStartDurationDays || 30} days
+                        {p.name} — {money(p.quickStartPriceAmount)} for {p.quickStartClassCount || 3} classes
                       </option>
                     ))}
                   </select>

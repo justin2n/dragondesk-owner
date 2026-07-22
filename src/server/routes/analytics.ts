@@ -212,9 +212,11 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
           WHERE s."accountHolderId" = m.id AND s.status = 'active'
         ), 0) AS "seatCount",
         -- Quick Starts are one-time trial revenue, counted where they were sold.
+        -- Every status counts: the money changes hands at enrollment, and
+        -- 'expired' is the normal end state once all the classes are used.
         COALESCE((
           SELECT SUM(q."priceAmount") FROM quick_start_enrollments q
-          WHERE q."memberId" = m.id AND q.status IN ('active', 'converted')
+          WHERE q."memberId" = m.id
         ), 0) AS "quickStartRevenue",
         -- Programs a contact actually trains in (member_programs is the source
         -- of truth; a participant may be in several).

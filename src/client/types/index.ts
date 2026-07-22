@@ -118,16 +118,20 @@ export interface MembershipSeat {
   endDate: string | null;
 }
 
-// The Trial-stage product: a priced trial into one program.
+// The Trial-stage product: a priced trial into one program, measured in
+// classes rather than days. Check-ins consume classesUsed; the trial ends when
+// it reaches classesIncluded.
 export interface QuickStartEnrollment {
   id: number;
   memberId: number;
   programId: number | null;
   programName?: string | null;
   priceAmount: number;            // cents
+  classesIncluded: number;
+  classesUsed: number;
   status: 'active' | 'converted' | 'expired';
   startDate: string;
-  endDate: string | null;
+  endDate: string | null;         // when it actually finished, not a planned expiry
 }
 
 export interface ParticipantSummary {

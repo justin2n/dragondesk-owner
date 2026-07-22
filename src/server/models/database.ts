@@ -1265,7 +1265,10 @@ async function initializeDatabase() {
     // Programs: age grouping (Kids/Adult programs) + the program's Quick Start.
     await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "ageGroup" TEXT DEFAULT 'All'`).catch(() => {});
     await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartPriceAmount" INTEGER DEFAULT 0`).catch(() => {});
-    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartDurationDays" INTEGER DEFAULT 30`).catch(() => {});
+    // A Quick Start is a fixed number of CLASSES, not a time window — it ends
+    // when the classes are used up, however long that takes.
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartClassCount" INTEGER DEFAULT 3`).catch(() => {});
+    await client.query(`ALTER TABLE programs DROP COLUMN IF EXISTS "quickStartDurationDays"`).catch(() => {});
     // programs."membershipId" encoded program→membership, which is the wrong
     // direction now: a membership grants a NUMBER of programs, not specific ones.
     await client.query(`ALTER TABLE programs DROP COLUMN IF EXISTS "membershipId"`).catch(() => {});
@@ -1315,14 +1318,19 @@ async function initializeDatabase() {
     `).catch(() => {});
 
     // ── Quick Start enrollments ────────────────────────────────────────────────
-    // A trialer's paid Quick Start into one program. Held by account holders and
-    // participants alike. Price is snapshotted from the program at enrollment.
+    // A trialer's paid Quick Start into one program: a fixed number of classes,
+    // consumed by check-ins. Held by account holders and participants alike.
+    // Price and class count are snapshotted from the program at enrollment, so
+    // later Settings edits don't retroactively change someone's live trial.
+    // "endDate" records when it actually finished, not a planned expiry.
     await client.query(`
       CREATE TABLE IF NOT EXISTS quick_start_enrollments (
         id SERIAL PRIMARY KEY,
         "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
         "programId" INTEGER REFERENCES programs(id) ON DELETE SET NULL,
         "priceAmount" INTEGER NOT NULL DEFAULT 0,
+        "classesIncluded" INTEGER NOT NULL DEFAULT 3,
+        "classesUsed" INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'converted', 'expired')),
         "startDate" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "endDate" TIMESTAMP,
@@ -1331,6 +1339,9 @@ async function initializeDatabase() {
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // Added after the table shipped with a duration-based model.
+    await client.query(`ALTER TABLE quick_start_enrollments ADD COLUMN IF NOT EXISTS "classesIncluded" INTEGER NOT NULL DEFAULT 3`).catch(() => {});
+    await client.query(`ALTER TABLE quick_start_enrollments ADD COLUMN IF NOT EXISTS "classesUsed" INTEGER NOT NULL DEFAULT 0`).catch(() => {});
     await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_member ON quick_start_enrollments("memberId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_program ON quick_start_enrollments("programId")`);
 

@@ -55,7 +55,8 @@ interface Program {
   ageGroup?: 'Kids' | 'Adult' | 'All';
   // Every martial art has a Quick Start — the priced trial into this program.
   quickStartPriceAmount?: number | null; // cents
-  quickStartDurationDays?: number | null;
+  // A Quick Start is a number of classes, not a time window.
+  quickStartClassCount?: number | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -557,7 +558,7 @@ const Settings = () => {
         ageGroup: form.programAgeGroup?.value || 'All',
         // Prices are stored in cents so rounding never drifts.
         quickStartPriceAmount: Math.round(parseFloat(form.programQuickStartPrice?.value || '0') * 100) || 0,
-        quickStartDurationDays: parseInt(form.programQuickStartDays?.value || '30') || 30,
+        quickStartClassCount: parseInt(form.programQuickStartClasses?.value || '3') || 3,
       };
 
       if (editingProgram) {
@@ -2052,7 +2053,7 @@ const Settings = () => {
                           <span className={styles.primaryBadge}>{program.ageGroup || 'All'}</span>
                           <span className={styles.primaryBadge}>
                             Quick Start ${((program.quickStartPriceAmount || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                            {' '}/ {program.quickStartDurationDays || 30}d
+                            {' '}/ {program.quickStartClassCount || 3} classes
                           </span>
                           {!program.isActive && (
                             <span className={styles.inactiveBadge}>Inactive</span>
@@ -2200,15 +2201,18 @@ const Settings = () => {
                         </div>
 
                         <div className={styles.formGroup}>
-                          <label className={styles.label}>Quick Start Length (days)</label>
+                          <label className={styles.label}>Quick Start Classes</label>
                           <input
                             type="number"
-                            name="programQuickStartDays"
+                            name="programQuickStartClasses"
                             min="1"
                             step="1"
-                            defaultValue={editingProgram?.quickStartDurationDays ?? 30}
+                            defaultValue={editingProgram?.quickStartClassCount ?? 3}
                             className={styles.input}
                           />
+                          <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                            How many classes the trial includes. It ends once they're used up, however long that takes.
+                          </p>
                         </div>
                       </div>
 

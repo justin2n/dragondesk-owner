@@ -316,13 +316,15 @@ router.get('/:id', async (req: AuthRequest, res) => {
     member.monthlyCost = member.seats.reduce((sum: number, s: any) => sum + (s.priceAmount || 0), 0);
     member.programLimit = await programLimitFor(member.id, accountId);
 
-    // Active Quick Start (the Trial-stage product), if any.
+    // Most recent Quick Start (the Trial-stage product). Deliberately not
+    // filtered to 'active': a used-up trial is exactly what staff need to see
+    // when deciding whether to convert someone.
     member.quickStart = (await pool.query(
       `SELECT q.*, p.name AS "programName"
        FROM quick_start_enrollments q
        LEFT JOIN programs p ON p.id = q."programId"
-       WHERE q."memberId" = $1 AND q.status = 'active'
-       ORDER BY q."createdAt" DESC LIMIT 1`,
+       WHERE q."memberId" = $1
+       ORDER BY (q.status = 'active') DESC, q."createdAt" DESC LIMIT 1`,
       [member.id],
     )).rows[0] || null;
 
@@ -580,13 +582,16 @@ router.post('/:id/convert', async (req: AuthRequest, res) => {
         return res.status(404).json({ error: 'Program not found' });
       }
       const program = prog.rows[0];
-      const days = Number(program.quickStartDurationDays) || 30;
+      // Snapshot the class count with the price: a Quick Start runs until its
+      // classes are used, so changing the program later must not shorten or
+      // extend a trial someone is already partway through.
+      const classes = Number(program.quickStartClassCount) || 3;
 
       await client.query(
         `INSERT INTO quick_start_enrollments
-           ("memberId", "programId", "priceAmount", status, "startDate", "endDate", "locationId")
-         VALUES ($1, $2, $3, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + ($4 || ' days')::interval, $5)`,
-        [member.id, program.id, program.quickStartPriceAmount || 0, String(days), member.locationId || null],
+           ("memberId", "programId", "priceAmount", "classesIncluded", "classesUsed", status, "startDate", "locationId")
+         VALUES ($1, $2, $3, $4, 0, 'active', CURRENT_TIMESTAMP, $5)`,
+        [member.id, program.id, program.quickStartPriceAmount || 0, classes, member.locationId || null],
       );
 
       await client.query(
@@ -645,9 +650,13 @@ router.post('/:id/convert', async (req: AuthRequest, res) => {
         );
       }
 
+      // Mark the trial converted whether or not its classes ran out first —
+      // using all 3 classes and then joining is the normal path, and it must
+      // still read as a conversion rather than an expiry.
       await client.query(
-        `UPDATE quick_start_enrollments SET status = 'converted', "updatedAt" = CURRENT_TIMESTAMP
-         WHERE "memberId" = $1 AND status = 'active'`,
+        `UPDATE quick_start_enrollments
+         SET status = 'converted', "endDate" = COALESCE("endDate", CURRENT_TIMESTAMP), "updatedAt" = CURRENT_TIMESTAMP
+         WHERE "memberId" = $1 AND status IN ('active', 'expired')`,
         [member.id],
       );
 

@@ -2,6 +2,7 @@ import express from 'express';
 import { query, get, run } from '../models/database';
 import { pool } from '../models/database';
 import { lookupMemberByQRCode } from '../services/qr-generator';
+import { consumeQuickStartClass } from '../utils/quickStart';
 
 const router = express.Router();
 
@@ -170,6 +171,10 @@ router.post('/check-in/qr', async (req, res) => {
       WHERE id = $1
     `, [member.id]);
 
+    // A Quick Start is 3 classes (or whatever the program sets), so attending a
+    // class draws one down. Non-fatal: never block a check-in over trial state.
+    await consumeQuickStartClass(member.id);
+
     // If event specified, update event_attendees (non-fatal)
     if (eventId) {
       try {
@@ -291,6 +296,10 @@ router.post('/check-in/search', async (req, res) => {
           "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = $1
     `, [memberId]);
+
+    // A Quick Start is 3 classes (or whatever the program sets), so attending a
+    // class draws one down. Non-fatal: never block a check-in over trial state.
+    await consumeQuickStartClass(memberId);
 
     // If event specified, update event_attendees (non-fatal)
     if (eventId) {

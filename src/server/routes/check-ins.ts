@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { pool } from '../models/database';
+import { consumeQuickStartClass, releaseQuickStartClass } from '../utils/quickStart';
 
 const router = express.Router();
 
@@ -246,6 +247,10 @@ router.post('/', async (req: AuthRequest, res) => {
       WHERE id = $1
     `, [memberId]);
 
+    // A Quick Start is 3 classes (or whatever the program sets), so attending a
+    // class draws one down. Non-fatal: never block a check-in over trial state.
+    await consumeQuickStartClass(memberId);
+
     if (eventId) {
       await pool.query(`
         INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
@@ -284,6 +289,10 @@ router.delete('/:id', async (req: AuthRequest, res) => {
           "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = $1
     `, [checkIn.rows[0].memberId]);
+
+    // Undoing a check-in gives the Quick Start class back — an accidental scan
+    // must not silently burn a trial class.
+    await releaseQuickStartClass(checkIn.rows[0].memberId);
 
     res.json({ success: true, message: 'Check-in deleted' });
   } catch (error) {
