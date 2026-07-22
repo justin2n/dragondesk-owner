@@ -34,6 +34,7 @@ const DragonDeskEngage = () => {
   const { selectedLocation, isAllLocations } = useLocation();
   const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'sms' | 'analytics'>('campaigns');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [trendGranularity, setTrendGranularity] = useState<'week' | 'month'>('week');
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
@@ -1259,34 +1260,49 @@ const DragonDeskEngage = () => {
       { label: 'Conversions', value: totalConversions.toLocaleString() },
     ];
 
-    // Trends over time: group sent campaigns by calendar month. sentAt is the true
-    // send date; fall back to updatedAt/createdAt for older rows without one.
-    const monthly = new Map<string, { sent: number; opens: number; conversions: number }>();
+    // Trends over time: bucket sent campaigns by week or month (user toggle).
+    // sentAt is the true send date; fall back to updatedAt/createdAt for older
+    // rows without one. Bucket keys are lexicographically sortable in both modes.
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const bucketOf = (d: Date): { key: string; label: string } => {
+      if (trendGranularity === 'month') {
+        return {
+          key: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`,
+          label: d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' }),
+        };
+      }
+      // Week: snap to that week's Monday so all days in a week share a bucket.
+      const ws = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      ws.setDate(ws.getDate() - ((ws.getDay() + 6) % 7));
+      return {
+        key: `${ws.getFullYear()}-${pad(ws.getMonth() + 1)}-${pad(ws.getDate())}`,
+        label: ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      };
+    };
+
+    const buckets = new Map<string, { label: string; sent: number; opens: number; conversions: number }>();
     for (const c of sentCampaigns) {
       const when = c.sentAt || c.updatedAt || c.createdAt;
       if (!when) continue;
       const d = new Date(when);
       if (isNaN(d.getTime())) continue;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const row = monthly.get(key) || { sent: 0, opens: 0, conversions: 0 };
+      const { key, label } = bucketOf(d);
+      const row = buckets.get(key) || { label, sent: 0, opens: 0, conversions: 0 };
       row.sent += c.sent || 0;
       row.opens += c.opens || 0;
       row.conversions += c.conversions || 0;
-      monthly.set(key, row);
+      buckets.set(key, row);
     }
-    const trend = Array.from(monthly.entries())
+    const trend = Array.from(buckets.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, v]) => {
-        const [y, m] = key.split('-').map(Number);
-        const label = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
-        return {
-          month: label,
-          sent: v.sent,
-          opens: v.opens,
-          conversions: v.conversions,
-          openRate: v.sent > 0 ? Math.round((v.opens / v.sent) * 100) : 0,
-        };
-      });
+      .map(([, v]) => ({
+        month: v.label,
+        sent: v.sent,
+        opens: v.opens,
+        conversions: v.conversions,
+        openRate: v.sent > 0 ? Math.round((v.opens / v.sent) * 100) : 0,
+      }));
+    const periodWord = trendGranularity === 'week' ? 'weeks' : 'months';
 
     const cardBg = 'var(--color-dark-grey, #1a1a2e)';
     const border = '1px solid var(--color-border, #333)';
@@ -1317,11 +1333,31 @@ const DragonDeskEngage = () => {
               ))}
             </div>
 
-            <h3 style={{ fontSize: '1rem', margin: '0 0 4px' }}>Trends Over Time</h3>
-            <p style={{ color: dim, fontSize: '0.85rem', margin: '0 0 14px' }}>Email marketing performance by month.</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', margin: '0 0 4px' }}>
+              <h3 style={{ fontSize: '1rem', margin: 0 }}>Trends Over Time</h3>
+              <div style={{ display: 'inline-flex', border, borderRadius: 8, overflow: 'hidden' }}>
+                {(['week', 'month'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setTrendGranularity(g)}
+                    style={{
+                      padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: trendGranularity === g ? 'var(--color-red)' : 'transparent',
+                      color: trendGranularity === g ? '#fff' : dim,
+                    }}
+                  >
+                    {g === 'week' ? 'Week over Week' : 'Month over Month'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p style={{ color: dim, fontSize: '0.85rem', margin: '0 0 14px' }}>
+              Email marketing performance by {trendGranularity}.
+            </p>
             {trend.length < 2 ? (
               <div style={{ background: cardBg, border, borderRadius: 8, padding: '20px', color: dim, fontSize: '0.9rem', marginBottom: 28 }}>
-                Trends appear once you've sent campaigns across at least two different months.
+                Trends appear once you've sent campaigns across at least two different {periodWord}.
+                {trendGranularity === 'month' && ' Try the Week over Week view to see trends sooner.'}
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 28 }}>
