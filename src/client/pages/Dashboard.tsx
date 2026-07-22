@@ -27,7 +27,7 @@ const Dashboard = () => {
     taekwondo: 0,
     programCounts: {} as Record<string, number>,
   });
-  const [programs, setPrograms] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
+  const [programs, setPrograms] = useState<{ id: number; name: string; isActive: boolean; ageGroup?: 'Kids' | 'Adult' | 'All' }[]>([]);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
@@ -190,9 +190,14 @@ const Dashboard = () => {
         </div>
         <div className={styles.programsGrid}>
           {programs.filter(p => {
+            // Age group is configured per program in Settings. Fall back to the
+            // old name heuristic for programs not yet categorised, and always
+            // show 'All' programs in both tabs.
+            if (p.ageGroup === 'All') return true;
+            if (p.ageGroup === 'Kids' || p.ageGroup === 'Adult') return p.ageGroup === ageFilter;
             const name = p.name.toLowerCase();
-            if (ageFilter === 'Kids') return name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
-            return !name.includes('kids') && !name.includes("children's") && !name.includes('youth') && !name.includes('young');
+            const looksKids = name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
+            return ageFilter === 'Kids' ? looksKids : !looksKids;
           }).map(p => (
             <div key={p.id} className={styles.programCard}>
               <div className={styles.programHeader}><h3>{p.name}</h3></div>

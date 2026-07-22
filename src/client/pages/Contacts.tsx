@@ -29,17 +29,106 @@ const RANKINGS: Record<string, string[]> = {
 };
 
 const BULK_FIELD_LABELS: Record<string, string> = {
-  accountStatus: 'Status',
+  accountStatus: 'Stage',
   programType: 'Program',
   membershipAge: 'Age Group',
   ranking: 'Ranking',
   locationId: 'Location',
 };
 
+// The three stages a contact moves through, plus the terminal Cancelled state.
+// The stored value stays 'trialer' for back-compat; only the label reads "Trial".
+const STAGE_LABELS: Record<string, string> = {
+  lead: 'Lead',
+  trialer: 'Trial',
+  member: 'Member',
+  cancelled: 'Cancelled',
+};
+
 const BULK_VALUE_LABELS: Record<string, Record<string, string>> = {
-  accountStatus: { lead: 'Lead', trialer: 'Trialer', member: 'Member', cancelled: 'Cancelled' },
+  accountStatus: STAGE_LABELS,
   membershipAge: { Adult: 'Adult', Kids: 'Kids' },
 };
+
+// Which product each stage exposes. Later-stage fields still render, greyed out,
+// so the path ahead is visible rather than hidden. Mirrors stageAllows() in
+// server/routes/members.ts, which enforces the same rules on write.
+const stageAllows = (stage: string, product: 'quickStart' | 'membership' | 'programs') => {
+  switch (product) {
+    case 'quickStart': return stage === 'trialer' || stage === 'member';
+    case 'membership':
+    case 'programs':   return stage === 'member';
+    default:           return false;
+  }
+};
+
+const STAGE_HINT: Record<string, string> = {
+  quickStart: 'Available at the Trial stage',
+  membership: 'Available at the Member stage',
+  programs: 'Available at the Member stage',
+};
+
+const money = (cents: number | null | undefined) =>
+  `$${((cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+// Wraps a stage-gated field: greys it out and explains why, instead of hiding it.
+const GatedField = ({
+  allowed, hint, label, children,
+}: { allowed: boolean; hint: string; label: string; children: React.ReactNode }) => (
+  <div style={{ opacity: allowed ? 1 : 0.45 }}>
+    <label className={styles.formLabel}>
+      {label}
+      {!allowed && (
+        <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', marginLeft: 6 }}>
+          — {hint}
+        </span>
+      )}
+    </label>
+    <fieldset disabled={!allowed} style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}>
+      {children}
+    </fieldset>
+  </div>
+);
+
+interface ProgramOption {
+  id: number;
+  name: string;
+  ageGroup?: 'Kids' | 'Adult' | 'All';
+  quickStartPriceAmount?: number | null;
+  quickStartDurationDays?: number | null;
+}
+
+interface MembershipOption {
+  id: number;
+  name: string;
+  priceAmount?: number | null;
+  isFamilyPlan?: boolean;
+  maxProgramsPerParticipant?: number | null;
+}
+
+// One purchased membership license on an account.
+interface Seat {
+  id: number;
+  accountHolderId: number;
+  membershipId: number;
+  membershipName: string;
+  participantId: number | null;
+  participantFirstName: string | null;
+  participantLastName: string | null;
+  priceAmount: number;
+  isFamilyPlan: boolean;
+  maxProgramsPerParticipant: number | null;
+  status: string;
+}
+
+interface QuickStart {
+  id: number;
+  programId: number | null;
+  programName: string | null;
+  priceAmount: number;
+  startDate: string;
+  endDate: string | null;
+}
 
 const Contacts = () => {
   const { selectedLocation, isAllLocations, locations } = useLocation();
@@ -73,9 +162,16 @@ const Contacts = () => {
   const [memberInvoices, setMemberInvoices] = useState<Invoice[]>([]);
   const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
   const [allPricingPlans, setAllPricingPlans] = useState<PricingPlan[]>([]);
-  const [memberships, setMemberships] = useState<{ id: number; name: string; programs: { id: number; name: string }[] }[]>([]);
-  const [programs, setPrograms] = useState<{ id: number; name: string; membershipId: number | null }[]>([]);
-  const [trialPrograms, setTrialPrograms] = useState<{ id: number; name: string }[]>([]);
+  const [memberships, setMemberships] = useState<MembershipOption[]>([]);
+  const [programs, setPrograms] = useState<ProgramOption[]>([]);
+  // Seats held by the account being edited, plus its active Quick Start.
+  const [seats, setSeats] = useState<Seat[]>([]);
+  const [quickStart, setQuickStart] = useState<QuickStart | null>(null);
+  const [seatBusy, setSeatBusy] = useState(false);
+  const [convertTarget, setConvertTarget] = useState<Member | null>(null);
+  const [convertProgramId, setConvertProgramId] = useState('');
+  const [convertMembershipId, setConvertMembershipId] = useState('');
+  const [convertBusy, setConvertBusy] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importProgram, setImportProgram] = useState('');
@@ -107,7 +203,6 @@ const Contacts = () => {
     email: '',
     phone: '',
     accountStatus: 'lead' as AccountStatus,
-    accountType: 'basic' as AccountType,
     programType: 'Adult BJJ' as ProgramType,
     membershipAge: 'Adult' as MembershipAge,
     ranking: 'White',
@@ -122,12 +217,10 @@ const Contacts = () => {
     memberStartDate: '',
     pricingPlanId: '' as string,
     companyName: '',
-    membershipId: '',
-    membershipName: '',
     memberType: 'account_holder' as 'account_holder' | 'participant',
     accountHolderId: '' as string,
     programIds: [] as number[],
-    trialProgramId: '' as string,
+    programInterestId: '' as string,
   });
 
   useEffect(() => {
@@ -141,9 +234,8 @@ const Contacts = () => {
 
   useEffect(() => {
     api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
-    api.get('/memberships').then(setMemberships).catch(() => {});
-    api.get('/programs').then(setPrograms).catch(() => {});
-    api.get('/trial-programs/active').then(setTrialPrograms).catch(() => {});
+    api.get('/memberships?isActive=true').then(setMemberships).catch(() => {});
+    api.get('/programs/active').then(setPrograms).catch(() => {});
     api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
   }, []);
 
@@ -208,13 +300,13 @@ const Contacts = () => {
         } catch { /* leave empty */ }
       }
       setEditingMember(member);
+      loadSeats(member);
       setFormData({
         firstName: member.firstName,
         lastName: member.lastName,
         email: member.email,
         phone: member.phone,
         accountStatus: member.accountStatus,
-        accountType: member.accountType,
         programType: member.programType || 'No Program Selected',
         membershipAge: member.membershipAge,
         ranking: member.ranking,
@@ -229,23 +321,22 @@ const Contacts = () => {
         memberStartDate: member.memberStartDate || '',
         pricingPlanId: member.pricingPlanId?.toString() || '',
         companyName: member.companyName || '',
-        membershipId: (member as any).membershipId?.toString() || '',
-        membershipName: (member as any).membershipName || '',
         memberType: (member.memberType as 'account_holder' | 'participant') || 'account_holder',
         accountHolderId: member.accountHolderId?.toString() || '',
         programIds,
-        trialProgramId: (member as any).trialProgramId?.toString() || '',
+        programInterestId: (member as any).programInterestId?.toString() || '',
       });
     } else {
       setEditingMember(null);
+      setSeats([]);
+      setQuickStart(null);
       setFormData({
         firstName: '',
         lastName: '',
         email: '',
         phone: '',
         accountStatus: 'lead',
-        accountType: 'basic',
-        programType: 'Adult BJJ',
+        programType: 'No Program Selected',
         membershipAge: 'Adult',
         ranking: 'White',
         leadSource: '',
@@ -259,12 +350,10 @@ const Contacts = () => {
         memberStartDate: '',
         pricingPlanId: '',
         companyName: '',
-        membershipId: '',
-        membershipName: '',
         memberType: contactType === 'participants' ? 'participant' : 'account_holder',
         accountHolderId: '',
         programIds: [],
-        trialProgramId: '',
+        programInterestId: '',
       });
     }
     setIsModalOpen(true);
@@ -273,7 +362,119 @@ const Contacts = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingMember(null);
+    setSeats([]);
+    setQuickStart(null);
   };
+
+  // Seats hang off the account holder, so a participant's seats are looked up
+  // against their holder — that's the account actually being billed.
+  const loadSeats = async (member: Member) => {
+    const accountId = member.accountHolderId ?? member.id;
+    try {
+      const [seatRows, detail] = await Promise.all([
+        api.get(`/membership-seats?accountHolderId=${accountId}&status=active`),
+        api.get(`/members/${member.id}`),
+      ]);
+      setSeats(seatRows);
+      setQuickStart(detail.quickStart || null);
+    } catch {
+      setSeats([]);
+      setQuickStart(null);
+    }
+  };
+
+  const handleAddSeat = async (membershipId: string, participantId: string) => {
+    if (!editingMember || !membershipId) return;
+    setSeatBusy(true);
+    try {
+      await api.post('/membership-seats', {
+        accountHolderId: editingMember.accountHolderId ?? editingMember.id,
+        membershipId: parseInt(membershipId),
+        participantId: participantId ? parseInt(participantId) : null,
+      });
+      await loadSeats(editingMember);
+      toast('Seat added.', 'success');
+    } catch (error: any) {
+      toast(error.message || 'Failed to add seat.', 'error');
+    } finally {
+      setSeatBusy(false);
+    }
+  };
+
+  const handleAssignSeat = async (seatId: number, participantId: string) => {
+    if (!editingMember) return;
+    setSeatBusy(true);
+    try {
+      await api.put(`/membership-seats/${seatId}`, {
+        participantId: participantId ? parseInt(participantId) : null,
+      });
+      await loadSeats(editingMember);
+    } catch (error: any) {
+      toast(error.message || 'Failed to assign seat.', 'error');
+    } finally {
+      setSeatBusy(false);
+    }
+  };
+
+  const handleRemoveSeat = async (seatId: number) => {
+    if (!editingMember) return;
+    if (!await confirm({
+      title: 'Cancel Seat',
+      message: 'Cancel this membership seat? It stops counting toward monthly revenue but stays on record.',
+      confirmLabel: 'Cancel Seat',
+      danger: true,
+    })) return;
+    setSeatBusy(true);
+    try {
+      await api.delete(`/membership-seats/${seatId}`);
+      await loadSeats(editingMember);
+    } catch (error: any) {
+      toast(error.message || 'Failed to cancel seat.', 'error');
+    } finally {
+      setSeatBusy(false);
+    }
+  };
+
+  // One-click stage advance. The server does the whole thing transactionally,
+  // so a contact never lands mid-stage without the product it requires.
+  const openConvert = (member: Member) => {
+    setConvertTarget(member);
+    setConvertProgramId('');
+    setConvertMembershipId('');
+  };
+
+  const handleConvert = async () => {
+    if (!convertTarget) return;
+    const toTrial = convertTarget.accountStatus === 'lead';
+    setConvertBusy(true);
+    try {
+      await api.post(`/members/${convertTarget.id}/convert`, {
+        programId: toTrial ? (convertProgramId ? parseInt(convertProgramId) : null) : null,
+        membershipId: !toTrial ? (convertMembershipId ? parseInt(convertMembershipId) : null) : null,
+      });
+      toast(`Converted to ${toTrial ? 'Trial' : 'Member'}.`, 'success');
+      setConvertTarget(null);
+      loadMembers();
+      if (editingMember?.id === convertTarget.id) handleCloseModal();
+    } catch (error: any) {
+      toast(error.message || 'Failed to convert contact.', 'error');
+    } finally {
+      setConvertBusy(false);
+    }
+  };
+
+  // What the seat covering this contact entitles them to. Shown next to the
+  // program picker so the limit is visible before the server rejects the save.
+  const seatLimitNote = (() => {
+    if (!editingMember || !stageAllows(formData.accountStatus, 'programs')) return '';
+    const covering = seats.find(s =>
+      s.isFamilyPlan || s.participantId === editingMember.id);
+    if (!covering) return 'No membership seat covers this contact yet — assign one to enroll them.';
+    if (covering.isFamilyPlan) return `Covered by ${covering.membershipName}: unlimited programs.`;
+    const limit = covering.maxProgramsPerParticipant;
+    if (limit == null) return `Covered by ${covering.membershipName}: unlimited programs.`;
+    return `Covered by ${covering.membershipName}: ${limit} program${limit === 1 ? '' : 's'} (${formData.programIds.length} selected).`;
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,14 +487,11 @@ const Contacts = () => {
     }
 
     try {
-      const selectedMembership = memberships.find(m => m.id === parseInt(formData.membershipId));
       const dataToSubmit = {
         ...formData,
         locationId: formData.locationId ? parseInt(formData.locationId) : null,
         pricingPlanId: formData.pricingPlanId ? parseInt(formData.pricingPlanId) : null,
-        membershipId: formData.membershipId ? parseInt(formData.membershipId) : null,
-        membershipName: selectedMembership?.name || formData.membershipName || null,
-        trialProgramId: formData.trialProgramId ? parseInt(formData.trialProgramId) : null,
+        programInterestId: formData.programInterestId ? parseInt(formData.programInterestId) : null,
       };
 
       if (editingMember) {
@@ -325,7 +523,6 @@ const Contacts = () => {
         firstName: memberToCancel.firstName,
         lastName: memberToCancel.lastName,
         email: memberToCancel.email,
-        accountType: memberToCancel.accountType,
         programType: memberToCancel.programType,
         membershipAge: memberToCancel.membershipAge,
         cancellationReason: cancellationReason,
@@ -717,7 +914,7 @@ const Contacts = () => {
             <span className={styles.memberTypeChip}>Participant</span>
           )}
         </div>
-        <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{member.accountStatus}</span>
+        <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
       </div>
       <div className={styles.cardBody} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
         {member.memberType !== 'participant' && member.email && (
@@ -748,10 +945,10 @@ const Contacts = () => {
           )}
         </div>
         <div className={styles.info}><span className={styles.label}>Ranking:</span><span>{member.ranking}</span></div>
-        {member.accountStatus === 'trialer' && (member as any).trialProgramId && (
+        {member.accountStatus === 'lead' && (member as any).programInterestId && (
           <div className={styles.info}>
-            <span className={styles.label}>Trial Program:</span>
-            <span>{trialPrograms.find(tp => tp.id === (member as any).trialProgramId)?.name || '—'}</span>
+            <span className={styles.label}>Interested in:</span>
+            <span>{programs.find(p => p.id === (member as any).programInterestId)?.name || '—'}</span>
           </div>
         )}
         {member.memberType !== 'participant' && (
@@ -760,6 +957,11 @@ const Contacts = () => {
         <div className={styles.info}><span className={styles.label}>Age Group:</span><span>{member.membershipAge}</span></div>
       </div>
       <div className={styles.cardFooter}>
+        {(member.accountStatus === 'lead' || member.accountStatus === 'trialer') && (
+          <button onClick={() => openConvert(member)} className={styles.editBtn}>
+            Convert to {member.accountStatus === 'lead' ? 'Trial' : 'Member'}
+          </button>
+        )}
         <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>Edit</button>
         <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>Delete</button>
       </div>
@@ -798,13 +1000,18 @@ const Contacts = () => {
       </td>
       <td>{member.email}</td>
       <td>{member.phone}</td>
-      <td><span className={`${styles.badge} ${styles[member.accountStatus]}`}>{member.accountStatus}</span></td>
+      <td><span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span></td>
       <td>{member.programType}</td>
       <td>{member.ranking}</td>
       <td>{planName(member.pricingPlanId)}</td>
       <td>{member.membershipAge}</td>
       <td onClick={(e) => e.stopPropagation()}>
         <div className={styles.tableActions}>
+          {(member.accountStatus === 'lead' || member.accountStatus === 'trialer') && (
+            <button onClick={() => openConvert(member)} className={styles.editBtn}>
+              Convert
+            </button>
+          )}
           <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>Edit</button>
           <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>Delete</button>
         </div>
@@ -817,7 +1024,7 @@ const Contacts = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Contacts</h1>
-          <p className={styles.subtitle}>Manage leads, trialers, and members</p>
+          <p className={styles.subtitle}>Manage leads, trials, and members</p>
         </div>
         <div className={styles.headerActions}>
           <input
@@ -877,7 +1084,7 @@ const Contacts = () => {
         >
           <option value="">All Account Statuses</option>
           <option value="lead">Lead</option>
-          <option value="trialer">Trialer</option>
+          <option value="trialer">Trial</option>
           <option value="member">Member</option>
           <option value="cancelled">Cancelled</option>
         </select>
@@ -968,7 +1175,7 @@ const Contacts = () => {
                 <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
                   <option value="">Select status...</option>
                   <option value="lead">Lead</option>
-                  <option value="trialer">Trialer</option>
+                  <option value="trialer">Trial</option>
                   <option value="member">Member</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
@@ -1109,11 +1316,12 @@ const Contacts = () => {
               {/* Account Holder picker — shown only for participants */}
               {formData.memberType === 'participant' && (
                 <div className={styles.formGroup} style={{ marginBottom: 16 }}>
-                  <label className={styles.formLabel}>Account Holder</label>
+                  <label className={styles.formLabel}>Account Holder *</label>
                   <select
                     value={formData.accountHolderId}
                     onChange={(e) => setFormData({ ...formData, accountHolderId: e.target.value })}
                     className={styles.input}
+                    required
                   >
                     <option value="">— Select account holder —</option>
                     {accountHolders.map(ah => (
@@ -1122,6 +1330,9 @@ const Contacts = () => {
                       </option>
                     ))}
                   </select>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    Every participant belongs to an account holder — that's the account billed for their seat.
+                  </span>
                 </div>
               )}
 
@@ -1188,7 +1399,7 @@ const Contacts = () => {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Account Status *</label>
+                  <label className={styles.formLabel}>Stage *</label>
                   <select
                     value={formData.accountStatus}
                     onChange={(e) => setFormData({ ...formData, accountStatus: e.target.value as AccountStatus })}
@@ -1196,7 +1407,7 @@ const Contacts = () => {
                     required
                   >
                     <option value="lead">Lead</option>
-                    <option value="trialer">Trialer</option>
+                    <option value="trialer">Trial</option>
                     <option value="member">Member</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
@@ -1236,114 +1447,187 @@ const Contacts = () => {
                 </div>
               </div>
 
-              {formData.memberType === 'account_holder' && memberships.length > 0 && (
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Membership Plan</label>
-                    <select
-                      value={formData.membershipId}
-                      onChange={(e) => setFormData({ ...formData, membershipId: e.target.value })}
-                      className={styles.input}
-                    >
-                      <option value="">No membership plan</option>
-                      {memberships.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </select>
-                  </div>
-                </div>
-              )}
 
-              {formData.accountStatus === 'trialer' && (
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Trial Program</label>
-                    <select
-                      value={formData.trialProgramId}
-                      onChange={(e) => setFormData({ ...formData, trialProgramId: e.target.value })}
-                      className={styles.input}
-                    >
-                      <option value="">No trial program</option>
-                      {trialPrograms.map(tp => <option key={tp.id} value={tp.id}>{tp.name}</option>)}
-                    </select>
-                    {trialPrograms.length === 0 && (
+              {/* ── Stage products ────────────────────────────────────────────
+                  Each stage exposes one product. Later-stage fields stay visible
+                  but greyed, so the path forward is legible from a Lead profile. */}
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Program Interest</label>
+                  <select
+                    value={formData.programInterestId}
+                    onChange={(e) => setFormData({ ...formData, programInterestId: e.target.value })}
+                    className={styles.input}
+                  >
+                    <option value="">No program interest</option>
+                    {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    What they enquired about. Captured automatically from the lead form.
+                  </span>
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <GatedField
+                    allowed={stageAllows(formData.accountStatus, 'quickStart')}
+                    hint={STAGE_HINT.quickStart}
+                    label="Quick Start"
+                  >
+                    {quickStart ? (
+                      <div className={styles.input} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span>{quickStart.programName || 'Program removed'}</span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>{money(quickStart.priceAmount)}</span>
+                      </div>
+                    ) : (
                       <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                        No trial programs configured. Add them in Settings &rarr; Trial Programs.
+                        {stageAllows(formData.accountStatus, 'quickStart')
+                          ? 'No Quick Start yet. Use Convert on a Lead to start one, priced from the program.'
+                          : 'Every martial art starts with a Quick Start trial.'}
                       </span>
                     )}
+                  </GatedField>
+                </div>
+              </div>
+
+              {/* Seats are the money: the account holder buys one per participant
+                  they cover, so this panel is the account's real monthly cost. */}
+              {formData.memberType === 'account_holder' && (
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <GatedField
+                      allowed={stageAllows(formData.accountStatus, 'membership')}
+                      hint={STAGE_HINT.membership}
+                      label="Membership Seats"
+                    >
+                      {editingMember ? (
+                        <>
+                          {seats.map(seat => (
+                            <div
+                              key={seat.id}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}
+                            >
+                              <span className={styles.input} style={{ flex: '1 1 140px', minWidth: 0 }}>
+                                {seat.membershipName} — {money(seat.priceAmount)}/mo
+                              </span>
+                              {seat.isFamilyPlan ? (
+                                <span style={{ flex: '1 1 160px', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                                  Covers everyone on this account
+                                </span>
+                              ) : (
+                                <select
+                                  value={seat.participantId?.toString() || ''}
+                                  onChange={(e) => handleAssignSeat(seat.id, e.target.value)}
+                                  className={styles.input}
+                                  style={{ flex: '1 1 160px' }}
+                                  disabled={seatBusy}
+                                >
+                                  <option value="">Unassigned</option>
+                                  {editingMember && (
+                                    <option value={editingMember.id}>
+                                      {editingMember.firstName} {editingMember.lastName} (account holder)
+                                    </option>
+                                  )}
+                                  {(editingMember?.participants || []).map(p => (
+                                    <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>
+                                  ))}
+                                </select>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSeat(seat.id)}
+                                className={styles.deleteBtn}
+                                disabled={seatBusy}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                            <select
+                              className={styles.input}
+                              style={{ flex: 1 }}
+                              value=""
+                              disabled={seatBusy || memberships.length === 0}
+                              onChange={(e) => handleAddSeat(e.target.value, '')}
+                            >
+                              <option value="">Add a seat...</option>
+                              {memberships.map(m => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} — {money(m.priceAmount)}/mo
+                                  {m.isFamilyPlan ? ' (family)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div style={{ marginTop: 6, fontSize: '0.9rem' }}>
+                            <strong>Monthly total: {money(seats.reduce((sum, s) => sum + s.priceAmount, 0))}</strong>
+                            <span style={{ color: 'var(--color-text-secondary)' }}>
+                              {' '}across {seats.length} seat{seats.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                          {memberships.length === 0 && (
+                            <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                              No membership plans configured. Add them in Settings &rarr; Membership Plans.
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                          Save this contact first, then assign membership seats.
+                        </span>
+                      )}
+                    </GatedField>
                   </div>
                 </div>
               )}
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  {formData.memberType === 'participant' ? (
-                    <>
-                      <label className={styles.formLabel}>Programs *</label>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.5rem 0' }}>
-                        {programs.map(p => (
-                          <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.programIds.includes(p.id)}
-                              onChange={(e) => {
-                                const next = e.target.checked
-                                  ? [...formData.programIds, p.id]
-                                  : formData.programIds.filter(id => id !== p.id);
-                                const primaryName = (programs.find(pr => pr.id === next[0])?.name || 'No Program Selected') as ProgramType;
-                                setFormData({
-                                  ...formData,
-                                  programIds: next,
-                                  programType: primaryName,
-                                  ranking: RANKINGS[primaryName]?.[0] || formData.ranking,
-                                });
-                              }}
-                            />
-                            {p.name}
-                          </label>
-                        ))}
-                        {programs.length === 0 && (
-                          <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                            No programs configured. Add them in Settings &rarr; Programs.
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <label className={styles.formLabel}>Program *</label>
-                      <select
-                        value={formData.programType}
-                        onChange={(e) => {
-                          const newProgram = e.target.value as ProgramType;
-                          setFormData({
-                            ...formData,
-                            programType: newProgram,
-                            ranking: RANKINGS[newProgram]?.[0] || 'Beginner',
-                          });
-                        }}
-                        className={styles.input}
-                        required
-                      >
-                        <option value="No Program Selected">No Program Selected</option>
-                        {programs.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                        {programs.length === 0 && <>
-                          <option value="Children's Martial Arts">Children's Martial Arts</option>
-                          <option value="Adult BJJ">Adult BJJ</option>
-                          <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                          <option value="DG Barbell">DG Barbell</option>
-                          <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                          <option value="The Ashtanga Club">The Ashtanga Club</option>
-                          <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                          <option value="Kids BJJ">Kids BJJ</option>
-                          <option value="Kids Muay Thai">Kids Muay Thai</option>
-                          <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                          <option value="DG Workspace">DG Workspace</option>
-                          <option value="Dragon Launch">Dragon Launch</option>
-                          <option value="Personal Training">Personal Training</option>
-                          <option value="DGMT Private Training">DGMT Private Training</option>
-                        </>}
-                      </select>
-                    </>
-                  )}
+                  <GatedField
+                    allowed={stageAllows(formData.accountStatus, 'programs')}
+                    hint={STAGE_HINT.programs}
+                    label={formData.memberType === 'participant' ? 'Programs' : 'Programs (if they train)'}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.5rem 0' }}>
+                      {programs.map(p => (
+                        <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={formData.programIds.includes(p.id)}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...formData.programIds, p.id]
+                                : formData.programIds.filter(id => id !== p.id);
+                              const primaryName = (programs.find(pr => pr.id === next[0])?.name || 'No Program Selected') as ProgramType;
+                              setFormData({
+                                ...formData,
+                                programIds: next,
+                                programType: primaryName,
+                                ranking: RANKINGS[primaryName]?.[0] || formData.ranking,
+                              });
+                            }}
+                          />
+                          {p.name}
+                          {p.ageGroup && p.ageGroup !== 'All' && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>({p.ageGroup})</span>
+                          )}
+                        </label>
+                      ))}
+                      {programs.length === 0 && (
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                          No programs configured. Add them in Settings &rarr; Programs.
+                        </span>
+                      )}
+                    </div>
+                    {seatLimitNote && (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{seatLimitNote}</span>
+                    )}
+                  </GatedField>
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Ranking *</label>
@@ -1711,6 +1995,86 @@ const Contacts = () => {
       )}
 
       {/* Cancellation Confirmation Modal */}
+      {/* Stage conversion. Each step needs the product the target stage
+          requires, so the modal collects it up front and the server commits
+          the stage change and the purchase together. */}
+      {convertTarget && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent} style={{ maxWidth: '500px' }}>
+            <div className={styles.modalHeader}>
+              <h2>Convert to {convertTarget.accountStatus === 'lead' ? 'Trial' : 'Member'}</h2>
+              <button onClick={() => setConvertTarget(null)} className={styles.closeBtn}>✕</button>
+            </div>
+            <div className={styles.form}>
+              <p style={{ color: 'var(--color-text-primary)', marginBottom: '1rem' }}>
+                Move <strong>{convertTarget.firstName} {convertTarget.lastName}</strong> from{' '}
+                {STAGE_LABELS[convertTarget.accountStatus]} to{' '}
+                {convertTarget.accountStatus === 'lead' ? 'Trial' : 'Member'}.
+              </p>
+
+              {convertTarget.accountStatus === 'lead' ? (
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Quick Start Program *</label>
+                  <select
+                    value={convertProgramId}
+                    onChange={(e) => setConvertProgramId(e.target.value)}
+                    className={styles.input}
+                  >
+                    <option value="">Select a program...</option>
+                    {programs.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — {money(p.quickStartPriceAmount)} for {p.quickStartDurationDays || 30} days
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                    Every martial art starts with a Quick Start. The price comes from the program.
+                  </span>
+                </div>
+              ) : convertTarget.memberType === 'participant' ? (
+                <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+                  This participant is covered by a seat on their account holder. Make sure one is
+                  assigned to them first — otherwise this conversion is rejected.
+                </p>
+              ) : (
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Membership Type *</label>
+                  <select
+                    value={convertMembershipId}
+                    onChange={(e) => setConvertMembershipId(e.target.value)}
+                    className={styles.input}
+                  >
+                    <option value="">Select a membership...</option>
+                    {memberships.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — {money(m.priceAmount)}/mo{m.isFamilyPlan ? ' (covers the whole account)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                    Buys the first seat on this account. Add more seats on the profile for each participant.
+                  </span>
+                </div>
+              )}
+
+              <div className={styles.modalFooter}>
+                <button type="button" onClick={() => setConvertTarget(null)} className={styles.cancelBtn}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConvert}
+                  className={styles.saveBtn}
+                  disabled={convertBusy}
+                >
+                  {convertBusy ? 'Converting...' : 'Convert'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCancelModal && (
         <div className={styles.modal}>
           <div className={styles.modalContent} style={{ maxWidth: '500px' }}>
@@ -1838,7 +2202,7 @@ const Contacts = () => {
                 <div className={styles.viewHeader}>
                   <div>
                     <span className={`${styles.badge} ${styles[viewingMember.accountStatus]}`}>
-                      {viewingMember.accountStatus}
+                      {STAGE_LABELS[viewingMember.accountStatus] || viewingMember.accountStatus}
                     </span>
                   </div>
                 </div>

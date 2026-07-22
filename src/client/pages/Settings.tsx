@@ -52,7 +52,10 @@ interface Program {
   id: number;
   name: string;
   description?: string;
-  membershipId?: number | null;
+  ageGroup?: 'Kids' | 'Adult' | 'All';
+  // Every martial art has a Quick Start — the priced trial into this program.
+  quickStartPriceAmount?: number | null; // cents
+  quickStartDurationDays?: number | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -64,8 +67,11 @@ interface Membership {
   description?: string;
   locationId?: number | null;
   priceAmount?: number | null; // monthly price in cents
+  // One seat covers the whole account rather than a single participant.
+  isFamilyPlan?: boolean;
+  // How many programs one seat covers; null = unlimited.
+  maxProgramsPerParticipant?: number | null;
   isActive: boolean;
-  programs: Program[];
   createdAt: string;
   updatedAt: string;
 }
@@ -341,12 +347,13 @@ const Settings = () => {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [editingMembership, setEditingMembership] = useState<Membership | null>(null);
+  // Mirrors the family-plan checkbox so the program-limit field can hide: a
+  // family seat is unlimited by definition, so asking for a limit is nonsense.
+  const [familyPlanChecked, setFamilyPlanChecked] = useState(false);
   const [unassignedParticipants, setUnassignedParticipants] = useState<{
     id: number; firstName: string; lastName: string; programType: string | null;
     accountHolderFirstName: string | null; accountHolderLastName: string | null;
   }[]>([]);
-  const [trialPrograms, setTrialPrograms] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
-  const [newTrialProgram, setNewTrialProgram] = useState('');
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassignFrom, setReassignFrom] = useState<string>('null');
@@ -505,7 +512,6 @@ const Settings = () => {
     loadPrograms();
     loadMemberships();
     loadUnassignedParticipants();
-    loadTrialPrograms();
     loadSettings();
     loadSocialAccounts();
     loadDkimConfigs();
@@ -544,11 +550,14 @@ const Settings = () => {
   const handleSaveProgram = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const membershipIdVal = (e.target as any).programMembershipId?.value;
+      const form = e.target as any;
       const programData = {
-        name: (e.target as any).programName.value,
-        description: (e.target as any).programDescription.value || '',
-        membershipId: membershipIdVal ? parseInt(membershipIdVal) : null,
+        name: form.programName.value,
+        description: form.programDescription.value || '',
+        ageGroup: form.programAgeGroup?.value || 'All',
+        // Prices are stored in cents so rounding never drifts.
+        quickStartPriceAmount: Math.round(parseFloat(form.programQuickStartPrice?.value || '0') * 100) || 0,
+        quickStartDurationDays: parseInt(form.programQuickStartDays?.value || '30') || 30,
       };
 
       if (editingProgram) {
@@ -607,47 +616,20 @@ const Settings = () => {
     }
   };
 
-  const loadTrialPrograms = async () => {
-    try {
-      setTrialPrograms(await api.get('/trial-programs'));
-    } catch (error) {
-      console.error('Failed to load trial programs:', error);
-    }
-  };
-
-  const handleAddTrialProgram = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const name = newTrialProgram.trim();
-    if (!name) return;
-    try {
-      await api.post('/trial-programs', { name });
-      setNewTrialProgram('');
-      await loadTrialPrograms();
-      showSaveMessage('Trial program added!');
-    } catch (error: any) {
-      toast(error.message || 'Failed to add trial program', 'error');
-    }
-  };
-
-  const handleDeleteTrialProgram = async (id: number) => {
-    if (!await confirm({ title: 'Delete Trial Program', message: 'Trialers assigned to it will be unlinked. Continue?', confirmLabel: 'Delete', danger: true })) return;
-    try {
-      await api.delete(`/trial-programs/${id}`);
-      await loadTrialPrograms();
-    } catch (error: any) {
-      toast(error.message || 'Failed to delete trial program', 'error');
-    }
-  };
-
   const handleSaveMembership = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const form = e.target as any;
       const priceDollars = parseFloat(form.membershipPrice.value);
+      const isFamilyPlan = !!form.membershipIsFamily?.checked;
+      const limitRaw = parseInt(form.membershipProgramLimit?.value || '');
       const data = {
         name: form.membershipName.value,
         description: form.membershipDescription.value || '',
         priceAmount: Number.isFinite(priceDollars) ? Math.round(priceDollars * 100) : 0,
+        isFamilyPlan,
+        // Blank or family plan means unlimited programs.
+        maxProgramsPerParticipant: isFamilyPlan || !Number.isFinite(limitRaw) ? null : limitRaw,
       };
       if (editingMembership) {
         await api.put(`/memberships/${editingMembership.id}`, data);
@@ -665,7 +647,7 @@ const Settings = () => {
   };
 
   const handleDeleteMembership = async (id: number) => {
-    if (!await confirm({ title: 'Delete Membership', message: 'This will unlink all programs from this membership. Continue?', confirmLabel: 'Delete', danger: true })) return;
+    if (!await confirm({ title: 'Delete Membership', message: 'Delete this membership plan? Plans with active seats cannot be deleted \u2014 deactivate them instead.', confirmLabel: 'Delete', danger: true })) return;
     try {
       await api.delete(`/memberships/${id}`);
       await loadMemberships();
@@ -1425,7 +1407,6 @@ const Settings = () => {
         { id: 'locations', label: 'Locations' },
         { id: 'memberships', label: 'Membership Plans' },
         { id: 'programs', label: 'Programs' },
-        { id: 'trial-programs', label: 'Trial Programs' },
       ]
     },
     {
@@ -1909,7 +1890,7 @@ const Settings = () => {
                     The paid plans account holders subscribe to. Each plan's monthly price drives the financial metrics in DragonDesk: Analytics.
                   </p>
                 </div>
-                <button onClick={() => { setEditingMembership(null); setShowMembershipModal(true); }} className={styles.primaryBtn}>
+                <button onClick={() => { setEditingMembership(null); setFamilyPlanChecked(false); setShowMembershipModal(true); }} className={styles.primaryBtn}>
                   <AddIcon size={20} />
                   Add Membership Plan
                 </button>
@@ -1925,6 +1906,7 @@ const Settings = () => {
                           <span className={styles.primaryBadge}>
                             ${((membership.priceAmount || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo
                           </span>
+                          {membership.isFamilyPlan && <span className={styles.primaryBadge}>Family</span>}
                           {!membership.isActive && <span className={styles.inactiveBadge}>Inactive</span>}
                         </div>
                       </div>
@@ -1932,19 +1914,19 @@ const Settings = () => {
                         <p className={styles.locationAddress}>{membership.description}</p>
                       )}
                       <div style={{ marginTop: '0.75rem' }}>
-                        <p className={styles.sectionDesc} style={{ marginBottom: '0.5rem' }}>Programs under this membership:</p>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                          {programs.filter(p => p.membershipId === membership.id).map(p => (
-                            <span key={p.id} className={styles.primaryBadge}>{p.name}</span>
-                          ))}
-                          {programs.filter(p => p.membershipId === membership.id).length === 0 && (
-                            <span className={styles.inactiveBadge}>No programs assigned</span>
-                          )}
-                        </div>
+                        <p className={styles.sectionDesc} style={{ margin: 0 }}>
+                          {membership.isFamilyPlan
+                            ? 'One seat covers every participant on the account, in unlimited programs.'
+                            : `One seat per participant, covering ${
+                                membership.maxProgramsPerParticipant == null
+                                  ? 'unlimited programs'
+                                  : `${membership.maxProgramsPerParticipant} program${membership.maxProgramsPerParticipant === 1 ? '' : 's'}`
+                              }.`}
+                        </p>
                       </div>
                     </div>
                     <div className={styles.locationActions}>
-                      <button onClick={() => { setEditingMembership(membership); setShowMembershipModal(true); }} className={styles.editBtn}>
+                      <button onClick={() => { setEditingMembership(membership); setFamilyPlanChecked(!!membership.isFamilyPlan); setShowMembershipModal(true); }} className={styles.editBtn}>
                         <EditIcon size={18} /> Edit
                       </button>
                       <button onClick={() => handleDeleteMembership(membership.id)} className={styles.deleteBtn}>
@@ -1990,6 +1972,42 @@ const Settings = () => {
                           <label className={styles.label}>Description</label>
                           <textarea name="membershipDescription" defaultValue={editingMembership?.description || ''} className={styles.textarea} placeholder="Brief description" rows={3} />
                         </div>
+
+                        {/* Entitlement: how many programs one seat covers, and
+                            whether a single seat covers the whole household. */}
+                        <div className={styles.formGroup}>
+                          <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input
+                              type="checkbox"
+                              name="membershipIsFamily"
+                              defaultChecked={editingMembership?.isFamilyPlan || false}
+                              onChange={(e) => setFamilyPlanChecked(e.target.checked)}
+                            />
+                            Family plan
+                          </label>
+                          <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                            One seat at this price covers every participant on the account, each in unlimited programs.
+                            Without this, the account holder buys one seat per participant.
+                          </p>
+                        </div>
+
+                        {!familyPlanChecked && (
+                          <div className={styles.formGroup}>
+                            <label className={styles.label}>Programs Per Participant</label>
+                            <input
+                              type="number"
+                              name="membershipProgramLimit"
+                              min="1"
+                              step="1"
+                              defaultValue={editingMembership?.maxProgramsPerParticipant ?? 1}
+                              className={styles.input}
+                              placeholder="Leave blank for unlimited"
+                            />
+                            <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                              How many martial arts one seat covers. Leave blank for unlimited.
+                            </p>
+                          </div>
+                        )}
                       </div>
                       <div className={styles.modalActions}>
                         <button type="button" onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.secondaryBtn}>Cancel</button>
@@ -2031,6 +2049,11 @@ const Settings = () => {
                       <div className={styles.locationHeader}>
                         <h3 className={styles.locationName}>{program.name}</h3>
                         <div className={styles.locationBadges}>
+                          <span className={styles.primaryBadge}>{program.ageGroup || 'All'}</span>
+                          <span className={styles.primaryBadge}>
+                            Quick Start ${((program.quickStartPriceAmount || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            {' '}/ {program.quickStartDurationDays || 30}d
+                          </span>
                           {!program.isActive && (
                             <span className={styles.inactiveBadge}>Inactive</span>
                           )}
@@ -2147,15 +2170,46 @@ const Settings = () => {
                             rows={3}
                           />
                         </div>
-                        {memberships.length > 0 && (
-                          <div className={styles.formGroup}>
-                            <label className={styles.label}>Membership</label>
-                            <select name="programMembershipId" defaultValue={editingProgram?.membershipId ?? ''} className={styles.input}>
-                              <option value="">No membership</option>
-                              {memberships.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                            </select>
-                          </div>
-                        )}
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Age Group</label>
+                          <select name="programAgeGroup" defaultValue={editingProgram?.ageGroup || 'All'} className={styles.input}>
+                            <option value="All">All Ages</option>
+                            <option value="Kids">Kids</option>
+                            <option value="Adult">Adult</option>
+                          </select>
+                        </div>
+
+                        {/* Every martial art starts with a Quick Start trial, so
+                            the offer lives on the program itself. */}
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Quick Start Price ($)</label>
+                          <input
+                            type="number"
+                            name="programQuickStartPrice"
+                            min="0"
+                            step="0.01"
+                            defaultValue={editingProgram?.quickStartPriceAmount != null
+                              ? (editingProgram.quickStartPriceAmount / 100).toFixed(2)
+                              : '0.00'}
+                            className={styles.input}
+                            placeholder="e.g., 99.00"
+                          />
+                          <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                            What a trialer pays to start this program. Feeds Quick Start revenue in DragonDesk: Analytics.
+                          </p>
+                        </div>
+
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Quick Start Length (days)</label>
+                          <input
+                            type="number"
+                            name="programQuickStartDays"
+                            min="1"
+                            step="1"
+                            defaultValue={editingProgram?.quickStartDurationDays ?? 30}
+                            className={styles.input}
+                          />
+                        </div>
                       </div>
 
                       <div className={styles.modalActions}>
@@ -2180,56 +2234,6 @@ const Settings = () => {
             </div>
           )}
 
-          {/* Trial Programs Management */}
-          {activeTab === 'trial-programs' && (
-            <div className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <h2 className={styles.sectionTitle}>Trial Programs</h2>
-                  <p className={styles.sectionDesc}>
-                    The trial offerings a trialer can be enrolled in. Assign one on a contact's profile when their status is Trialer.
-                  </p>
-                </div>
-              </div>
-
-              <form onSubmit={handleAddTrialProgram} className={styles.formRow} style={{ gap: '0.5rem', alignItems: 'flex-end' }}>
-                <div className={styles.formGroup} style={{ flex: 1 }}>
-                  <label className={styles.label}>Add Trial Program</label>
-                  <input
-                    type="text"
-                    value={newTrialProgram}
-                    onChange={(e) => setNewTrialProgram(e.target.value)}
-                    className={styles.input}
-                    placeholder="e.g., 2-Week Intro Trial"
-                  />
-                </div>
-                <button type="submit" className={styles.primaryBtn}>
-                  <AddIcon size={20} />
-                  Add
-                </button>
-              </form>
-
-              <div className={styles.locationsList} style={{ marginTop: '1rem' }}>
-                {trialPrograms.map((tp) => (
-                  <div key={tp.id} className={styles.locationCard} style={{ padding: '0.75rem 1rem' }}>
-                    <div className={styles.locationInfo}>
-                      <span className={styles.locationName} style={{ fontSize: '0.95rem' }}>{tp.name}</span>
-                    </div>
-                    <button onClick={() => handleDeleteTrialProgram(tp.id)} className={styles.deleteBtn}>
-                      <DeleteIcon size={18} /> Remove
-                    </button>
-                  </div>
-                ))}
-                {trialPrograms.length === 0 && (
-                  <div className={styles.emptyState}>
-                    <p>No trial programs yet. Add your first one above.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* MyStudio API Configuration */}
           {activeTab === 'mystudio' && (
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>MyStudio API Integration</h2>

@@ -20,9 +20,15 @@ export interface Location {
 
 export type AccountStatus = 'lead' | 'trialer' | 'member' | 'cancelled';
 
+// DEPRECATED: superseded by membership seats (see MembershipSeat). A contact's
+// plan is no longer a single value — an account holder buys one seat per
+// participant they cover. Retained only for legacy CSV-import rows.
 export type AccountType = 'basic' | 'premium' | 'elite' | 'family';
 
+// Programs are configured in Settings, so this union is only the Dragon Gym
+// defaults — treat any program name as valid.
 export type ProgramType =
+  | (string & {})
   | 'No Program Selected'
   | "Children's Martial Arts"
   | 'Adult BJJ'
@@ -63,8 +69,8 @@ export interface Member {
   lastName: string;
   email: string | null;
   phone: string;
-  accountStatus: AccountStatus;
-  accountType: AccountType;
+  accountStatus: AccountStatus;  // the contact's Stage: lead | trialer | member
+  accountType?: AccountType;     // deprecated, see MembershipSeat
   programType: ProgramType | null;
   membershipAge: MembershipAge;
   ranking: string;
@@ -83,8 +89,45 @@ export interface Member {
   accountHolderId?: number | null;
   participants?: ParticipantSummary[];
   accountHolder?: { id: number; firstName: string; lastName: string; email: string | null } | null;
+  // Lead-stage product: what they enquired about (from the lead form).
+  programInterestId?: number | null;
+  // Populated by GET /members/:id.
+  seats?: MembershipSeat[];
+  monthlyCost?: number;           // cents, summed across active seats
+  quickStart?: QuickStartEnrollment | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// One purchased membership license. The account holder pays for it; the
+// participant occupying it trains under it. A family-plan seat has no
+// participant and covers everyone on the account.
+export interface MembershipSeat {
+  id: number;
+  accountHolderId: number;
+  membershipId: number;
+  membershipName: string;
+  participantId: number | null;
+  participantFirstName: string | null;
+  participantLastName: string | null;
+  priceAmount: number;            // cents, snapshotted at purchase
+  isFamilyPlan: boolean;
+  maxProgramsPerParticipant: number | null;  // null = unlimited
+  status: 'active' | 'cancelled';
+  startDate: string;
+  endDate: string | null;
+}
+
+// The Trial-stage product: a priced trial into one program.
+export interface QuickStartEnrollment {
+  id: number;
+  memberId: number;
+  programId: number | null;
+  programName?: string | null;
+  priceAmount: number;            // cents
+  status: 'active' | 'converted' | 'expired';
+  startDate: string;
+  endDate: string | null;
 }
 
 export interface ParticipantSummary {
