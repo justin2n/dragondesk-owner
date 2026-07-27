@@ -383,6 +383,13 @@
   letter-spacing: 0.04em;
 }
 
+.filterHint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
 /* ── Live preview ────────────────────────────────────────── */
 .previewBlock {
   border: 1px solid var(--color-border);

@@ -1,16 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
-import { Audience, AudienceFilter, Member, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource } from '../types';
+import { Audience, AudienceFilter, Member, AccountStatus, ProgramType, MembershipAge, LeadSource } from '../types';
 import { DeleteIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import { useLocation } from '../contexts/LocationContext';
 import styles from './Audiences.module.css';
 
-const PROGRAM_TYPES: ProgramType[] = [
+// Programs are configured in Settings, so the builder loads them from the API.
+// This is only a fallback for the first render before they arrive.
+const FALLBACK_PROGRAM_TYPES: ProgramType[] = [
   "Children's Martial Arts", 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
   'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
   'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
   'Dragon Launch', 'Personal Training', 'DGMT Private Training',
+];
+
+// The stored account-status values are unchanged; only the labels read as the
+// contact "Stage" (trialer → Trial), matching the rest of the app.
+const STAGE_OPTIONS: { val: AccountStatus; label: string }[] = [
+  { val: 'lead', label: 'Lead' },
+  { val: 'trialer', label: 'Trial' },
+  { val: 'member', label: 'Member' },
+  { val: 'cancelled', label: 'Cancelled' },
 ];
 
 const RANKINGS: Record<string, string[]> = {
@@ -48,11 +59,17 @@ const Audiences = () => {
   const [tagInput, setTagInput] = useState('');
   const [previewMembers, setPreviewMembers] = useState<Member[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Settings-configured catalogs, so the builder reflects the real programs and
+  // membership plans rather than a hardcoded list.
+  const [programOptions, setProgramOptions] = useState<{ id: number; name: string }[]>([]);
+  const [membershipOptions, setMembershipOptions] = useState<{ id: number; name: string; priceAmount?: number | null }[]>([]);
 
   const emptyFilters = {
+    memberType: [] as ('account_holder' | 'participant')[],
     accountStatus: [] as AccountStatus[],
-    accountType: [] as AccountType[],
     programType: [] as ProgramType[],
+    programInterestId: [] as number[],
+    membershipId: [] as number[],
     membershipAge: [] as MembershipAge[],
     ranking: [] as string[],
     leadSource: [] as LeadSource[],
@@ -62,7 +79,17 @@ const Audiences = () => {
 
   const [formData, setFormData] = useState({ name: '', description: '', filters: emptyFilters });
 
-  useEffect(() => { loadAudiences(); }, []);
+  useEffect(() => {
+    loadAudiences();
+    api.get('/programs/active').then(setProgramOptions).catch(() => {});
+    api.get('/memberships?isActive=true').then(setMembershipOptions).catch(() => {});
+  }, []);
+
+  // Program pills come from Settings; fall back to the built-in list only if the
+  // catalog hasn't loaded (or none are configured yet).
+  const programNames: ProgramType[] = programOptions.length > 0
+    ? programOptions.map(p => p.name as ProgramType)
+    : FALLBACK_PROGRAM_TYPES;
 
   const loadAudiences = async () => {
     try {
@@ -109,9 +136,11 @@ const Audiences = () => {
       name: audience.name,
       description: audience.description || '',
       filters: {
+        memberType: af.memberType ?? [],
         accountStatus: af.accountStatus ?? [],
-        accountType: af.accountType ?? [],
         programType: af.programType ?? [],
+        programInterestId: af.programInterestId ?? [],
+        membershipId: af.membershipId ?? [],
         membershipAge: af.membershipAge ?? [],
         ranking: af.ranking ?? [],
         leadSource: af.leadSource ?? [],
@@ -329,21 +358,40 @@ const Audiences = () => {
                 </div>
               )}
 
-              {/* Status + Age Group */}
+              {/* Profile Type + Stage */}
               <div className={styles.filterGrid2}>
                 <div className={styles.filterBlock}>
-                  <label className={styles.filterLabel}>Account Status</label>
+                  <label className={styles.filterLabel}>Profile Type</label>
                   <div className={styles.pillGroup}>
-                    {(['lead', 'trialer', 'member', 'cancelled'] as AccountStatus[]).map(s => (
-                      <button key={s} type="button"
-                        className={`${styles.pill} ${f.accountStatus.includes(s) ? styles.pillActive : ''}`}
-                        onClick={() => setFilter({ accountStatus: toggle(f.accountStatus, s) })}>
-                        {s.charAt(0).toUpperCase() + s.slice(1)}
+                    {([
+                      { val: 'account_holder', label: 'Account Holder' },
+                      { val: 'participant', label: 'Participant' },
+                    ] as { val: 'account_holder' | 'participant'; label: string }[]).map(({ val, label }) => (
+                      <button key={val} type="button"
+                        className={`${styles.pill} ${f.memberType.includes(val) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ memberType: toggle(f.memberType, val) })}>
+                        {label}
                       </button>
                     ))}
                   </div>
                 </div>
 
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Stage</label>
+                  <div className={styles.pillGroup}>
+                    {STAGE_OPTIONS.map(({ val, label }) => (
+                      <button key={val} type="button"
+                        className={`${styles.pill} ${f.accountStatus.includes(val) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ accountStatus: toggle(f.accountStatus, val) })}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Age Group + Lead Source */}
+              <div className={styles.filterGrid2}>
                 <div className={styles.filterBlock}>
                   <label className={styles.filterLabel}>Age Group</label>
                   <div className={styles.pillGroup}>
@@ -352,22 +400,6 @@ const Audiences = () => {
                         className={`${styles.pill} ${f.membershipAge.includes(a) ? styles.pillActive : ''}`}
                         onClick={() => setFilter({ membershipAge: toggle(f.membershipAge, a) })}>
                         {a}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Account Type + Lead Source */}
-              <div className={styles.filterGrid2}>
-                <div className={styles.filterBlock}>
-                  <label className={styles.filterLabel}>Account Type</label>
-                  <div className={styles.pillGroup}>
-                    {(['basic', 'premium', 'elite', 'family'] as AccountType[]).map(t => (
-                      <button key={t} type="button"
-                        className={`${styles.pill} ${f.accountType.includes(t) ? styles.pillActive : ''}`}
-                        onClick={() => setFilter({ accountType: toggle(f.accountType, t) })}>
-                        {t.charAt(0).toUpperCase() + t.slice(1)}
                       </button>
                     ))}
                   </div>
@@ -394,11 +426,12 @@ const Audiences = () => {
                 </div>
               </div>
 
-              {/* Program Type */}
+              {/* Program — matches a contact's primary program or any program a
+                  participant trains in. Sourced from Settings. */}
               <div className={styles.filterBlock}>
-                <label className={styles.filterLabel}>Program Type</label>
+                <label className={styles.filterLabel}>Program</label>
                 <div className={styles.pillGroup}>
-                  {PROGRAM_TYPES.map(p => (
+                  {programNames.map(p => (
                     <button key={p} type="button"
                       className={`${styles.pill} ${f.programType.includes(p) ? styles.pillActive : ''}`}
                       onClick={() => setFilter({ programType: toggle(f.programType, p) })}>
@@ -407,6 +440,40 @@ const Audiences = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Membership Type — the plan a paying account holder is on. */}
+              {membershipOptions.length > 0 && (
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Membership Type</label>
+                  <div className={styles.pillGroup}>
+                    {membershipOptions.map(m => (
+                      <button key={m.id} type="button"
+                        className={`${styles.pill} ${f.membershipId.includes(m.id) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ membershipId: toggle(f.membershipId, m.id) })}>
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                  <small className={styles.filterHint}>Matches the account holder paying for an active seat on the plan.</small>
+                </div>
+              )}
+
+              {/* Program Interest — what a lead enquired about. */}
+              {programOptions.length > 0 && (
+                <div className={styles.filterBlock}>
+                  <label className={styles.filterLabel}>Program Interest</label>
+                  <div className={styles.pillGroup}>
+                    {programOptions.map(p => (
+                      <button key={p.id} type="button"
+                        className={`${styles.pill} ${f.programInterestId.includes(p.id) ? styles.pillActive : ''}`}
+                        onClick={() => setFilter({ programInterestId: toggle(f.programInterestId, p.id) })}>
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                  <small className={styles.filterHint}>The program a lead expressed interest in (from the lead form).</small>
+                </div>
+              )}
 
               {/* Ranking — collapsible */}
               <div className={styles.filterBlock}>

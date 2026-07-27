@@ -162,8 +162,13 @@ export interface Audience {
 
 export interface AudienceFilter {
   accountStatus?: AccountStatus[];
+  /** @deprecated superseded by membershipId (membership seats). Kept for old saved audiences. */
   accountType?: AccountType[];
   programType?: ProgramType[];
+  /** Lead-stage product: the program a lead enquired about (program ids). */
+  programInterestId?: number[];
+  /** Member-stage product: matches the account holder of an active seat of these membership plans. */
+  membershipId?: number[];
   membershipAge?: MembershipAge[];
   ranking?: string[];
   leadSource?: LeadSource[];

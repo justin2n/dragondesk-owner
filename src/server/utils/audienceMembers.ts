@@ -35,8 +35,45 @@ export function buildAudienceQuery(
   }
 
   if (f.accountStatus?.length) inClause('accountStatus', f.accountStatus);
+  // accountType is deprecated (superseded by membership seats) and no longer
+  // offered in the builder, but old saved audiences may still reference it.
   if (f.accountType?.length) inClause('accountType', f.accountType);
-  if (f.programType?.length) inClause('programType', f.programType);
+
+  // Program matches the contact's primary program OR any program they train in
+  // via the member_programs junction — a participant enrolled in several
+  // programs must match a filter for any one of them, not just the primary.
+  if (f.programType?.length) {
+    const ph = f.programType.map(() => '?').join(',');
+    sql += ` AND ("programType" IN (${ph}) OR EXISTS (
+      SELECT 1 FROM member_programs mp JOIN programs p ON p.id = mp."programId"
+      WHERE mp."memberId" = members.id AND p.name IN (${ph})
+    ))`;
+    params.push(...f.programType, ...f.programType);
+    filterCount++;
+  }
+
+  // Program Interest is the Lead-stage product (from the lead form), stored as
+  // a program id on the contact.
+  if (f.programInterestId?.length) {
+    const ph = f.programInterestId.map(() => '?').join(',');
+    sql += ` AND members."programInterestId" IN (${ph})`;
+    params.push(...f.programInterestId);
+    filterCount++;
+  }
+
+  // Membership Type matches the paying account holder of an active seat of that
+  // plan — not the participants it covers. Targets whoever holds the license.
+  if (f.membershipId?.length) {
+    const ph = f.membershipId.map(() => '?').join(',');
+    sql += ` AND EXISTS (
+      SELECT 1 FROM membership_seats s
+      WHERE s.status = 'active' AND s."membershipId" IN (${ph})
+        AND s."accountHolderId" = members.id
+    )`;
+    params.push(...f.membershipId);
+    filterCount++;
+  }
+
   if (f.membershipAge?.length) inClause('membershipAge', f.membershipAge);
   if (f.ranking?.length) inClause('ranking', f.ranking);
   if (f.leadSource?.length) inClause('leadSource', f.leadSource);
