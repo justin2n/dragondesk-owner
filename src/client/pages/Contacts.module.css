@@ -1387,6 +1387,13 @@
   color: var(--color-text-secondary);
 }
 
+.importSkipReasons {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
 /* ── History tab ───────────────────────────────────────────────────────────── */
 
 .historyList {

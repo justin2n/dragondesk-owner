@@ -1345,6 +1345,11 @@ async function initializeDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_member ON quick_start_enrollments("memberId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_program ON quick_start_enrollments("programId")`);
 
+    // Mark seats/quick starts created by the MyStudio importer so a re-import can
+    // rebuild a member's synced records without touching ones added by hand.
+    await client.query(`ALTER TABLE membership_seats ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
+    await client.query(`ALTER TABLE quick_start_enrollments ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
+
     // DEPRECATED, retained deliberately: "accountType", "membershipId" and
     // "membershipName" are superseded by membership_seats — a contact's plan is
     // no longer a single value, since an account holder buys one seat per

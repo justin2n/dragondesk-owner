@@ -1977,13 +1977,28 @@ const Contacts = () => {
                             {r.skipped > 0 && <span>{r.skipped} skipped</span>}
                             {r.errors > 0 && <span className={styles.importFailed}>{r.errors} errors</span>}
                           </div>
-                          {/* Student Details breakdown (account holder / participant linking) */}
-                          {(r.accountHoldersCreated != null || r.participantsCreated != null || r.relinked != null || r.contactsUpdated != null) && (
+                          {/* Account holder / participant structure */}
+                          {(r.accountHoldersCreated > 0 || r.participantsCreated > 0 || r.relinked > 0 || r.contactsUpdated > 0 || r.unmatched > 0) && (
                             <div className={styles.importFileResultStats}>
                               {r.accountHoldersCreated > 0 && <span>{r.accountHoldersCreated} account holders created</span>}
                               {r.participantsCreated > 0 && <span>{r.participantsCreated} participants created</span>}
                               {r.relinked > 0 && <span>{r.relinked} participants relinked</span>}
                               {r.contactsUpdated > 0 && <span>{r.contactsUpdated} contacts updated</span>}
+                              {r.unmatched > 0 && <span>{r.unmatched} unmatched</span>}
+                            </div>
+                          )}
+                          {/* New-model products created (seats, quick starts, programs) */}
+                          {(r.seatsCreated > 0 || r.quickStartsCreated > 0 || r.membershipsCreated > 0 || r.programsLinked > 0) && (
+                            <div className={styles.importFileResultStats}>
+                              {r.seatsCreated > 0 && <span className={styles.importSuccess}>{r.seatsCreated} membership seats</span>}
+                              {r.quickStartsCreated > 0 && <span className={styles.importSuccess}>{r.quickStartsCreated} quick starts</span>}
+                              {r.programsLinked > 0 && <span>{r.programsLinked} program enrollments</span>}
+                              {r.membershipsCreated > 0 && <span>{r.membershipsCreated} membership types created</span>}
+                            </div>
+                          )}
+                          {r.skipReasons?.length > 0 && (
+                            <div className={styles.importSkipReasons}>
+                              {r.skipReasons.slice(0, 5).map((s: string, si: number) => <div key={si}>• {s}</div>)}
                             </div>
                           )}
                         </>
