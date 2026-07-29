@@ -57,6 +57,44 @@ router.get('/', async (req: AuthRequest, res) => {
   }
 });
 
+// GET /api/sales-signals/by-member?hours=24
+// Intent score (recent tracking-event count) keyed by memberId, so the Contacts
+// list can flag hot leads without opening Pulse. Same engagement signal Pulse
+// uses, aggregated per member across all their visitor sessions. Returns a map
+// { [memberId]: { count, lastActivity } }.
+router.get('/by-member', async (req: AuthRequest, res) => {
+  try {
+    const hours = parseInt(req.query.hours as string) || 24;
+
+    const result = await pool.query(`
+      SELECT vi."memberId"        AS "memberId",
+             COUNT(te.id)         AS count,
+             MAX(te."createdAt")  AS "lastActivity"
+      FROM (
+        -- Distinct visitor sessions per member, so a member with several
+        -- identity rows on one session isn't counted multiple times.
+        SELECT DISTINCT "memberId", "visitorId", token
+        FROM visitor_identities
+        WHERE "memberId" IS NOT NULL
+      ) vi
+      JOIN tracking_events te
+        ON  te."visitorId" = vi."visitorId"
+        AND te.token       = vi.token
+        AND te."createdAt" >= NOW() - ($1 || ' hours')::interval
+      GROUP BY vi."memberId"
+    `, [hours]);
+
+    const scores: Record<number, { count: number; lastActivity: string }> = {};
+    for (const r of result.rows) {
+      scores[r.memberId] = { count: parseInt(r.count) || 0, lastActivity: r.lastActivity };
+    }
+    res.json(scores);
+  } catch (error) {
+    console.error('Error fetching per-member intent scores:', error);
+    res.json({}); // fail soft — the Contacts list still renders without badges
+  }
+});
+
 // GET /api/sales-signals/count — lightweight, used for sidebar badge
 router.get('/count', async (req: AuthRequest, res) => {
   try {

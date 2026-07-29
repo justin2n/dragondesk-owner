@@ -50,6 +50,18 @@ const BULK_VALUE_LABELS: Record<string, Record<string, string>> = {
   membershipAge: { Adult: 'Adult', Kids: 'Kids' },
 };
 
+// Intent tiers mirror DragonDesk: Pulse (SalesSignals.tsx). WARM starts at 10 —
+// Pulse's default "min events" floor — so a card badge means the same "worth a
+// call" bar as Pulse, and quiet contacts stay unbadged.
+const INTENT_TIERS = [
+  { min: 50, label: 'ON FIRE', cls: 'intentFire' },
+  { min: 25, label: 'HOT', cls: 'intentHot' },
+  { min: 10, label: 'WARM', cls: 'intentWarm' },
+] as const;
+
+const intentTier = (count: number | undefined) =>
+  count == null ? null : INTENT_TIERS.find(t => count >= t.min) || null;
+
 // Which product each stage exposes. Later-stage fields still render, greyed out,
 // so the path ahead is visible rather than hidden. Mirrors stageAllows() in
 // server/routes/members.ts, which enforces the same rules on write.
@@ -187,6 +199,10 @@ const Contacts = () => {
   const [billingLoading, setBillingLoading] = useState(false);
   const [contactType, setContactType] = useState<'all' | 'account_holders' | 'participants'>('all');
   const [accountHolders, setAccountHolders] = useState<Member[]>([]);
+  // Intent score (recent tracking-event count) per member, the same engagement
+  // signal DragonDesk: Pulse uses — surfaced here so staff spot hot leads
+  // without opening Pulse. Keyed by member id; only "warm+" scores are shown.
+  const [intentScores, setIntentScores] = useState<Record<number, number>>({});
   const [filters, setFilters] = useState({
     accountStatus: '',
     programType: '',
@@ -240,6 +256,18 @@ const Contacts = () => {
     api.get('/memberships?isActive=true').then(setMemberships).catch(() => {});
     api.get('/programs/active').then(setPrograms).catch(() => {});
     api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
+  }, []);
+
+  // Intent scores over the last 24h (same window Pulse defaults to). Fail-soft:
+  // a missing map just means no badges, never a broken Contacts list.
+  useEffect(() => {
+    api.get('/sales-signals/by-member?hours=24')
+      .then((scores: Record<number, { count: number }>) => {
+        const flat: Record<number, number> = {};
+        for (const [id, v] of Object.entries(scores)) flat[Number(id)] = v.count;
+        setIntentScores(flat);
+      })
+      .catch(() => setIntentScores({}));
   }, []);
 
   // Deep-link: ?member=<id> auto-opens the profile modal
@@ -917,7 +945,20 @@ const Contacts = () => {
             <span className={styles.memberTypeChip}>Participant</span>
           )}
         </div>
-        <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {(() => {
+            const tier = intentTier(intentScores[member.id]);
+            return tier ? (
+              <span
+                className={`${styles.intentBadge} ${styles[tier.cls]}`}
+                title={`${intentScores[member.id]} site events in the last 24h (from DragonDesk: Pulse)`}
+              >
+                {tier.label}
+              </span>
+            ) : null;
+          })()}
+          <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
+        </div>
       </div>
       <div className={styles.cardBody} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
         {member.memberType !== 'participant' && member.email && (
@@ -1003,7 +1044,21 @@ const Contacts = () => {
       </td>
       <td>{member.email}</td>
       <td>{member.phone}</td>
-      <td><span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span></td>
+      <td>
+        <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
+        {(() => {
+          const tier = intentTier(intentScores[member.id]);
+          return tier ? (
+            <span
+              className={`${styles.intentBadge} ${styles[tier.cls]}`}
+              style={{ marginLeft: 6 }}
+              title={`${intentScores[member.id]} site events in the last 24h (from DragonDesk: Pulse)`}
+            >
+              {tier.label}
+            </span>
+          ) : null;
+        })()}
+      </td>
       <td>{member.programType}</td>
       <td>{member.ranking}</td>
       <td>{planName(member.pricingPlanId)}</td>
