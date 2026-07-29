@@ -155,6 +155,38 @@ router.put('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, r
   }
 });
 
+// Programs with zero references — no primary program, no enrollment, and no lead
+// interest. These are the "dead" programs safe to prune (same condition the
+// single-delete guard enforces, applied in bulk).
+const UNUSED_PROGRAMS_SQL = `
+  SELECT p.id, p.name FROM programs p
+  WHERE NOT EXISTS (SELECT 1 FROM members m WHERE m."programType" = p.name)
+    AND NOT EXISTS (SELECT 1 FROM member_programs mp WHERE mp."programId" = p.id)
+    AND NOT EXISTS (SELECT 1 FROM members m WHERE m."programInterestId" = p.id)
+  ORDER BY p.name ASC`;
+
+// GET /api/programs/unused — preview what a prune would remove.
+router.get('/unused', authenticateToken, authorizeAdmin, async (_req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(UNUSED_PROGRAMS_SQL);
+    res.json(result.rows);
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
+// POST /api/programs/prune-unused — delete every program with zero references.
+router.post('/prune-unused', authenticateToken, authorizeAdmin, async (_req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM programs WHERE id IN (SELECT id FROM (${UNUSED_PROGRAMS_SQL}) u) RETURNING name`
+    );
+    res.json({ deleted: result.rows.length, names: result.rows.map(r => r.name) });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
 router.delete('/:id', authenticateToken, authorizeAdmin, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;

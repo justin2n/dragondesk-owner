@@ -589,6 +589,32 @@ const Settings = () => {
     }
   };
 
+  // Remove every program with no members, enrollments, or lead interest — the
+  // "dead" programs that clutter the dashboard and dropdowns. Shows the list and
+  // confirms first, since deletion is irreversible.
+  const handlePruneUnusedPrograms = async () => {
+    try {
+      const unused: { id: number; name: string }[] = await api.get('/programs/unused');
+      if (unused.length === 0) {
+        toast('No unused programs to remove — every program has members or interest.', 'success');
+        return;
+      }
+      const names = unused.map(u => u.name).join(', ');
+      const ok = await confirm({
+        title: `Remove ${unused.length} unused program${unused.length === 1 ? '' : 's'}?`,
+        message: `These have no members, enrollments, or lead interest and will be permanently deleted:\n\n${names}`,
+        confirmLabel: 'Remove them',
+        danger: true,
+      });
+      if (!ok) return;
+      const result = await api.post('/programs/prune-unused', {});
+      await loadPrograms();
+      showSaveMessage(`Removed ${result.deleted} unused program${result.deleted === 1 ? '' : 's'}.`);
+    } catch (error: any) {
+      toast(error.message || 'Failed to remove unused programs', 'error');
+    }
+  };
+
   const handleToggleProgramActive = async (program: Program) => {
     try {
       await api.put(`/programs/${program.id}`, { isActive: !program.isActive });
@@ -2031,16 +2057,21 @@ const Settings = () => {
                     Manage your martial arts programs and disciplines.
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEditingProgram(null);
-                    setShowProgramModal(true);
-                  }}
-                  className={styles.primaryBtn}
-                >
-                  <AddIcon size={20} />
-                  Add Program
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button onClick={handlePruneUnusedPrograms} className={styles.secondaryBtn}>
+                    Remove Unused
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingProgram(null);
+                      setShowProgramModal(true);
+                    }}
+                    className={styles.primaryBtn}
+                  >
+                    <AddIcon size={20} />
+                    Add Program
+                  </button>
+                </div>
               </div>
 
               <div className={styles.locationsList}>

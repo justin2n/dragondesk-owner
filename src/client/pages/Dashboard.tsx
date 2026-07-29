@@ -184,27 +184,36 @@ const Dashboard = () => {
           </div>
         </div>
         <div className={styles.programsGrid}>
-          {programs.filter(p => {
-            // Age group is configured per program in Settings. Fall back to the
-            // old name heuristic for programs not yet categorised, and always
-            // show 'All' programs in both tabs.
-            if (p.ageGroup === 'All') return true;
-            if (p.ageGroup === 'Kids' || p.ageGroup === 'Adult') return p.ageGroup === ageFilter;
-            const name = p.name.toLowerCase();
-            const looksKids = name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
-            return ageFilter === 'Kids' ? looksKids : !looksKids;
-          }).map(p => (
-            <div key={p.id} className={styles.programCard}>
-              <div className={styles.programHeader}><h3>{p.name}</h3></div>
-              <div className={styles.programValue}>{stats.programCounts[p.name] || 0}</div>
-              <div className={styles.programLabel}>Active Members</div>
-            </div>
-          ))}
-          {programs.length === 0 && (
-            <div className={styles.programCard}>
-              <div className={styles.programLabel}>No programs configured. Add programs in Settings.</div>
-            </div>
-          )}
+          {(() => {
+            const visible = programs.filter(p => {
+              // Hide dead tiles: a program with nobody enrolled adds only clutter.
+              if ((stats.programCounts[p.name] || 0) === 0) return false;
+              // Age group is configured per program in Settings. Fall back to the
+              // old name heuristic for programs not yet categorised, and always
+              // show 'All' programs in both tabs.
+              if (p.ageGroup === 'All') return true;
+              if (p.ageGroup === 'Kids' || p.ageGroup === 'Adult') return p.ageGroup === ageFilter;
+              const name = p.name.toLowerCase();
+              const looksKids = name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
+              return ageFilter === 'Kids' ? looksKids : !looksKids;
+            });
+            if (visible.length === 0) {
+              return (
+                <div className={styles.programCard}>
+                  <div className={styles.programLabel}>
+                    No {ageFilter === 'Kids' ? 'kids' : 'adult'} programs with active members.
+                  </div>
+                </div>
+              );
+            }
+            return visible.map(p => (
+              <div key={p.id} className={styles.programCard}>
+                <div className={styles.programHeader}><h3>{p.name}</h3></div>
+                <div className={styles.programValue}>{stats.programCounts[p.name] || 0}</div>
+                <div className={styles.programLabel}>Active Members</div>
+              </div>
+            ));
+          })()}
         </div>
       </div>
 
