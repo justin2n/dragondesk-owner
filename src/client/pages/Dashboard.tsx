@@ -18,13 +18,10 @@ import styles from './Dashboard.module.css';
 const Dashboard = () => {
   const { selectedLocation, isAllLocations } = useLocation();
   const [stats, setStats] = useState({
-    totalMembers: 0,
     leads: 0,
-    trialers: 0,
-    members: 0,
-    bjj: 0,
-    muayThai: 0,
-    taekwondo: 0,
+    activeTrials: 0,
+    accountHolders: 0,
+    participants: 0,
     programCounts: {} as Record<string, number>,
   });
   const [programs, setPrograms] = useState<{ id: number; name: string; isActive: boolean; ageGroup?: 'Kids' | 'Adult' | 'All' }[]>([]);
@@ -57,13 +54,11 @@ const Dashboard = () => {
         .catch(() => ({}));
 
       setStats({
-        totalMembers: members.length,
         leads: members.filter(m => m.accountStatus === 'lead').length,
-        trialers: members.filter(m => m.accountStatus === 'trialer').length,
-        members: members.filter(m => m.accountStatus === 'member').length,
-        bjj: 0,
-        muayThai: 0,
-        taekwondo: 0,
+        activeTrials: members.filter(m => m.accountStatus === 'trialer').length,
+        // Account holder is the default when memberType is unset (legacy rows).
+        accountHolders: members.filter(m => (m.memberType || 'account_holder') === 'account_holder').length,
+        participants: members.filter(m => m.memberType === 'participant').length,
         programCounts,
       });
     } catch (error) {
@@ -131,16 +126,6 @@ const Dashboard = () => {
       <div className={styles.statsGrid}>
         <div className={styles.statCard}>
           <div className={styles.statIcon}>
-            <MembersIcon size={40} />
-          </div>
-          <div className={styles.statInfo}>
-            <div className={styles.statValue}>{stats.totalMembers}</div>
-            <div className={styles.statLabel}>Total Profiles</div>
-          </div>
-        </div>
-
-        <div className={styles.statCard}>
-          <div className={styles.statIcon}>
             <AudiencesIcon size={40} />
           </div>
           <div className={styles.statInfo}>
@@ -151,21 +136,31 @@ const Dashboard = () => {
 
         <div className={styles.statCard}>
           <div className={styles.statIcon}>
-            <AddPersonIcon size={40} />
+            <StarIcon size={40} />
           </div>
           <div className={styles.statInfo}>
-            <div className={styles.statValue}>{stats.trialers}</div>
-            <div className={styles.statLabel}>Trialers</div>
+            <div className={styles.statValue}>{stats.activeTrials}</div>
+            <div className={styles.statLabel}>Active Trials</div>
           </div>
         </div>
 
         <div className={styles.statCard}>
           <div className={styles.statIcon}>
-            <StarIcon size={40} />
+            <MembersIcon size={40} />
           </div>
           <div className={styles.statInfo}>
-            <div className={styles.statValue}>{stats.members}</div>
-            <div className={styles.statLabel}>Members</div>
+            <div className={styles.statValue}>{stats.accountHolders}</div>
+            <div className={styles.statLabel}>Account Holders</div>
+          </div>
+        </div>
+
+        <div className={styles.statCard}>
+          <div className={styles.statIcon}>
+            <AddPersonIcon size={40} />
+          </div>
+          <div className={styles.statInfo}>
+            <div className={styles.statValue}>{stats.participants}</div>
+            <div className={styles.statLabel}>Participants</div>
           </div>
         </div>
       </div>
