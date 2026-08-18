@@ -35,29 +35,28 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
   const [editType, setEditType] = useState<'text' | 'image' | 'style'>('text');
   const [styleProperty, setStyleProperty] = useState('');
 
-  useEffect(() => {
-    if (iframeRef.current) {
-      const iframe = iframeRef.current;
+  // Injected iframe listeners are set up once per page load and close over
+  // state, so mirror the live values into refs they can read instead.
+  const editModeRef = useRef(editMode);
+  const changesRef = useRef(changes);
+  useEffect(() => { editModeRef.current = editMode; }, [editMode]);
+  useEffect(() => { changesRef.current = changes; }, [changes]);
 
-      iframe.onload = () => {
-        setIsLoading(false);
-        try {
-          injectEditorScript();
-        } catch (err: any) {
-          if (err.name === 'SecurityError') {
-            setError('Cannot edit this page due to browser security restrictions (CORS). The page must be on the same domain or allow cross-origin access.');
-          } else {
-            setError(`Error loading page: ${err.message}`);
-          }
-        }
-      };
-
-      iframe.onerror = () => {
-        setError('Failed to load the page. Please check the URL and ensure the page allows embedding.');
-        setIsLoading(false);
-      };
+  // Fired by the iframe's onLoad prop (attached at render, so it can't be missed
+  // the way an imperatively-assigned onload can when the page loads fast/cached).
+  const handleIframeLoad = () => {
+    setIsLoading(false);
+    setError(null);
+    try {
+      injectEditorScript();
+    } catch (err: any) {
+      if (err.name === 'SecurityError') {
+        setError('Cannot edit this page due to browser security restrictions (CORS). The page must be on the same domain or allow cross-origin access.');
+      } else {
+        setError(`Error loading page: ${err.message}`);
+      }
     }
-  }, [pageUrl]);
+  };
 
   const injectEditorScript = () => {
     if (!iframeRef.current) return;
@@ -66,6 +65,14 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
     if (!iframeDoc) {
       throw new Error('Cannot access iframe content. Page must allow embedding, be served from the same domain, or use a CORS proxy.');
     }
+
+    // Guard against double-injection if load fires more than once for the same
+    // document (the flag lives on the doc, so a real reload resets it).
+    if ((iframeDoc as any).__ddEditorInjected) {
+      applyChanges(iframeDoc);
+      return;
+    }
+    (iframeDoc as any).__ddEditorInjected = true;
 
     // Inject CSS for hover highlighting
     const style = iframeDoc.createElement('style');
@@ -104,7 +111,7 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
 
     interactiveElements.forEach((element: any) => {
       element.addEventListener('mouseenter', () => {
-        if (editMode === 'select') {
+        if (editModeRef.current === 'select') {
           element.classList.add('dojo-editor-highlight');
           const selector = generateSelector(element);
           setHoveredSelector(selector);
@@ -119,7 +126,7 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
       element.addEventListener('click', (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
-        if (editMode === 'select') {
+        if (editModeRef.current === 'select') {
           handleElementClick(element);
         }
       });
@@ -136,11 +143,14 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
     }
 
     let selector = element.tagName.toLowerCase();
-    if (element.className) {
-      const classes = element.className.split(' ').filter(c => !c.startsWith('dojo-editor'));
-      if (classes.length > 0) {
-        selector += '.' + classes.join('.');
-      }
+    // className is an SVGAnimatedString (not a string) on SVG elements, so read
+    // classes from classList, which is always a DOMTokenList. CSS-escape each so
+    // utility classes with special chars (e.g. Tailwind's "md:flex") stay valid.
+    const classes = Array.from(element.classList)
+      .filter((c) => typeof c === 'string' && !c.startsWith('dojo-editor')) as string[];
+    if (classes.length > 0) {
+      const esc = (window as any).CSS?.escape ? (window as any).CSS.escape : (s: string) => s;
+      selector += '.' + classes.map(esc).join('.');
     }
 
     // Add nth-child if needed for uniqueness
@@ -210,10 +220,9 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
     setChanges(updatedChanges);
     onChange({ ...variant, changes: updatedChanges });
 
-    // Apply the change immediately
-    if (iframeRef.current?.contentDocument) {
-      applyChange(iframeRef.current.contentDocument, newChange);
-    }
+    // Apply to the exact element the user clicked, not a re-query of the selector
+    // (which can resolve to a different element when the selector isn't unique).
+    applyChangeToElement(selectedElement.element, newChange);
 
     setEditMode('select');
     setSelectedElement(null);
@@ -226,17 +235,19 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
   const applyChange = (doc: Document, change: ElementChange) => {
     try {
       const element = doc.querySelector(change.selector);
-      if (!element) return;
-
-      if (change.type === 'text') {
-        element.textContent = change.newValue;
-      } else if (change.type === 'image' && element instanceof HTMLImageElement) {
-        element.src = change.newValue;
-      } else if (change.type === 'style' && change.property) {
-        (element as HTMLElement).style.setProperty(change.property, change.newValue);
-      }
+      if (element) applyChangeToElement(element, change);
     } catch (err) {
       console.error('Error applying change:', err);
+    }
+  };
+
+  const applyChangeToElement = (element: Element, change: ElementChange) => {
+    if (change.type === 'text') {
+      element.textContent = change.newValue;
+    } else if (change.type === 'image' && element instanceof HTMLImageElement) {
+      element.src = change.newValue;
+    } else if (change.type === 'style' && change.property) {
+      (element as HTMLElement).style.setProperty(change.property, change.newValue);
     }
   };
 
@@ -413,6 +424,11 @@ const VisualPageEditor: React.FC<VisualPageEditorProps> = ({
           src={`/api/proxy?url=${encodeURIComponent(pageUrl)}`}
           className={styles.iframe}
           title={`${variantLabel} Preview`}
+          onLoad={handleIframeLoad}
+          onError={() => {
+            setError('Failed to load the page. Please check the URL and ensure the page allows embedding.');
+            setIsLoading(false);
+          }}
         />
 
         {editMode === 'select' && (
