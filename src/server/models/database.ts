@@ -1407,8 +1407,26 @@ async function initializeDatabase() {
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
 
+    // ── DragonDesk: Optimize — experience types + All Traffic audience ─────────
+    // Experiences can be page edits (default), promo bars, or offer modals. The
+    // bar/modal config rides inside the variant JSON, so no new columns for it.
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "experienceType" TEXT DEFAULT 'page_edit'`).catch(() => {});
+    // System audiences (like "All Traffic") are seeded and cannot be deleted.
+    await client.query(`ALTER TABLE audiences ADD COLUMN IF NOT EXISTS "isSystem" BOOLEAN DEFAULT false`).catch(() => {});
+
     // Seed admin user if none exists
     await seedAdminUser(client);
+
+    // Seed the "All Traffic" audience — an empty-filter audience that matches
+    // everyone, the default target for Optimize experiences. createdBy points at
+    // any existing user (seedAdminUser guarantees one). Guarded on name.
+    await client.query(`
+      INSERT INTO audiences (name, description, filters, "createdBy", "isSystem")
+      SELECT 'All Traffic', 'Everyone — the default target for website experiences.', '{}',
+             (SELECT id FROM users ORDER BY id ASC LIMIT 1), true
+      WHERE NOT EXISTS (SELECT 1 FROM audiences WHERE name = 'All Traffic')
+        AND EXISTS (SELECT 1 FROM users)
+    `).catch(() => {});
 
     console.log('Database tables initialized');
   } catch (err) {

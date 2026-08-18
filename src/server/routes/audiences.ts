@@ -130,6 +130,12 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Audience not found' });
     }
 
+    // System audiences (e.g. "All Traffic") are the default targets for Optimize
+    // experiences and can't be deleted.
+    if (existingAudience.isSystem) {
+      return res.status(400).json({ error: 'The All Traffic audience is built in and cannot be deleted.' });
+    }
+
     await run('DELETE FROM audiences WHERE id = ?', [id]);
     res.json({ message: 'Audience deleted successfully' });
   } catch (error) {

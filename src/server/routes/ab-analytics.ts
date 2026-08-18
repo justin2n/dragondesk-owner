@@ -4,8 +4,20 @@ import { query, run } from '../models/database';
 
 const router = express.Router();
 
+// CORS for the public tracking beacon: the site snippet posts here cross-origin
+// (promo bar / offer modal views + clicks), same as /api/tracking/collect.
+router.options('/track', (_req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.status(204).end();
+});
+
 // Track an event (view, click, lead, engagement, bounce)
 router.post('/track', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   try {
     const { testId, variant, eventType, sessionId, metadata } = req.body;
 

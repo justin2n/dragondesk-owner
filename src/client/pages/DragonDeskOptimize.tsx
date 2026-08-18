@@ -7,6 +7,30 @@ import { useToast } from '../components/Toast';
 import styles from './DragonDeskOptimize.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit' | 'analytics' | 'tracking';
+type ExperienceType = 'page_edit' | 'promo_bar' | 'offer_modal';
+
+const EXPERIENCE_TYPES: { value: ExperienceType; label: string; desc: string }[] = [
+  { value: 'page_edit', label: 'Page Edit', desc: 'Change text, styles, or attributes on an existing page.' },
+  { value: 'promo_bar', label: 'Promo Bar', desc: 'A banner injected at the top or bottom of every page.' },
+  { value: 'offer_modal', label: 'Offer Modal', desc: 'A popup shown on load, exit intent, or scroll depth.' },
+];
+
+// Treatment config defaults. The bar/modal config rides inside variantB so the
+// existing two-variant structure is reused (A = control, B = treatment).
+const DEFAULT_PROMO_BAR = {
+  message: 'Join today and get your first month free!',
+  ctaLabel: 'Claim Offer', ctaLink: '',
+  bgColor: '#c0392b', textColor: '#ffffff',
+  position: 'top' as 'top' | 'bottom',
+  dismissible: true, frequency: 'session' as 'session' | 'once' | 'always',
+};
+const DEFAULT_OFFER_MODAL = {
+  heading: 'Limited-time offer', body: 'Sign up this week and get your first month free.',
+  imageUrl: '', ctaLabel: 'Get Started', ctaLink: '',
+  bgColor: '#ffffff', textColor: '#1a1a2e', accentColor: '#c0392b',
+  trigger: { type: 'load' as 'load' | 'exit' | 'scroll', delaySeconds: 3, scrollPct: 50 },
+  dismissible: true, frequency: 'session' as 'session' | 'once' | 'always',
+};
 
 const DragonDeskOptimize = () => {
   const { toast, confirm } = useToast();
@@ -38,6 +62,7 @@ const DragonDeskOptimize = () => {
 
   const [formData, setFormData] = useState({
     name: '',
+    experienceType: 'page_edit' as ExperienceType,
     audienceId: '',
     pageUrl: '',
     trafficSplit: 50,
@@ -58,6 +83,8 @@ const DragonDeskOptimize = () => {
       ctaLink: '',
       image: '',
       changes: [] as any[],
+      promoBar: { ...DEFAULT_PROMO_BAR },
+      offerModal: { ...DEFAULT_OFFER_MODAL },
     },
     status: 'draft' as 'draft' | 'running' | 'completed',
   });
@@ -94,16 +121,20 @@ const DragonDeskOptimize = () => {
     }
   };
 
+  // The seeded "All Traffic" audience — default target for new experiences.
+  const allTrafficId = audiences.find(a => a.name === 'All Traffic')?.id;
+
   const handleCreateTest = () => {
     setEditingTest(null);
     setPreviewUrl('');
     setFormData({
       name: '',
-      audienceId: '',
+      experienceType: 'page_edit',
+      audienceId: allTrafficId ? String(allTrafficId) : '',
       pageUrl: '',
       trafficSplit: 50,
       variantA: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
-      variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
+      variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [], promoBar: { ...DEFAULT_PROMO_BAR }, offerModal: { ...DEFAULT_OFFER_MODAL } },
       status: 'draft',
     });
     setActiveTab('variantA');
@@ -114,13 +145,16 @@ const DragonDeskOptimize = () => {
     setEditingTest(test);
     const url = (test as any).pageUrl || '';
     setPreviewUrl(url);
+    const vb: any = test.variantB || {};
     setFormData({
       name: test.name,
-      audienceId: test.audienceId.toString(),
+      experienceType: ((test as any).experienceType as ExperienceType) || 'page_edit',
+      audienceId: test.audienceId ? test.audienceId.toString() : (allTrafficId ? String(allTrafficId) : ''),
       pageUrl: url,
-      trafficSplit: (test as any).trafficSplit || 50,
+      trafficSplit: (test as any).trafficSplit ?? 50,
       variantA: { ...test.variantA, changes: test.variantA.changes || [] },
-      variantB: { ...test.variantB, changes: test.variantB.changes || [] },
+      // Backfill bar/modal config for older tests that predate these fields.
+      variantB: { ...vb, changes: vb.changes || [], promoBar: { ...DEFAULT_PROMO_BAR, ...(vb.promoBar || {}) }, offerModal: { ...DEFAULT_OFFER_MODAL, ...(vb.offerModal || {}), trigger: { ...DEFAULT_OFFER_MODAL.trigger, ...((vb.offerModal || {}).trigger || {}) } } },
       status: test.status,
     });
     setActiveTab('variantA');
@@ -197,6 +231,105 @@ const DragonDeskOptimize = () => {
   const handleViewAnalytics = (test: ABTest) => {
     setEditingTest(test);
     setViewMode('analytics');
+  };
+
+  // Patch the treatment (variant B) bar/modal config.
+  const updateBar = (patch: Partial<typeof DEFAULT_PROMO_BAR>) =>
+    setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, promoBar: { ...fd.variantB.promoBar, ...patch } } }));
+  const updateModal = (patch: Partial<typeof DEFAULT_OFFER_MODAL>) =>
+    setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, offerModal: { ...fd.variantB.offerModal, ...patch } } }));
+
+  // Config form + live preview for promo bar / offer modal experiences. Variant A
+  // is always control (nothing shown), so there's a single treatment editor.
+  const renderTreatmentEditor = () => {
+    const isBar = formData.experienceType === 'promo_bar';
+    const bar = formData.variantB.promoBar;
+    const modal = formData.variantB.offerModal;
+    const field = (label: string, node: React.ReactNode) => (
+      <div className={styles.formGroup}><label>{label}</label>{node}</div>
+    );
+    return (
+      <div style={{ padding: '1.5rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+        <div>
+          <h3 style={{ marginTop: 0 }}>{isBar ? 'Promo Bar' : 'Offer Modal'} — Treatment</h3>
+          <p className={styles.fieldHelp} style={{ marginBottom: '1rem' }}>
+            Variant A is the control (nothing shown). This is what the treatment group sees.
+          </p>
+
+          {isBar ? (
+            <>
+              {field('Message', <input className={styles.input} value={bar.message} onChange={e => updateBar({ message: e.target.value })} />)}
+              {field('Button Label', <input className={styles.input} value={bar.ctaLabel} onChange={e => updateBar({ ctaLabel: e.target.value })} placeholder="Leave blank for no button" />)}
+              {field('Button Link', <input className={styles.input} value={bar.ctaLink} onChange={e => updateBar({ ctaLink: e.target.value })} placeholder="https://..." />)}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                {field('Background', <input type="color" value={bar.bgColor} onChange={e => updateBar({ bgColor: e.target.value })} />)}
+                {field('Text', <input type="color" value={bar.textColor} onChange={e => updateBar({ textColor: e.target.value })} />)}
+                {field('Position', <select className={styles.input} value={bar.position} onChange={e => updateBar({ position: e.target.value as 'top' | 'bottom' })}><option value="top">Top</option><option value="bottom">Bottom</option></select>)}
+              </div>
+            </>
+          ) : (
+            <>
+              {field('Heading', <input className={styles.input} value={modal.heading} onChange={e => updateModal({ heading: e.target.value })} />)}
+              {field('Body', <textarea className={styles.input} rows={3} value={modal.body} onChange={e => updateModal({ body: e.target.value })} />)}
+              {field('Image URL', <input className={styles.input} value={modal.imageUrl} onChange={e => updateModal({ imageUrl: e.target.value })} placeholder="Optional https://..." />)}
+              {field('Button Label', <input className={styles.input} value={modal.ctaLabel} onChange={e => updateModal({ ctaLabel: e.target.value })} />)}
+              {field('Button Link', <input className={styles.input} value={modal.ctaLink} onChange={e => updateModal({ ctaLink: e.target.value })} placeholder="https://..." />)}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                {field('Background', <input type="color" value={modal.bgColor} onChange={e => updateModal({ bgColor: e.target.value })} />)}
+                {field('Text', <input type="color" value={modal.textColor} onChange={e => updateModal({ textColor: e.target.value })} />)}
+                {field('Button', <input type="color" value={modal.accentColor} onChange={e => updateModal({ accentColor: e.target.value })} />)}
+              </div>
+              {field('Trigger', (
+                <select className={styles.input} value={modal.trigger.type} onChange={e => updateModal({ trigger: { ...modal.trigger, type: e.target.value as 'load' | 'exit' | 'scroll' } })}>
+                  <option value="load">On page load (after delay)</option>
+                  <option value="exit">Exit intent</option>
+                  <option value="scroll">On scroll depth</option>
+                </select>
+              ))}
+              {modal.trigger.type === 'load' && field('Delay (seconds)', <input type="number" min="0" className={styles.input} value={modal.trigger.delaySeconds} onChange={e => updateModal({ trigger: { ...modal.trigger, delaySeconds: parseInt(e.target.value) || 0 } })} />)}
+              {modal.trigger.type === 'scroll' && field('Scroll depth (%)', <input type="number" min="1" max="100" className={styles.input} value={modal.trigger.scrollPct} onChange={e => updateModal({ trigger: { ...modal.trigger, scrollPct: parseInt(e.target.value) || 50 } })} />)}
+            </>
+          )}
+
+          {field('Show frequency', (
+            <select className={styles.input} value={isBar ? bar.frequency : modal.frequency} onChange={e => (isBar ? updateBar : updateModal)({ frequency: e.target.value as 'session' | 'once' | 'always' })}>
+              <option value="session">Once per session</option>
+              <option value="once">Once ever (per visitor)</option>
+              <option value="always">Every page view</option>
+            </select>
+          ))}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <input type="checkbox" checked={isBar ? bar.dismissible : modal.dismissible} onChange={e => (isBar ? updateBar : updateModal)({ dismissible: e.target.checked })} />
+            Visitors can dismiss it
+          </label>
+        </div>
+
+        {/* Live preview */}
+        <div>
+          <h3 style={{ marginTop: 0 }}>Preview</h3>
+          {isBar ? (
+            <div style={{ background: bar.bgColor, color: bar.textColor, padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, fontWeight: 600 }}>
+              <span>{bar.message}</span>
+              {bar.ctaLabel && <span style={{ background: bar.textColor, color: bar.bgColor, padding: '7px 16px', borderRadius: 6, fontWeight: 700 }}>{bar.ctaLabel}</span>}
+              {bar.dismissible && <span style={{ marginLeft: 8, opacity: 0.8 }}>×</span>}
+            </div>
+          ) : (
+            <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 8, padding: 24, display: 'flex', justifyContent: 'center' }}>
+              <div style={{ background: modal.bgColor, color: modal.textColor, borderRadius: 12, padding: 28, maxWidth: 340, textAlign: 'center', position: 'relative' }}>
+                {modal.dismissible && <span style={{ position: 'absolute', right: 12, top: 8, opacity: 0.6 }}>×</span>}
+                {modal.imageUrl && <img src={modal.imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 12 }} />}
+                {modal.heading && <h2 style={{ margin: '0 0 10px', fontSize: 20 }}>{modal.heading}</h2>}
+                {modal.body && <p style={{ margin: '0 0 16px', opacity: 0.9 }}>{modal.body}</p>}
+                {modal.ctaLabel && <span style={{ display: 'inline-block', background: modal.accentColor, color: '#fff', padding: '12px 24px', borderRadius: 8, fontWeight: 700 }}>{modal.ctaLabel}</span>}
+              </div>
+            </div>
+          )}
+          <p className={styles.fieldHelp} style={{ marginTop: '1rem' }}>
+            Runs on any page where your DragonDesk tracking snippet is installed. Set status to Running to go live.
+          </p>
+        </div>
+      </div>
+    );
   };
 
   // Render test list
@@ -365,6 +498,26 @@ const DragonDeskOptimize = () => {
           </div>
 
           <div className={styles.formGroup}>
+            <label>Experience Type</label>
+            <select
+              value={formData.experienceType}
+              onChange={(e) => {
+                const experienceType = e.target.value as ExperienceType;
+                // Bar/modal default to 100% ("just run it"); page edits to a 50/50 split.
+                const trafficSplit = experienceType === 'page_edit' ? 50 : 100;
+                setFormData({ ...formData, experienceType, trafficSplit });
+              }}
+              className={styles.input}
+            >
+              {EXPERIENCE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <p className={styles.fieldHelp}>
+              {EXPERIENCE_TYPES.find(t => t.value === formData.experienceType)?.desc}
+            </p>
+          </div>
+
+          {formData.experienceType === 'page_edit' && (
+          <div className={styles.formGroup}>
             <label>Page URL *</label>
             <div className={styles.urlInputRow}>
               <input
@@ -389,6 +542,7 @@ const DragonDeskOptimize = () => {
               Enter a URL then click Load Preview to open the visual editor
             </p>
           </div>
+          )}
 
           <div className={styles.formGroup}>
             <label>Target Audience</label>
@@ -410,7 +564,7 @@ const DragonDeskOptimize = () => {
           </div>
 
           <div className={styles.formGroup}>
-            <label>Traffic Split</label>
+            <label>{formData.experienceType === 'page_edit' ? 'Traffic Split' : 'Show To'}</label>
             <div className={styles.trafficSplitContainer}>
               <div className={styles.trafficSplitSlider}>
                 <input
@@ -424,17 +578,31 @@ const DragonDeskOptimize = () => {
                   className={styles.slider}
                 />
               </div>
-              <div className={styles.trafficSplitLabels}>
-                <div className={styles.trafficSplitLabel}>
-                  <span className={styles.variantLetter}>A</span>
-                  <span className={styles.percentage}>{formData.trafficSplit}%</span>
+              {formData.experienceType === 'page_edit' ? (
+                <div className={styles.trafficSplitLabels}>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.variantLetter}>A</span>
+                    <span className={styles.percentage}>{formData.trafficSplit}%</span>
+                  </div>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.variantLetter}>B</span>
+                    <span className={styles.percentage}>{100 - formData.trafficSplit}%</span>
+                  </div>
                 </div>
-                <div className={styles.trafficSplitLabel}>
-                  <span className={styles.variantLetter}>B</span>
-                  <span className={styles.percentage}>{100 - formData.trafficSplit}%</span>
+              ) : (
+                <div className={styles.trafficSplitLabels}>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.percentage}>{formData.trafficSplit}% see it</span>
+                  </div>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.percentage}>{100 - formData.trafficSplit}% control</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
+            {formData.experienceType !== 'page_edit' && (
+              <p className={styles.fieldHelp}>100% just runs it. Lower it to A/B test showing it vs not.</p>
+            )}
           </div>
 
           <div className={styles.formGroup}>
@@ -463,7 +631,9 @@ const DragonDeskOptimize = () => {
         </div>
 
         <div className={styles.editorMain}>
-          {previewUrl ? (
+          {formData.experienceType !== 'page_edit' ? (
+            renderTreatmentEditor()
+          ) : previewUrl ? (
             <>
               <div className={styles.tabsContainer}>
                 <div className={styles.tabs}>

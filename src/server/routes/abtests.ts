@@ -33,11 +33,13 @@ router.get('/:id', async (req: AuthRequest, res) => {
 
 router.post('/', async (req: AuthRequest, res) => {
   try {
-    const { name, audienceId, pageUrl, trafficSplit, variantA, variantB, status } = req.body;
+    const { name, audienceId, pageUrl, trafficSplit, variantA, variantB, status, experienceType } = req.body;
 
     if (!name || !variantA || !variantB || !status) {
       return res.status(400).json({ error: 'Required fields are missing' });
     }
+
+    const expType = ['page_edit', 'promo_bar', 'offer_modal'].includes(experienceType) ? experienceType : 'page_edit';
 
     if (audienceId && status !== 'draft') {
       const audience = await get('SELECT * FROM audiences WHERE id = ?', [audienceId]);
@@ -54,8 +56,8 @@ router.post('/', async (req: AuthRequest, res) => {
     const variantBJson = JSON.stringify(variantB);
 
     const result = await run(
-      'INSERT INTO ab_tests (name, audienceId, pageUrl, trafficSplit, variantA, variantB, status, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, audienceId || null, pageUrl || null, trafficSplit || 50, variantAJson, variantBJson, status, req.user!.id]
+      'INSERT INTO ab_tests (name, audienceId, pageUrl, trafficSplit, variantA, variantB, status, "experienceType", createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, audienceId || null, pageUrl || null, trafficSplit || 50, variantAJson, variantBJson, status, expType, req.user!.id]
     );
 
     const newABTest = await get('SELECT * FROM ab_tests WHERE id = ?', [result.id]);
@@ -69,7 +71,7 @@ router.post('/', async (req: AuthRequest, res) => {
 router.put('/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { name, audienceId, pageUrl, trafficSplit, variantA, variantB, status, results } = req.body;
+    const { name, audienceId, pageUrl, trafficSplit, variantA, variantB, status, results, experienceType } = req.body;
 
     const existingABTest = await get('SELECT * FROM ab_tests WHERE id = ?', [id]);
 
@@ -80,13 +82,16 @@ router.put('/:id', async (req: AuthRequest, res) => {
     const variantAJson = JSON.stringify(variantA);
     const variantBJson = JSON.stringify(variantB);
     const resultsJson = results ? JSON.stringify(results) : null;
+    const expType = ['page_edit', 'promo_bar', 'offer_modal'].includes(experienceType)
+      ? experienceType
+      : (existingABTest.experienceType || 'page_edit');
 
     await run(
       `UPDATE ab_tests SET
         name = ?, audienceId = ?, pageUrl = ?, trafficSplit = ?, variantA = ?, variantB = ?,
-        status = ?, results = ?, updatedAt = CURRENT_TIMESTAMP
+        status = ?, results = ?, "experienceType" = ?, updatedAt = CURRENT_TIMESTAMP
       WHERE id = ?`,
-      [name, audienceId, pageUrl || null, trafficSplit || 50, variantAJson, variantBJson, status, resultsJson, id]
+      [name, audienceId, pageUrl || null, trafficSplit || 50, variantAJson, variantBJson, status, resultsJson, expType, id]
     );
 
     const updatedABTest = await get('SELECT * FROM ab_tests WHERE id = ?', [id]);

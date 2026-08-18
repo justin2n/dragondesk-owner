@@ -155,6 +155,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
     credentials:'omit'
   }).then(function(r){return r.json();}).then(function(data){
     if(data&&data.changes&&data.changes.length){applyChanges(data.changes);}
+    if(data&&data.experiences&&data.experiences.length){renderExperiences(data.experiences);}
   }).catch(function(){});
 
   function applyChanges(changes){
@@ -168,6 +169,102 @@ function buildTrackingScript(token: string, endpoint: string): string {
         });
       }catch(e){}
     });
+  }
+
+  /* ── Injected experiences: promo bars & offer modals ── */
+  var AB=EP.replace('/tracking','/ab-analytics');
+  function trackExp(testId,variant,type){
+    try{fetch(AB+'/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({testId:testId,variant:variant,eventType:type,sessionId:sid}),keepalive:true,credentials:'omit'});}catch(e){}
+  }
+  /* Frequency cap. 'once' persists across sessions, 'session' per tab, 'always' never caps. */
+  function seen(testId,freq){
+    if(freq==='always')return false;
+    var k='_dd_exp_'+testId;
+    try{return (freq==='session'?sessionStorage:localStorage).getItem(k)==='1';}catch(e){return false;}
+  }
+  function markSeen(testId,freq){
+    if(freq==='always')return;
+    var k='_dd_exp_'+testId;
+    try{(freq==='session'?sessionStorage:localStorage).setItem(k,'1');}catch(e){}
+  }
+  /* Run fn on the configured trigger (offer modals). Promo bars show immediately. */
+  function onTrigger(trig,fn){
+    trig=trig||{};var t=trig.type||'load';
+    if(t==='load'){setTimeout(fn,Math.max(0,(trig.delaySeconds||0)*1000));return;}
+    if(t==='exit'){
+      var fired=false;
+      var h=function(e){if(!fired&&e.clientY<=0){fired=true;d.removeEventListener('mouseout',h);fn();}};
+      d.addEventListener('mouseout',h);return;
+    }
+    if(t==='scroll'){
+      var pct=trig.scrollPct||50,fired2=false;
+      var s=function(){var p=Math.round((w.scrollY/((d.body.scrollHeight-w.innerHeight)||1))*100);if(!fired2&&p>=pct){fired2=true;w.removeEventListener('scroll',s);fn();}};
+      w.addEventListener('scroll',s,{passive:true});return;
+    }
+    setTimeout(fn,0);
+  }
+  function renderExperiences(list){
+    list.forEach(function(exp){
+      try{
+        if(!exp||!exp.config)return;
+        if(seen(exp.testId,exp.config.frequency))return;
+        if(exp.kind==='promoBar')renderPromoBar(exp);
+        else if(exp.kind==='offerModal')onTrigger(exp.config.trigger,function(){renderOfferModal(exp);});
+      }catch(e){}
+    });
+  }
+  function ctaClick(exp,href){
+    trackExp(exp.testId,exp.variant,'click');
+    if(href){try{w.open(href,'_self');}catch(e){location.href=href;}}
+  }
+  function renderPromoBar(exp){
+    var c=exp.config;
+    var bar=d.createElement('div');
+    bar.className='dd-exp-bar';
+    var pos=(c.position==='bottom')?'bottom:0;':'top:0;';
+    bar.style.cssText='position:fixed;left:0;right:0;'+pos+'z-index:2147483646;display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 44px 12px 16px;font:600 15px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,.15);background:'+(c.bgColor||'#c0392b')+';color:'+(c.textColor||'#ffffff')+';';
+    var msg=d.createElement('span');msg.textContent=c.message||'';bar.appendChild(msg);
+    if(c.ctaLabel){
+      var a=d.createElement('a');a.textContent=c.ctaLabel;a.href=c.ctaLink||'#';
+      a.style.cssText='display:inline-block;padding:7px 16px;border-radius:6px;background:'+(c.textColor||'#fff')+';color:'+(c.bgColor||'#c0392b')+';text-decoration:none;font-weight:700;white-space:nowrap;';
+      a.addEventListener('click',function(e){e.preventDefault();ctaClick(exp,c.ctaLink);});
+      bar.appendChild(a);
+    }
+    if(c.dismissible!==false){
+      var x=d.createElement('button');x.textContent='\\u00d7';x.setAttribute('aria-label','Dismiss');
+      x.style.cssText='position:absolute;right:12px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:inherit;font-size:22px;line-height:1;cursor:pointer;opacity:.8;';
+      x.addEventListener('click',function(){bar.remove();markSeen(exp.testId,c.frequency);});
+      bar.appendChild(x);
+    }
+    d.body.appendChild(bar);
+    trackExp(exp.testId,exp.variant,'view');
+    markSeen(exp.testId,c.frequency);
+  }
+  function renderOfferModal(exp){
+    var c=exp.config;
+    var ov=d.createElement('div');ov.className='dd-exp-overlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    var card=d.createElement('div');
+    card.style.cssText='position:relative;max-width:440px;width:100%;background:'+(c.bgColor||'#fff')+';color:'+(c.textColor||'#1a1a2e')+';border-radius:12px;padding:28px;box-sizing:border-box;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.35);text-align:center;';
+    if(c.imageUrl){var img=d.createElement('img');img.src=c.imageUrl;img.style.cssText='max-width:100%;border-radius:8px;margin-bottom:14px;';card.appendChild(img);}
+    if(c.heading){var h=d.createElement('h2');h.textContent=c.heading;h.style.cssText='margin:0 0 10px;font-size:22px;font-weight:700;';card.appendChild(h);}
+    if(c.body){var p=d.createElement('p');p.textContent=c.body;p.style.cssText='margin:0 0 18px;opacity:.9;';card.appendChild(p);}
+    if(c.ctaLabel){
+      var a=d.createElement('a');a.textContent=c.ctaLabel;a.href=c.ctaLink||'#';
+      a.style.cssText='display:inline-block;padding:12px 24px;border-radius:8px;background:'+(c.accentColor||'#c0392b')+';color:#fff;text-decoration:none;font-weight:700;';
+      a.addEventListener('click',function(e){e.preventDefault();ctaClick(exp,c.ctaLink);});
+      card.appendChild(a);
+    }
+    function close(){ov.remove();markSeen(exp.testId,c.frequency);}
+    if(c.dismissible!==false){
+      var x=d.createElement('button');x.textContent='\\u00d7';x.setAttribute('aria-label','Close');
+      x.style.cssText='position:absolute;right:12px;top:10px;background:transparent;border:none;color:inherit;font-size:24px;line-height:1;cursor:pointer;opacity:.6;';
+      x.addEventListener('click',close);card.appendChild(x);
+      ov.addEventListener('click',function(e){if(e.target===ov)close();});
+    }
+    ov.appendChild(card);d.body.appendChild(ov);
+    trackExp(exp.testId,exp.variant,'view');
+    markSeen(exp.testId,c.frequency);
   }
 })(window,document);
 `;
@@ -323,16 +420,20 @@ router.post('/personalize', async (req: Request, res: Response) => {
   try {
     // Get running A/B tests for this token (match on pageUrl path)
     const tests = await pool.query(`
-      SELECT t.id, t."variantA", t."variantB", t."trafficSplit",
+      SELECT t.id, t."variantA", t."variantB", t."trafficSplit", t."experienceType",
              a.filters as "audienceFilters"
       FROM ab_tests t
       LEFT JOIN audiences a ON a.id = t."audienceId"
       WHERE t.status = 'running'
     `);
 
-    if (tests.rows.length === 0) { res.json({ changes: [] }); return; }
+    if (tests.rows.length === 0) { res.json({ changes: [], experiences: [] }); return; }
 
     const changes: any[] = [];
+    // Promo bars / offer modals: injected UI (not element edits), so they ride a
+    // separate list the snippet renders. Each carries the test id + which variant
+    // was assigned, so the client fires analytics for the right arm.
+    const experiences: any[] = [];
 
     for (const test of tests.rows) {
       // Check if visitor matches any behavior audience rules
@@ -349,21 +450,40 @@ router.post('/personalize', async (req: Request, res: Response) => {
 
       if (!inAudience) continue;
 
-      // Deterministic variant assignment based on visitor ID hash
+      // Deterministic bucket from the visitor id.
       const hash = vid.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-      const variant = (hash % 100) < test.trafficSplit ? variantA : variantB;
+      const bucket = hash % 100;
+      const expType = test.experienceType || 'page_edit';
 
-      if (variant && variant.changes) {
-        changes.push(...variant.changes.map((c: any) => ({
-          selector: c.selector,
-          type: c.type,
-          property: c.property,
-          value: c.newValue,
-        })));
+      if (expType === 'page_edit') {
+        // Unchanged: trafficSplit is the share that sees variant A.
+        const variant = bucket < test.trafficSplit ? variantA : variantB;
+        if (variant && variant.changes) {
+          changes.push(...variant.changes.map((c: any) => ({
+            selector: c.selector,
+            type: c.type,
+            property: c.property,
+            value: c.newValue,
+          })));
+        }
+        continue;
       }
+
+      // Promo bar / offer modal: A is always control (nothing shown). trafficSplit
+      // is the share that sees the treatment (B) — so 100% shows it to everyone,
+      // 50% A/B tests "show it vs not."
+      if (bucket >= test.trafficSplit) continue;
+      const config = expType === 'promo_bar' ? variantB?.promoBar : variantB?.offerModal;
+      if (!config) continue;
+      experiences.push({
+        testId: test.id,
+        variant: 'B',
+        kind: expType === 'promo_bar' ? 'promoBar' : 'offerModal',
+        config,
+      });
     }
 
-    res.json({ changes });
+    res.json({ changes, experiences });
   } catch (err) {
     res.json({ changes: [] });
   }
