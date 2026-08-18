@@ -59,11 +59,12 @@ router.get('/:testId', async (req, res) => {
       [testId]
     );
 
-    // Get engagement time data
+    // Get engagement time data. metadata is stored as JSON text, so read
+    // duration via jsonb (Postgres) rather than SQLite's json_extract.
     const engagementData = await query(
       `SELECT
         variant,
-        AVG(CAST(json_extract(metadata, '$.duration') AS INTEGER)) as avgEngagementTime
+        AVG((NULLIF(metadata, '')::jsonb->>'duration')::numeric) as avgEngagementTime
        FROM ab_test_events
        WHERE testId = ? AND eventType = 'engagement' AND metadata IS NOT NULL
        GROUP BY variant`,
@@ -86,13 +87,13 @@ router.get('/:testId', async (req, res) => {
     const timeSeriesData = await query(
       `SELECT
         variant,
-        DATE(createdAt) as date,
+        (createdAt)::date as date,
         COUNT(CASE WHEN eventType = 'view' THEN 1 END) as views,
         COUNT(CASE WHEN eventType = 'click' THEN 1 END) as clicks,
         COUNT(CASE WHEN eventType = 'lead' THEN 1 END) as leads
        FROM ab_test_events
-       WHERE testId = ? AND createdAt >= datetime('now', '-30 days')
-       GROUP BY variant, DATE(createdAt)
+       WHERE testId = ? AND createdAt >= NOW() - INTERVAL '30 days'
+       GROUP BY variant, (createdAt)::date
        ORDER BY date ASC`,
       [testId]
     );
@@ -145,7 +146,7 @@ router.get('/:testId/comparison', async (req, res) => {
         COUNT(CASE WHEN eventType = 'click' THEN 1 END) as clicks,
         COUNT(CASE WHEN eventType = 'lead' THEN 1 END) as leads,
         COUNT(DISTINCT sessionId) as uniqueVisitors,
-        COUNT(DISTINCT DATE(createdAt)) as activeDays
+        COUNT(DISTINCT (createdAt)::date) as activeDays
        FROM ab_test_events
        WHERE testId = ?
        GROUP BY variant`,
