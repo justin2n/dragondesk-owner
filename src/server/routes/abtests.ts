@@ -42,15 +42,13 @@ router.post('/', async (req: AuthRequest, res) => {
     const expType = ['page_edit', 'promo_bar', 'offer_modal'].includes(experienceType) ? experienceType : 'page_edit';
     const goalJson = goal && goal.type && goal.type !== 'none' ? JSON.stringify(goal) : null;
 
-    if (audienceId && status !== 'draft') {
+    // Audience is optional: no audience = show to everyone. Only validate that a
+    // supplied audience exists.
+    if (audienceId) {
       const audience = await get('SELECT * FROM audiences WHERE id = ?', [audienceId]);
       if (!audience) {
         return res.status(404).json({ error: 'Audience not found' });
       }
-    }
-
-    if (!audienceId && status !== 'draft') {
-      return res.status(400).json({ error: 'An audience is required to publish a test.' });
     }
 
     const variantAJson = JSON.stringify(variantA);

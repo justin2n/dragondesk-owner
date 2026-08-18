@@ -108,15 +108,6 @@ const DragonDeskOptimize = () => {
     status: 'draft' as 'draft' | 'running' | 'completed',
   });
 
-  // If the form opened before audiences loaded, default the target to All Traffic
-  // (everyone) once it's available, so an experience is never left unassigned.
-  useEffect(() => {
-    const allTraffic = audiences.find(a => a.name === 'All Traffic');
-    if ((viewMode === 'create' || viewMode === 'edit') && !formData.audienceId && allTraffic) {
-      setFormData(fd => ({ ...fd, audienceId: String(allTraffic.id) }));
-    }
-  }, [audiences, viewMode, formData.audienceId]);
-
   useEffect(() => {
     loadData();
   }, []);
@@ -149,7 +140,8 @@ const DragonDeskOptimize = () => {
     }
   };
 
-  // The seeded "All Traffic" audience — default target for new experiences.
+  // The legacy seeded "All Traffic" audience. Audience is now optional (empty =
+  // everyone), so an experience pointing at it is shown as "Everyone".
   const allTrafficId = audiences.find(a => a.name === 'All Traffic')?.id;
 
   const handleCreateTest = () => {
@@ -158,7 +150,7 @@ const DragonDeskOptimize = () => {
     setFormData({
       name: '',
       experienceType: 'page_edit',
-      audienceId: allTrafficId ? String(allTrafficId) : '',
+      audienceId: '', // empty = everyone (no audience)
       pageUrl: '',
       trafficSplit: 50,
       variantA: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
@@ -178,7 +170,9 @@ const DragonDeskOptimize = () => {
     setFormData({
       name: test.name,
       experienceType: ((test as any).experienceType as ExperienceType) || 'page_edit',
-      audienceId: test.audienceId ? test.audienceId.toString() : (allTrafficId ? String(allTrafficId) : ''),
+      // Empty = everyone. A test pointing at the legacy All Traffic audience is
+      // treated the same, so it reads as "Everyone".
+      audienceId: test.audienceId && test.audienceId !== allTrafficId ? test.audienceId.toString() : '',
       pageUrl: url,
       trafficSplit: (test as any).trafficSplit ?? 50,
       variantA: { ...test.variantA, changes: test.variantA.changes || [] },
@@ -193,14 +187,11 @@ const DragonDeskOptimize = () => {
 
   const handleSubmitTest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.audienceId) {
-      toast('Please select a target audience before publishing.', 'error');
-      return;
-    }
     try {
       const payload = {
         ...formData,
-        audienceId: parseInt(formData.audienceId),
+        // Empty audience = show to everyone (no targeting).
+        audienceId: formData.audienceId ? parseInt(formData.audienceId) : null,
       };
 
       if (editingTest) {
@@ -473,7 +464,7 @@ const DragonDeskOptimize = () => {
                   </div>
                   <div className={styles.cardInfo}>
                     <span className={styles.label}>Audience:</span>
-                    <span>{audience?.name || 'Unknown'}</span>
+                    <span>{!test.audienceId || audience?.name === 'All Traffic' ? 'Everyone' : (audience?.name || 'Unknown')}</span>
                   </div>
                   <div className={styles.cardInfo}>
                     <span className={styles.label}>Traffic Split:</span>
@@ -611,20 +602,22 @@ const DragonDeskOptimize = () => {
               onChange={(e) => setFormData({ ...formData, audienceId: e.target.value })}
               className={styles.input}
             >
-              {/* All Traffic (everyone) is the default and sits at the top; other
-                  audiences narrow to visitors matching their behavior rules. */}
-              {[...audiences]
-                .sort((a, b) => (a.name === 'All Traffic' ? -1 : b.name === 'All Traffic' ? 1 : 0))
+              {/* Empty = everyone (no audience). Behavior audiences below narrow
+                  to visitors matching their rules. The legacy All Traffic system
+                  audience is hidden since "Everyone" already covers it. */}
+              <option value="">Everyone — show to all visitors</option>
+              {audiences
+                .filter((a) => a.name !== 'All Traffic')
                 .map((audience) => (
                   <option key={audience.id} value={audience.id}>
-                    {audience.name === 'All Traffic' ? 'All Traffic — everyone' : audience.name}
+                    {audience.name}
                   </option>
                 ))}
             </select>
             <p className={styles.fieldHelp}>
-              {audiences.find(a => String(a.id) === formData.audienceId)?.name === 'All Traffic'
-                ? 'Shown to every visitor. Set "Show To" to 100% to reach everyone, or lower it to test it against a holdout.'
-                : 'Only visitors matching this audience will see it. Choose All Traffic to show it to everyone.'}
+              {!formData.audienceId
+                ? 'No audience needed — shown to every visitor. Set "Show To" to 100% to reach everyone.'
+                : 'Only visitors matching this audience will see it.'}
             </p>
           </div>
 
