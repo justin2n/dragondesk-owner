@@ -414,7 +414,7 @@ router.post('/personalize', async (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
-  const { token, vid, path } = req.body;
+  const { token, vid, path, url } = req.body;
   if (!token || !vid) { res.json({ changes: [] }); return; }
 
   try {
@@ -473,6 +473,8 @@ router.post('/personalize', async (req: Request, res: Response) => {
       // is the share that sees the treatment (B) — so 100% shows it to everyone,
       // 50% A/B tests "show it vs not."
       if (bucket >= test.trafficSplit) continue;
+      // URL targeting: whole site (default) or a specific page/path.
+      if (!matchesUrlTarget(variantB?.targeting, path, url)) continue;
       const config = expType === 'promo_bar' ? variantB?.promoBar : variantB?.offerModal;
       if (!config) continue;
       experiences.push({
@@ -488,6 +490,28 @@ router.post('/personalize', async (req: Request, res: Response) => {
     res.json({ changes: [] });
   }
 });
+
+// Does the visitor's current page satisfy an experience's URL targeting?
+// scope 'site' (or missing) matches everywhere; 'page' matches the configured
+// path/URL by exact / starts-with / contains. Missing value = whole site.
+function matchesUrlTarget(
+  targeting: { scope?: string; matchType?: string; value?: string } | undefined,
+  path?: string,
+  url?: string,
+): boolean {
+  if (!targeting || targeting.scope !== 'page') return true;
+  const value = (targeting.value || '').trim();
+  if (!value) return true;
+  // Match against the path by default; if the target looks like a full URL, use it.
+  const hay = /^https?:\/\//i.test(value) ? (url || '') : (path || '');
+  const v = value.toLowerCase();
+  const h = hay.toLowerCase();
+  switch (targeting.matchType) {
+    case 'exact': return h === v;
+    case 'startsWith': return h.startsWith(v);
+    default: return h.includes(v); // 'contains'
+  }
+}
 
 async function checkBehaviorAudience(
   visitorId: string,

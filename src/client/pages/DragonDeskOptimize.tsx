@@ -31,6 +31,12 @@ const DEFAULT_OFFER_MODAL = {
   trigger: { type: 'load' as 'load' | 'exit' | 'scroll', delaySeconds: 3, scrollPct: 50 },
   dismissible: true, frequency: 'session' as 'session' | 'once' | 'always',
 };
+// Where a bar/modal shows: the whole site, or a specific page matched by path.
+const DEFAULT_TARGETING = {
+  scope: 'site' as 'site' | 'page',
+  matchType: 'contains' as 'contains' | 'exact' | 'startsWith',
+  value: '',
+};
 
 const DragonDeskOptimize = () => {
   const { toast, confirm } = useToast();
@@ -85,6 +91,7 @@ const DragonDeskOptimize = () => {
       changes: [] as any[],
       promoBar: { ...DEFAULT_PROMO_BAR },
       offerModal: { ...DEFAULT_OFFER_MODAL },
+      targeting: { ...DEFAULT_TARGETING },
     },
     status: 'draft' as 'draft' | 'running' | 'completed',
   });
@@ -143,7 +150,7 @@ const DragonDeskOptimize = () => {
       pageUrl: '',
       trafficSplit: 50,
       variantA: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
-      variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [], promoBar: { ...DEFAULT_PROMO_BAR }, offerModal: { ...DEFAULT_OFFER_MODAL } },
+      variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [], promoBar: { ...DEFAULT_PROMO_BAR }, offerModal: { ...DEFAULT_OFFER_MODAL }, targeting: { ...DEFAULT_TARGETING } },
       status: 'draft',
     });
     setActiveTab('variantA');
@@ -163,7 +170,7 @@ const DragonDeskOptimize = () => {
       trafficSplit: (test as any).trafficSplit ?? 50,
       variantA: { ...test.variantA, changes: test.variantA.changes || [] },
       // Backfill bar/modal config for older tests that predate these fields.
-      variantB: { ...vb, changes: vb.changes || [], promoBar: { ...DEFAULT_PROMO_BAR, ...(vb.promoBar || {}) }, offerModal: { ...DEFAULT_OFFER_MODAL, ...(vb.offerModal || {}), trigger: { ...DEFAULT_OFFER_MODAL.trigger, ...((vb.offerModal || {}).trigger || {}) } } },
+      variantB: { ...vb, changes: vb.changes || [], promoBar: { ...DEFAULT_PROMO_BAR, ...(vb.promoBar || {}) }, offerModal: { ...DEFAULT_OFFER_MODAL, ...(vb.offerModal || {}), trigger: { ...DEFAULT_OFFER_MODAL.trigger, ...((vb.offerModal || {}).trigger || {}) } }, targeting: { ...DEFAULT_TARGETING, ...(vb.targeting || {}) } },
       status: test.status,
     });
     setActiveTab('variantA');
@@ -247,6 +254,8 @@ const DragonDeskOptimize = () => {
     setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, promoBar: { ...fd.variantB.promoBar, ...patch } } }));
   const updateModal = (patch: Partial<typeof DEFAULT_OFFER_MODAL>) =>
     setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, offerModal: { ...fd.variantB.offerModal, ...patch } } }));
+  const updateTargeting = (patch: Partial<typeof DEFAULT_TARGETING>) =>
+    setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, targeting: { ...fd.variantB.targeting, ...patch } } }));
 
   // Config form + live preview for promo bar / offer modal experiences. Variant A
   // is always control (nothing shown), so there's a single treatment editor.
@@ -311,6 +320,34 @@ const DragonDeskOptimize = () => {
             <input type="checkbox" checked={isBar ? bar.dismissible : modal.dismissible} onChange={e => (isBar ? updateBar : updateModal)({ dismissible: e.target.checked })} />
             Visitors can dismiss it
           </label>
+
+          {/* URL targeting — whole site or a specific page. */}
+          <h4 style={{ margin: '1.5rem 0 0.5rem' }}>Show on</h4>
+          {field('Pages', (
+            <select className={styles.input} value={formData.variantB.targeting.scope} onChange={e => updateTargeting({ scope: e.target.value as 'site' | 'page' })}>
+              <option value="site">Whole site — every page</option>
+              <option value="page">A specific page</option>
+            </select>
+          ))}
+          {formData.variantB.targeting.scope === 'page' && (
+            <>
+              {field('Match', (
+                <select className={styles.input} value={formData.variantB.targeting.matchType} onChange={e => updateTargeting({ matchType: e.target.value as 'contains' | 'exact' | 'startsWith' })}>
+                  <option value="exact">URL path is exactly</option>
+                  <option value="startsWith">URL path starts with</option>
+                  <option value="contains">URL path contains</option>
+                </select>
+              ))}
+              {field('Path', (
+                <input className={styles.input} value={formData.variantB.targeting.value}
+                  onChange={e => updateTargeting({ value: e.target.value })}
+                  placeholder="/pricing" />
+              ))}
+              <p className={styles.fieldHelp}>
+                Match the page path, e.g. <code>/pricing</code>. Paste a full <code>https://</code> URL to match the whole address instead.
+              </p>
+            </>
+          )}
         </div>
 
         {/* Live preview */}
