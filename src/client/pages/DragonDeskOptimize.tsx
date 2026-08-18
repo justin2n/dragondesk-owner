@@ -89,6 +89,15 @@ const DragonDeskOptimize = () => {
     status: 'draft' as 'draft' | 'running' | 'completed',
   });
 
+  // If the form opened before audiences loaded, default the target to All Traffic
+  // (everyone) once it's available, so an experience is never left unassigned.
+  useEffect(() => {
+    const allTraffic = audiences.find(a => a.name === 'All Traffic');
+    if ((viewMode === 'create' || viewMode === 'edit') && !formData.audienceId && allTraffic) {
+      setFormData(fd => ({ ...fd, audienceId: String(allTraffic.id) }));
+    }
+  }, [audiences, viewMode, formData.audienceId]);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -545,22 +554,27 @@ const DragonDeskOptimize = () => {
           )}
 
           <div className={styles.formGroup}>
-            <label>Target Audience</label>
+            <label>Who sees it</label>
             <select
               value={formData.audienceId}
               onChange={(e) => setFormData({ ...formData, audienceId: e.target.value })}
               className={styles.input}
             >
-              <option value="">Select an audience</option>
-              {audiences.map((audience) => (
-                <option key={audience.id} value={audience.id}>
-                  {audience.name}
-                </option>
-              ))}
+              {/* All Traffic (everyone) is the default and sits at the top; other
+                  audiences narrow to visitors matching their behavior rules. */}
+              {[...audiences]
+                .sort((a, b) => (a.name === 'All Traffic' ? -1 : b.name === 'All Traffic' ? 1 : 0))
+                .map((audience) => (
+                  <option key={audience.id} value={audience.id}>
+                    {audience.name === 'All Traffic' ? 'All Traffic — everyone' : audience.name}
+                  </option>
+                ))}
             </select>
-            {!formData.audienceId && (
-              <p className={styles.fieldHelp}>Required to publish — save as draft first if you haven't created an audience yet.</p>
-            )}
+            <p className={styles.fieldHelp}>
+              {audiences.find(a => String(a.id) === formData.audienceId)?.name === 'All Traffic'
+                ? 'Shown to every visitor. Set "Show To" to 100% to reach everyone, or lower it to test it against a holdout.'
+                : 'Only visitors matching this audience will see it. Choose All Traffic to show it to everyone.'}
+            </p>
           </div>
 
           <div className={styles.formGroup}>
