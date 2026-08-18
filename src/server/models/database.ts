@@ -1411,6 +1411,10 @@ async function initializeDatabase() {
     // Experiences can be page edits (default), promo bars, or offer modals. The
     // bar/modal config rides inside the variant JSON, so no new columns for it.
     await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "experienceType" TEXT DEFAULT 'page_edit'`).catch(() => {});
+    // Conversion goal for an experience (JSON): {type:'form_submit'|'tel_click'|
+    // 'email_click'|'selector_click', selector?}. A goal completion is recorded
+    // as a 'lead' event so it flows into the existing conversion-rate analytics.
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS goal TEXT`).catch(() => {});
     // System audiences (like "All Traffic") are seeded and cannot be deleted.
     await client.query(`ALTER TABLE audiences ADD COLUMN IF NOT EXISTS "isSystem" BOOLEAN DEFAULT false`).catch(() => {});
 

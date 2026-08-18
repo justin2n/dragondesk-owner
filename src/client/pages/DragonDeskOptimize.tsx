@@ -38,6 +38,17 @@ const DEFAULT_TARGETING = {
   value: '',
 };
 
+// Conversion goal — completing it records a 'lead' event, which drives the
+// conversion rate + winner in analytics. 'none' just tracks views/clicks.
+type GoalType = 'none' | 'form_submit' | 'tel_click' | 'email_click' | 'selector_click';
+const GOAL_OPTIONS: { value: GoalType; label: string }[] = [
+  { value: 'none', label: 'No goal (track views & clicks only)' },
+  { value: 'form_submit', label: 'Form submitted (a lead fills out any form)' },
+  { value: 'tel_click', label: 'Phone number clicked (tel: link)' },
+  { value: 'email_click', label: 'Email clicked (mailto: link)' },
+  { value: 'selector_click', label: 'Specific button/link clicked (by CSS selector)' },
+];
+
 const DragonDeskOptimize = () => {
   const { toast, confirm } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -93,6 +104,7 @@ const DragonDeskOptimize = () => {
       offerModal: { ...DEFAULT_OFFER_MODAL },
       targeting: { ...DEFAULT_TARGETING },
     },
+    goal: { type: 'none' as GoalType, selector: '' },
     status: 'draft' as 'draft' | 'running' | 'completed',
   });
 
@@ -151,6 +163,7 @@ const DragonDeskOptimize = () => {
       trafficSplit: 50,
       variantA: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
       variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [], promoBar: { ...DEFAULT_PROMO_BAR }, offerModal: { ...DEFAULT_OFFER_MODAL }, targeting: { ...DEFAULT_TARGETING } },
+      goal: { type: 'none', selector: '' },
       status: 'draft',
     });
     setActiveTab('variantA');
@@ -171,6 +184,7 @@ const DragonDeskOptimize = () => {
       variantA: { ...test.variantA, changes: test.variantA.changes || [] },
       // Backfill bar/modal config for older tests that predate these fields.
       variantB: { ...vb, changes: vb.changes || [], promoBar: { ...DEFAULT_PROMO_BAR, ...(vb.promoBar || {}) }, offerModal: { ...DEFAULT_OFFER_MODAL, ...(vb.offerModal || {}), trigger: { ...DEFAULT_OFFER_MODAL.trigger, ...((vb.offerModal || {}).trigger || {}) } }, targeting: { ...DEFAULT_TARGETING, ...(vb.targeting || {}) } },
+      goal: (() => { const g: any = (test as any).goal; const parsed = typeof g === 'string' ? (g ? JSON.parse(g) : null) : g; return { type: (parsed?.type as GoalType) || 'none', selector: parsed?.selector || '' }; })(),
       status: test.status,
     });
     setActiveTab('variantA');
@@ -654,6 +668,29 @@ const DragonDeskOptimize = () => {
             {formData.experienceType !== 'page_edit' && (
               <p className={styles.fieldHelp}>100% just runs it. Lower it to A/B test showing it vs not.</p>
             )}
+          </div>
+
+          <div className={styles.formGroup}>
+            <label>Conversion Goal</label>
+            <select
+              value={formData.goal.type}
+              onChange={(e) => setFormData({ ...formData, goal: { ...formData.goal, type: e.target.value as GoalType } })}
+              className={styles.input}
+            >
+              {GOAL_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+            </select>
+            {formData.goal.type === 'selector_click' && (
+              <input
+                className={styles.input}
+                style={{ marginTop: 8 }}
+                value={formData.goal.selector}
+                onChange={(e) => setFormData({ ...formData, goal: { ...formData.goal, selector: e.target.value } })}
+                placeholder=".book-now, #signup-btn"
+              />
+            )}
+            <p className={styles.fieldHelp}>
+              Completing the goal counts as a conversion in analytics. Works for any experience type.
+            </p>
           </div>
 
           <div className={styles.formGroup}>

@@ -155,8 +155,37 @@ function buildTrackingScript(token: string, endpoint: string): string {
     credentials:'omit'
   }).then(function(r){return r.json();}).then(function(data){
     if(data&&data.changes&&data.changes.length){applyChanges(data.changes);}
+    if(data&&data.enrollments&&data.enrollments.length){setupEnrollments(data.enrollments);}
     if(data&&data.experiences&&data.experiences.length){renderExperiences(data.experiences);}
   }).catch(function(){});
+
+  /* Enrollment: one view per assigned test (both arms), plus goal watchers that
+     record a conversion ('lead') when the visitor completes the chosen goal. */
+  function setupEnrollments(list){
+    list.forEach(function(en){trackExp(en.testId,en.variant,'view');});
+    var goals=list.filter(function(en){return en.goal&&en.goal.type;});
+    if(!goals.length)return;
+    function convert(en){
+      var k='_dd_conv_'+en.testId;
+      try{if(localStorage.getItem(k)==='1')return;localStorage.setItem(k,'1');}catch(e){}
+      trackExp(en.testId,en.variant,'lead');
+    }
+    d.addEventListener('click',function(e){
+      var el=e.target;if(!el||!el.closest)return;
+      goals.forEach(function(en){
+        var g=en.goal,hit=false;
+        try{
+          if(g.type==='tel_click')hit=!!el.closest('a[href^="tel:"]');
+          else if(g.type==='email_click')hit=!!el.closest('a[href^="mailto:"]');
+          else if(g.type==='selector_click'&&g.selector)hit=!!el.closest(g.selector);
+        }catch(_){}
+        if(hit)convert(en);
+      });
+    },true);
+    d.addEventListener('submit',function(){
+      goals.forEach(function(en){if(en.goal.type==='form_submit')convert(en);});
+    },true);
+  }
 
   function applyChanges(changes){
     changes.forEach(function(c){
@@ -237,7 +266,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
       bar.appendChild(x);
     }
     d.body.appendChild(bar);
-    trackExp(exp.testId,exp.variant,'view');
+    /* view is recorded once per enrollment (setupEnrollments), not here. */
     markSeen(exp.testId,c.frequency);
   }
   function renderOfferModal(exp){
@@ -263,7 +292,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
       ov.addEventListener('click',function(e){if(e.target===ov)close();});
     }
     ov.appendChild(card);d.body.appendChild(ov);
-    trackExp(exp.testId,exp.variant,'view');
+    /* view is recorded once per enrollment (setupEnrollments), not here. */
     markSeen(exp.testId,c.frequency);
   }
 })(window,document);
@@ -420,26 +449,30 @@ router.post('/personalize', async (req: Request, res: Response) => {
   try {
     // Get running A/B tests for this token (match on pageUrl path)
     const tests = await pool.query(`
-      SELECT t.id, t."variantA", t."variantB", t."trafficSplit", t."experienceType",
+      SELECT t.id, t."variantA", t."variantB", t."trafficSplit", t."experienceType", t.goal,
              a.filters as "audienceFilters"
       FROM ab_tests t
       LEFT JOIN audiences a ON a.id = t."audienceId"
       WHERE t.status = 'running'
     `);
 
-    if (tests.rows.length === 0) { res.json({ changes: [], experiences: [] }); return; }
+    if (tests.rows.length === 0) { res.json({ changes: [], experiences: [], enrollments: [] }); return; }
 
     const changes: any[] = [];
     // Promo bars / offer modals: injected UI (not element edits), so they ride a
-    // separate list the snippet renders. Each carries the test id + which variant
-    // was assigned, so the client fires analytics for the right arm.
+    // separate list the snippet renders.
     const experiences: any[] = [];
+    // Every assigned running test the visitor is in — BOTH arms — so the snippet
+    // can fire a view and watch the goal for each. Control (A) must be enrolled
+    // too, or a "show it vs not" test has nothing to compare the treatment to.
+    const enrollments: any[] = [];
 
     for (const test of tests.rows) {
       // Check if visitor matches any behavior audience rules
       const variantA = typeof test.variantA === 'string' ? JSON.parse(test.variantA) : test.variantA;
       const variantB = typeof test.variantB === 'string' ? JSON.parse(test.variantB) : test.variantB;
       const filters = test.audienceFilters ? (typeof test.audienceFilters === 'string' ? JSON.parse(test.audienceFilters) : test.audienceFilters) : {};
+      const goal = test.goal ? (typeof test.goal === 'string' ? JSON.parse(test.goal) : test.goal) : null;
 
       let inAudience = true;
 
@@ -457,7 +490,8 @@ router.post('/personalize', async (req: Request, res: Response) => {
 
       if (expType === 'page_edit') {
         // Unchanged: trafficSplit is the share that sees variant A.
-        const variant = bucket < test.trafficSplit ? variantA : variantB;
+        const isA = bucket < test.trafficSplit;
+        const variant = isA ? variantA : variantB;
         if (variant && variant.changes) {
           changes.push(...variant.changes.map((c: any) => ({
             selector: c.selector,
@@ -466,26 +500,31 @@ router.post('/personalize', async (req: Request, res: Response) => {
             value: c.newValue,
           })));
         }
+        enrollments.push({ testId: test.id, variant: isA ? 'A' : 'B', goal });
         continue;
       }
 
-      // Promo bar / offer modal: A is always control (nothing shown). trafficSplit
-      // is the share that sees the treatment (B) — so 100% shows it to everyone,
-      // 50% A/B tests "show it vs not."
-      if (bucket >= test.trafficSplit) continue;
-      // URL targeting: whole site (default) or a specific page/path.
+      // Promo bar / offer modal. URL targeting gates the experience on this page
+      // for BOTH arms — off-target pages enroll no one.
       if (!matchesUrlTarget(variantB?.targeting, path, url)) continue;
-      const config = expType === 'promo_bar' ? variantB?.promoBar : variantB?.offerModal;
-      if (!config) continue;
-      experiences.push({
-        testId: test.id,
-        variant: 'B',
-        kind: expType === 'promo_bar' ? 'promoBar' : 'offerModal',
-        config,
-      });
+      // trafficSplit is the treatment share: bucket < split → treatment (B, sees
+      // it); otherwise control (A, sees nothing). 100% = everyone treated.
+      const isTreatment = bucket < test.trafficSplit;
+      enrollments.push({ testId: test.id, variant: isTreatment ? 'B' : 'A', goal });
+      if (isTreatment) {
+        const config = expType === 'promo_bar' ? variantB?.promoBar : variantB?.offerModal;
+        if (config) {
+          experiences.push({
+            testId: test.id,
+            variant: 'B',
+            kind: expType === 'promo_bar' ? 'promoBar' : 'offerModal',
+            config,
+          });
+        }
+      }
     }
 
-    res.json({ changes, experiences });
+    res.json({ changes, experiences, enrollments });
   } catch (err) {
     res.json({ changes: [] });
   }

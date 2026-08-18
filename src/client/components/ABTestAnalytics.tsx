@@ -110,7 +110,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </span>
           </div>
           <div className={styles.compactMetric}>
-            <span className={styles.compactLabel}>Leads:</span>
+            <span className={styles.compactLabel}>Conversions:</span>
             <span className={styles.compactValue}>
               {(variantA?.leads || 0) + (variantB?.leads || 0)}
             </span>
@@ -165,7 +165,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </div>
 
             <div className={styles.metric}>
-              <div className={styles.metricLabel}>Leads</div>
+              <div className={styles.metricLabel}>Conversions</div>
               <div className={styles.metricValue}>{variantA?.leads || 0}</div>
             </div>
 
@@ -217,7 +217,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </div>
 
             <div className={styles.metric}>
-              <div className={styles.metricLabel}>Leads</div>
+              <div className={styles.metricLabel}>Conversions</div>
               <div className={styles.metricValue}>{variantB?.leads || 0}</div>
             </div>
 
