@@ -218,17 +218,25 @@ router.get('/member/lookup', async (req, res) => {
       return res.status(400).json({ error: 'Search term and location ID are required' });
     }
 
-    const searchTerm = `%${search}%`;
+    // This endpoint is public (kiosks have no login), so it must not become a
+    // roster-harvesting API. Require a real search term and scope results to the
+    // kiosk's own location, so it can't be swept to dump all members.
+    const term = String(search).trim();
+    if (term.length < 2) {
+      return res.status(400).json({ error: 'Search term must be at least 2 characters' });
+    }
+    const searchTerm = `%${term}%`;
 
     const result = await pool.query(`
       SELECT id, "firstName", "lastName", "programType", ranking
       FROM members
-      WHERE ("firstName" || ' ' || "lastName" ILIKE $1
+      WHERE "locationId" = $2::int
+        AND ("firstName" || ' ' || "lastName" ILIKE $1
              OR email ILIKE $1
              OR phone ILIKE $1)
       ORDER BY "firstName", "lastName"
       LIMIT 10
-    `, [searchTerm]);
+    `, [searchTerm, locationId]);
 
     await logKioskActivity(parseInt(locationId as string), 'member_search', undefined, { search });
 

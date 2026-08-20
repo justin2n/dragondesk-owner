@@ -14,22 +14,49 @@ router.options('/track', (_req, res) => {
   res.status(204).end();
 });
 
-// Track an event (view, click, lead, engagement, bounce)
+const ALLOWED_EVENT_TYPES = new Set(['view', 'click', 'lead', 'engagement', 'bounce']);
+const runningTestCache = new Map<number, { ok: boolean; at: number }>();
+
+// This endpoint is public (the site snippet posts to it cross-origin), so it's
+// unauthenticated and must validate aggressively: a real running test id, a
+// known event type, one variant letter, and a bounded metadata blob — otherwise
+// it's an A/B-result-poisoning and storage-exhaustion sink.
 router.post('/track', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   try {
-    const { testId, variant, eventType, sessionId, metadata } = req.body;
+    const testId = Number(req.body?.testId);
+    const variant = req.body?.variant;
+    const eventType = req.body?.eventType;
+    const sessionId = req.body?.sessionId;
+    let { metadata } = req.body || {};
 
-    if (!testId || !variant || !eventType) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!Number.isInteger(testId) || testId <= 0) return res.status(400).json({ error: 'Invalid testId' });
+    if (variant !== 'A' && variant !== 'B') return res.status(400).json({ error: 'Invalid variant' });
+    if (!ALLOWED_EVENT_TYPES.has(eventType)) return res.status(400).json({ error: 'Invalid eventType' });
+
+    // Only accept events for a real, running test (cached 60s to avoid a DB hit
+    // per beacon). Silently 204 unknown ids so scanners learn nothing.
+    const cached = runningTestCache.get(testId);
+    let ok = cached && Date.now() - cached.at < 60_000 ? cached.ok : undefined;
+    if (ok === undefined) {
+      const rows = await query(`SELECT 1 FROM ab_tests WHERE id = ? AND status = 'running'`, [testId]);
+      ok = rows.length > 0;
+      runningTestCache.set(testId, { ok, at: Date.now() });
+    }
+    if (!ok) return res.status(204).end();
+
+    // Cap metadata so a single beacon can't store an unbounded blob.
+    let metaStr: string | null = null;
+    if (metadata != null) {
+      metaStr = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
+      if (metaStr.length > 2000) metaStr = metaStr.slice(0, 2000);
     }
 
-    // Record the event
     await run(
       `INSERT INTO ab_test_events (testId, variant, eventType, sessionId, metadata)
        VALUES (?, ?, ?, ?, ?)`,
-      [testId, variant, eventType, sessionId || null, metadata ? JSON.stringify(metadata) : null]
+      [testId, variant, eventType, sessionId ? String(sessionId).slice(0, 100) : null, metaStr]
     );
 
     res.status(201).json({ success: true });

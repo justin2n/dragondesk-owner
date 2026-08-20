@@ -1444,15 +1444,30 @@ async function seedAdminUser(client: any) {
   const bcrypt = await import('bcryptjs');
 
   const result = await client.query('SELECT id FROM users WHERE role = $1', ['admin']);
+  if (result.rows.length > 0) return;
 
-  if (result.rows.length === 0) {
-    const hashedPassword = await bcrypt.default.hash('admin123', 10);
-    await client.query(
-      'INSERT INTO users (username, email, password, role, "firstName", "lastName") VALUES ($1, $2, $3, $4, $5, $6)',
-      ['admin', 'admin@dragondesk.com', hashedPassword, 'admin', 'System', 'Administrator']
-    );
-    console.log('Default admin user created (username: admin, password: admin123)');
+  // SECURITY: never seed a hardcoded password. Only bootstrap an admin when a
+  // strong password is supplied via SEED_ADMIN_PASSWORD, and force a change on
+  // first login. Otherwise skip and rely on the INIT_ADMIN_SECRET-gated
+  // /api/auth/init-admin endpoint to create the first admin.
+  const seedPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!seedPassword || seedPassword.length < 12) {
+    console.log('No admin user found. Set SEED_ADMIN_PASSWORD (>=12 chars) or use /api/auth/init-admin to create one.');
+    return;
   }
+
+  const username = process.env.SEED_ADMIN_USERNAME || 'admin';
+  const email = process.env.SEED_ADMIN_EMAIL || 'admin@dragondesk.com';
+  const hashedPassword = await bcrypt.default.hash(seedPassword, 12);
+  // Ensure the column exists — the migration that adds it elsewhere is
+  // fire-and-forget and can race this seed on a brand-new database.
+  await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN DEFAULT false`).catch(() => {});
+  await client.query(
+    `INSERT INTO users (username, email, password, role, "firstName", "lastName", "mustChangePassword")
+     VALUES ($1, $2, $3, 'admin', 'System', 'Administrator', true)`,
+    [username, email, hashedPassword]
+  );
+  console.log(`Seeded admin "${username}" from SEED_ADMIN_PASSWORD (must change password on first login).`);
 }
 
 // List of camelCase column names that need quoting in PostgreSQL

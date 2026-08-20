@@ -304,6 +304,40 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploaded images
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// ── Rate limiters for public / unauthenticated endpoints ────────────────────
+// These MUST be registered before the routes they protect: Express runs
+// middleware in registration order, so a limiter added after the route never
+// runs. (They were previously registered afterward and silently did nothing.)
+const publicLeadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many submissions. Please try again later.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+const kioskLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'Too many requests from this kiosk. Slow down.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+const trackingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'Rate limit exceeded.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+// The A/B analytics beacon (/track) is public; throttle per-IP so it can't flood
+// ab_test_events. Generous enough for real page traffic.
+const abAnalyticsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'Rate limit exceeded.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+app.use('/api/kiosk', kioskLimiter);
+app.use('/api/tracking', trackingLimiter);
+app.use('/api/ab-analytics', abAnalyticsLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/members', membersRoutes);
 app.use('/api/audiences', audiencesRoutes);
@@ -353,31 +387,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
 });
 
-// Rate limiters for public / unauthenticated endpoints
-const publicLeadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { error: 'Too many submissions. Please try again later.' },
-  standardHeaders: true, legacyHeaders: false,
-});
-
-const kioskLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 60,             // 1 check-in per second on average — plenty for a kiosk
-  message: { error: 'Too many requests from this kiosk. Slow down.' },
-  standardHeaders: true, legacyHeaders: false,
-});
-
-const trackingLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  message: { error: 'Rate limit exceeded.' },
-  standardHeaders: true, legacyHeaders: false,
-});
-
-// Apply rate limiters before the route registrations
-app.use('/api/kiosk', kioskLimiter);
-app.use('/api/tracking', trackingLimiter);
 
 // Public lead capture — no auth required, for marketing site and lead forms
 app.post('/api/public/lead', publicLeadLimiter, async (req, res) => {
