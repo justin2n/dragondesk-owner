@@ -1,6 +1,7 @@
 import { serverError } from '../utils/errors';
 import express from 'express';
 import { query, run } from '../models/database';
+import { computeSignificance } from '../utils/abStats';
 
 const router = express.Router();
 
@@ -125,9 +126,27 @@ router.get('/:testId', async (req, res) => {
       [testId]
     );
 
+    // Statistical significance: compare the two variants' conversion rates.
+    // Conversions are 'lead' events (the goal); the denominator is views.
+    const A = analytics.find((v: any) => v.variant === 'A');
+    const B = analytics.find((v: any) => v.variant === 'B');
+    // Recent traffic rate (combined views/day) to forecast time-to-significance.
+    const days = new Set(timeSeriesData.map((r: any) => String(r.date))).size || 1;
+    const totalViews = analytics.reduce((s: number, v: any) => s + Number(v.views || 0), 0);
+    const dailyViews = totalViews / days;
+
+    const significance = (A && B)
+      ? computeSignificance(
+          { views: Number(A.views) || 0, conversions: Number(A.leads) || 0 },
+          { views: Number(B.views) || 0, conversions: Number(B.leads) || 0 },
+          dailyViews,
+        )
+      : null;
+
     res.json({
       summary: analyticsWithEngagement,
       timeSeries: timeSeriesData,
+      significance,
     });
   } catch (error: any) {
     console.error('Error fetching analytics:', error);

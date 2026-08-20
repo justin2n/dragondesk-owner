@@ -15,9 +15,25 @@ interface VariantAnalytics {
   bounceRate: string;
 }
 
+interface Significance {
+  status: 'insufficient_data' | 'not_significant' | 'significant';
+  confidence: number;
+  pValue: number;
+  significanceLevel: 95 | 99 | null;
+  winner: 'A' | 'B' | null;
+  controlRate: number;
+  treatmentRate: number;
+  relativeLift: number;
+  sample: { a: number; b: number };
+  conversions: { a: number; b: number };
+  recommendation: string;
+  projection: { visitorsNeeded: number; daysRemaining: number | null } | null;
+}
+
 interface AnalyticsData {
   summary: VariantAnalytics[];
   timeSeries: any[];
+  significance?: Significance | null;
 }
 
 interface ABTestAnalyticsProps {
@@ -96,7 +112,44 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
 
   const variantA = getVariantData('A');
   const variantB = getVariantData('B');
-  const winner = calculateWinner();
+  const sig = analytics.significance || null;
+  // Prefer the statistically-sound winner; fall back to the raw-rate compare.
+  const winner = sig?.status === 'significant' ? sig.winner : calculateWinner();
+
+  const renderSignificance = () => {
+    if (!sig) return null;
+    const cls =
+      sig.status === 'significant' ? styles.sigSignificant :
+      sig.status === 'not_significant' ? styles.sigPending : styles.sigCollecting;
+    const heading =
+      sig.status === 'significant'
+        ? `Statistically significant — ${sig.confidence}% confidence${sig.significanceLevel === 99 ? ' (99% milestone)' : ''}`
+        : sig.status === 'not_significant'
+          ? `Not significant yet — ${sig.confidence}% confidence (need 95%)`
+          : 'Collecting data';
+    return (
+      <div className={`${styles.sigBanner} ${cls}`}>
+        <div className={styles.sigHead}>
+          <span className={styles.sigDot} />
+          <strong>{heading}</strong>
+        </div>
+        <p className={styles.sigRec}>{sig.recommendation}</p>
+        <div className={styles.sigStats}>
+          <span>A: {sig.controlRate.toFixed(2)}% ({sig.conversions.a}/{sig.sample.a})</span>
+          <span>B: {sig.treatmentRate.toFixed(2)}% ({sig.conversions.b}/{sig.sample.b})</span>
+          {sig.status !== 'insufficient_data' && (
+            <span>Lift: {sig.relativeLift > 0 ? '+' : ''}{sig.relativeLift}%</span>
+          )}
+        </div>
+        {sig.projection && (
+          <p className={styles.sigProjection}>
+            Prediction: ~{sig.projection.visitorsNeeded.toLocaleString()} more visitors
+            {sig.projection.daysRemaining != null ? ` (~${sig.projection.daysRemaining} day${sig.projection.daysRemaining === 1 ? '' : 's'} at current traffic)` : ''} to reach 95% for the current gap.
+          </p>
+        )}
+      </div>
+    );
+  };
 
   if (compact) {
     // Compact view for cards
@@ -129,6 +182,13 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </span>
           </div>
         </div>
+        {sig && sig.status !== 'insufficient_data' && (
+          <div className={`${styles.compactSig} ${sig.status === 'significant' ? styles.sigSignificant : styles.sigPending}`}>
+            {sig.status === 'significant'
+              ? `Significant · ${sig.confidence}% · ${sig.winner} wins`
+              : `${sig.confidence}% confidence`}
+          </div>
+        )}
       </div>
     );
   }
@@ -140,10 +200,12 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
         <h3 className={styles.title}>Analytics Dashboard</h3>
         {winner && (
           <div className={styles.winnerBadge}>
-            Variant {winner} is winning
+            {sig?.status === 'significant' ? `Variant ${winner} wins` : `Variant ${winner} is ahead`}
           </div>
         )}
       </div>
+
+      {renderSignificance()}
 
       <div className={styles.variantsComparison}>
         {/* Variant A */}
