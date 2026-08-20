@@ -49,6 +49,7 @@ import posRoutes from './routes/pos';
 import adminEmailsRoutes from './routes/admin-emails';
 import salesSignalsRoutes from './routes/sales-signals';
 import alertsRoutes from './routes/alerts';
+import { sweepRunningTests } from './services/abSignificance';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
 import { serverError } from './utils/errors';
 import { createHash } from 'crypto';
@@ -513,3 +514,9 @@ process.on('uncaughtException', (err) => {
 app.listen(PORT, () => {
   console.log(`🐉 DragonDesk CRM server running on port ${PORT}`);
 });
+
+// Proactively detect A/B tests that reach statistical significance, so a
+// notification appears even when nobody is looking at the analytics. Runs a
+// short while after boot (let migrations finish) then every 15 minutes.
+setTimeout(() => { sweepRunningTests().catch(() => {}); }, 30_000);
+setInterval(() => { sweepRunningTests().catch(() => {}); }, 15 * 60 * 1000);

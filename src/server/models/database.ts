@@ -1415,6 +1415,12 @@ async function initializeDatabase() {
     // 'email_click'|'selector_click', selector?}. A goal completion is recorded
     // as a 'lead' event so it flows into the existing conversion-rate analytics.
     await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS goal TEXT`).catch(() => {});
+    // Statistical-significance milestone: stamped once, the first time a running
+    // test crosses 95% confidence, so it can be surfaced as a notification.
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigReachedAt" TIMESTAMP`).catch(() => {});
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigWinner" TEXT`).catch(() => {});
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigConfidence" NUMERIC`).catch(() => {});
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigLevel" INTEGER`).catch(() => {});
     // System audiences (like "All Traffic") are seeded and cannot be deleted.
     await client.query(`ALTER TABLE audiences ADD COLUMN IF NOT EXISTS "isSystem" BOOLEAN DEFAULT false`).catch(() => {});
 

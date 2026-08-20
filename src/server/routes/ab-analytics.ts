@@ -2,6 +2,7 @@ import { serverError } from '../utils/errors';
 import express from 'express';
 import { query, run } from '../models/database';
 import { computeSignificance } from '../utils/abStats';
+import { stampIfSignificant } from '../services/abSignificance';
 
 const router = express.Router();
 
@@ -142,6 +143,12 @@ router.get('/:testId', async (req, res) => {
           dailyViews,
         )
       : null;
+
+    // Catch the milestone the moment someone views the analytics (the periodic
+    // sweep catches it otherwise). Non-blocking, idempotent.
+    if (significance) {
+      stampIfSignificant(Number(testId), significance).catch(() => {});
+    }
 
     res.json({
       summary: analyticsWithEngagement,

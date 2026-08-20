@@ -48,6 +48,31 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
       }
     }
 
+    // A/B experiments that have crossed statistical significance while running —
+    // stamped by the significance sweep. One alert per test, keyed by id so it
+    // can be dismissed independently.
+    try {
+      const sigTests = await pool.query(
+        `SELECT id, name, "sigWinner", "sigConfidence"
+         FROM ab_tests
+         WHERE status = 'running' AND "sigReachedAt" IS NOT NULL
+         ORDER BY "sigReachedAt" DESC`,
+      );
+      for (const t of sigTests.rows) {
+        const conf = t.sigConfidence != null ? `${Number(t.sigConfidence)}%` : '95%+';
+        const verdict = t.sigWinner === 'A'
+          ? `the control (A) is winning at ${conf} — the change didn't help`
+          : `Variant ${t.sigWinner} wins at ${conf}`;
+        alerts.push({
+          type: `ab_sig_${t.id}`,
+          message: `Experiment "${t.name}" reached statistical significance — ${verdict}. Review and decide.`,
+          severity: 'info',
+        });
+      }
+    } catch (err) {
+      console.error('[alerts] AB significance check failed:', err);
+    }
+
     res.json({ alerts });
   } catch (err: any) {
     serverError(res, err);
