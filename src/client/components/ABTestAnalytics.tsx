@@ -28,6 +28,13 @@ interface Significance {
   conversions: { a: number; b: number };
   recommendation: string;
   projection: { visitorsNeeded: number; daysRemaining: number | null } | null;
+  dataGate: {
+    viewsNeededA: number;
+    viewsNeededB: number;
+    conversionsNeeded: number;
+    daysRemaining: number | null;
+    thresholds: { minViewsPerArm: number; minTotalConversions: number };
+  } | null;
 }
 
 interface AnalyticsData {
@@ -141,6 +148,16 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             <span>Lift: {sig.relativeLift > 0 ? '+' : ''}{sig.relativeLift}%</span>
           )}
         </div>
+        {sig.dataGate && (
+          <p className={styles.sigProjection}>
+            Needs {[
+              sig.dataGate.viewsNeededA > 0 ? `${sig.dataGate.viewsNeededA} more visitor${sig.dataGate.viewsNeededA === 1 ? '' : 's'} on A` : null,
+              sig.dataGate.viewsNeededB > 0 ? `${sig.dataGate.viewsNeededB} more visitor${sig.dataGate.viewsNeededB === 1 ? '' : 's'} on B` : null,
+              sig.dataGate.conversionsNeeded > 0 ? `${sig.dataGate.conversionsNeeded} more conversion${sig.dataGate.conversionsNeeded === 1 ? '' : 's'}` : null,
+            ].filter(Boolean).join(', ')} before a verdict is possible
+            {sig.dataGate.daysRemaining != null ? ` (~${sig.dataGate.daysRemaining} day${sig.dataGate.daysRemaining === 1 ? '' : 's'} at current traffic)` : ''}.
+          </p>
+        )}
         {sig.projection && (
           <p className={styles.sigProjection}>
             Prediction: ~{sig.projection.visitorsNeeded.toLocaleString()} more visitors

@@ -37,12 +37,35 @@ export interface SignificanceResult {
   recommendation: string;
   // Forecast to reach 95% (null when already significant or not projectable).
   projection: { visitorsNeeded: number; daysRemaining: number | null } | null;
+  // Progress toward the minimum data a verdict needs. Only set while status is
+  // 'insufficient_data' — past the gate, `projection` answers "how much longer?".
+  dataGate: DataGate | null;
+}
+
+export interface DataGate {
+  viewsNeededA: number;         // more views variant A still needs
+  viewsNeededB: number;         // more views variant B still needs
+  conversionsNeeded: number;    // more conversions needed across both arms
+  daysRemaining: number | null; // at recent traffic; null when not projectable
+  thresholds: { minViewsPerArm: number; minTotalConversions: number };
 }
 
 // Minimum data before we'll even attempt a verdict — below this, small-sample
 // swings make the z-test meaningless.
 const MIN_VIEWS_PER_ARM = 30;
 const MIN_TOTAL_CONVERSIONS = 5;
+
+export const DATA_GATE_THRESHOLDS = {
+  minViewsPerArm: MIN_VIEWS_PER_ARM,
+  minTotalConversions: MIN_TOTAL_CONVERSIONS,
+};
+
+function joinList(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] || '';
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
+}
+const plural = (n: number, word: string) => `${n} more ${word}${n === 1 ? '' : 's'}`;
 
 export function computeSignificance(
   a: VariantStat,
@@ -66,14 +89,49 @@ export function computeSignificance(
   };
 
   if (nA < MIN_VIEWS_PER_ARM || nB < MIN_VIEWS_PER_ARM || xA + xB < MIN_TOTAL_CONVERSIONS) {
+    // Below the gate the z-test is meaningless, but "not enough data" on its own
+    // gives no sense of progress — so report exactly what's still missing.
+    const viewsNeededA = Math.max(0, MIN_VIEWS_PER_ARM - nA);
+    const viewsNeededB = Math.max(0, MIN_VIEWS_PER_ARM - nB);
+    const conversionsNeeded = Math.max(0, MIN_TOTAL_CONVERSIONS - (xA + xB));
+
+    // Time to clear the gate is bounded by whichever constraint is slower. With
+    // no conversions yet there's no rate to extrapolate from, so don't guess.
+    let daysRemaining: number | null = null;
+    if (dailyViews && dailyViews > 0) {
+      const viewDays = (viewsNeededA + viewsNeededB) / dailyViews;
+      const observedRate = nA + nB > 0 ? (xA + xB) / (nA + nB) : 0;
+      if (conversionsNeeded === 0) {
+        daysRemaining = Math.ceil(viewDays);
+      } else if (observedRate > 0) {
+        daysRemaining = Math.ceil(Math.max(viewDays, conversionsNeeded / (observedRate * dailyViews)));
+      }
+    }
+
+    const missing: string[] = [];
+    if (viewsNeededA > 0) missing.push(`${plural(viewsNeededA, 'visitor')} on A`);
+    if (viewsNeededB > 0) missing.push(`${plural(viewsNeededB, 'visitor')} on B`);
+    if (conversionsNeeded > 0) missing.push(plural(conversionsNeeded, 'conversion'));
+
     return {
       ...base,
       status: 'insufficient_data',
       confidence: 0,
       pValue: 1,
       significanceLevel: null,
-      recommendation: 'Still collecting data — keep the test running until each variant has enough visitors and conversions.',
+      recommendation: missing.length
+        ? `Still collecting data — needs ${joinList(missing)} before a verdict is possible${
+            daysRemaining != null ? ` (~${daysRemaining} day${daysRemaining === 1 ? '' : 's'} at current traffic)` : ''
+          }.`
+        : 'Still collecting data — keep the test running.',
       projection: null,
+      dataGate: {
+        viewsNeededA,
+        viewsNeededB,
+        conversionsNeeded,
+        daysRemaining,
+        thresholds: DATA_GATE_THRESHOLDS,
+      },
     };
   }
 
@@ -116,5 +174,6 @@ export function computeSignificance(
     significanceLevel: level,
     recommendation,
     projection,
+    dataGate: null,
   };
 }
