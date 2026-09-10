@@ -5,6 +5,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { pool } from '../models/database';
 import { computeSignificance } from '../utils/abStats';
 import { stampIfSignificant } from '../services/abSignificance';
+import { getOptimizeSettings } from '../services/optimizeSettings';
 
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -702,6 +703,7 @@ async function executeTool(name: string, input: any, userId: number): Promise<st
           { views: A.views, conversions: A.leads },
           { views: B.views, conversions: B.leads },
           (A.views + B.views) / days,
+          await getOptimizeSettings(),
         );
         // Same milestone stamp the analytics view performs. Idempotent.
         stampIfSignificant(Number(testId), significance).catch(() => {});

@@ -1,5 +1,6 @@
 import { pool } from '../models/database';
 import { computeSignificance, SignificanceResult } from '../utils/abStats';
+import { getOptimizeSettings } from './optimizeSettings';
 
 // Detects when a running A/B experiment first crosses 95% statistical
 // significance and stamps the milestone on the ab_tests row (sigReachedAt +
@@ -37,7 +38,7 @@ export async function stampIfSignificant(testId: number, sig: SignificanceResult
 // Evaluate one test from its raw events and stamp if newly significant.
 export async function evaluateAndStamp(testId: number): Promise<boolean> {
   const { a, b } = await aggregatesFor(testId);
-  const sig = computeSignificance(a, b);
+  const sig = computeSignificance(a, b, undefined, await getOptimizeSettings());
   return stampIfSignificant(testId, sig);
 }
 

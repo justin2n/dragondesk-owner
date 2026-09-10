@@ -395,6 +395,20 @@ const Settings = () => {
 
   // Twilio SMS config (DB-encrypted, self-serve)
   const [smsSettings, setSmsSettings] = useState<any>(null);
+
+  // DragonDesk: Optimize — experiment settings
+  const [optimizeForm, setOptimizeForm] = useState({
+    confidenceThreshold: 95,
+    minViewsPerArm: 30,
+    minTotalConversions: 5,
+  });
+  const [optimizeDefaults, setOptimizeDefaults] = useState({
+    confidenceThreshold: 95,
+    minViewsPerArm: 30,
+    minTotalConversions: 5,
+  });
+  const [optimizeLevels, setOptimizeLevels] = useState<number[]>([90, 95, 99]);
+  const [optimizeSaving, setOptimizeSaving] = useState(false);
   const [smsForm, setSmsForm] = useState({ accountSid: '', authToken: '', fromNumber: '', messagingServiceSid: '' });
   const [smsSaving, setSmsSaving] = useState(false);
 
@@ -518,6 +532,7 @@ const Settings = () => {
     loadDkimConfigs();
     loadBillingSettings();
     loadPricingPlans();
+    loadOptimizeSettings();
     api.get('/webhooks/keys').then(setWebhookKeys).catch(() => {});
   }, []);
 
@@ -829,6 +844,30 @@ const Settings = () => {
       toast(error.message || 'Failed to save SMS settings', 'error');
     } finally {
       setSmsSaving(false);
+    }
+  };
+
+  const loadOptimizeSettings = async () => {
+    try {
+      const data = await api.get('/optimize-settings');
+      setOptimizeForm(data.settings);
+      setOptimizeDefaults(data.defaults);
+      setOptimizeLevels(data.allowedConfidenceLevels);
+    } catch {
+      // Non-fatal: the form keeps the defaults it was initialised with.
+    }
+  };
+
+  const handleSaveOptimizeSettings = async () => {
+    setOptimizeSaving(true);
+    try {
+      const { settings } = await api.put('/optimize-settings', optimizeForm);
+      setOptimizeForm(settings);
+      showSaveMessage('Optimize settings saved');
+    } catch (error: any) {
+      toast(error.message || 'Failed to save Optimize settings', 'error');
+    } finally {
+      setOptimizeSaving(false);
     }
   };
 
@@ -1437,14 +1476,36 @@ const Settings = () => {
       ]
     },
     {
-      label: 'Integrations',
+      label: 'DragonDesk: Engage',
       tabs: [
-        { id: 'mystudio', label: 'MyStudio API' },
         { id: 'email', label: 'Email Settings' },
         { id: 'sms', label: 'SMS (Twilio)' },
         { id: 'admin-email', label: 'Admin Email' },
         { id: 'dkim', label: 'DKIM Authentication' },
-        { id: 'social', label: 'Social Settings' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Social',
+      tabs: [
+        { id: 'social', label: 'Social Accounts' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Optimize',
+      tabs: [
+        { id: 'optimize', label: 'Experiment Settings' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Outreach',
+      tabs: [
+        { id: 'outreach', label: 'Telephony' },
+      ]
+    },
+    {
+      label: 'Integrations',
+      tabs: [
+        { id: 'mystudio', label: 'MyStudio API' },
         { id: 'integrations', label: 'API Integrations' },
         { id: 'leadforms', label: 'Lead Forms' },
       ]
@@ -3195,6 +3256,98 @@ const Settings = () => {
           )}
 
           {/* Theme Settings */}
+          {/* DragonDesk: Optimize — experiment settings */}
+          {activeTab === 'optimize' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>Experiment Settings</h2>
+              <p className={styles.sectionDesc}>
+                Controls how DragonDesk: Optimize decides an experiment has a winner. These apply
+                to every experience across the studio.
+              </p>
+
+              <div className={styles.form}>
+                <div className={styles.formGroup}>
+                  <label className={styles.label}>Confidence Threshold</label>
+                  <select
+                    className={styles.select}
+                    value={optimizeForm.confidenceThreshold}
+                    onChange={e => setOptimizeForm({ ...optimizeForm, confidenceThreshold: Number(e.target.value) })}
+                  >
+                    {optimizeLevels.map(level => (
+                      <option key={level} value={level}>
+                        {level}%{level === optimizeDefaults.confidenceThreshold ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <span className={styles.helpText}>
+                    How sure the test must be before a variant is called the winner. A lower bar
+                    calls winners sooner but is wrong more often; 95% is the usual standard.
+                  </span>
+                </div>
+
+                <h3 className={styles.subsectionTitle}>Minimum Data</h3>
+                <p className={styles.sectionDesc}>
+                  Below these amounts no verdict is attempted at all — small samples swing too
+                  wildly to mean anything. Until an experience clears both, its analytics show how
+                  much more data it needs.
+                </p>
+
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Visitors per Variant</label>
+                    <input
+                      type="number" min="1" max="100000" className={styles.input}
+                      value={optimizeForm.minViewsPerArm}
+                      onChange={e => setOptimizeForm({ ...optimizeForm, minViewsPerArm: Number(e.target.value) })}
+                    />
+                    <span className={styles.helpText}>Default: {optimizeDefaults.minViewsPerArm}</span>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Total Conversions</label>
+                    <input
+                      type="number" min="1" max="100000" className={styles.input}
+                      value={optimizeForm.minTotalConversions}
+                      onChange={e => setOptimizeForm({ ...optimizeForm, minTotalConversions: Number(e.target.value) })}
+                    />
+                    <span className={styles.helpText}>
+                      Across both variants combined. Default: {optimizeDefaults.minTotalConversions}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={styles.infoBox}>
+                  Changing these re-judges running experiments from here on. Experiments already
+                  marked significant keep that record — it reflects the bar in force when they
+                  crossed it.
+                </div>
+
+                <button onClick={handleSaveOptimizeSettings} className={styles.saveBtn} disabled={optimizeSaving}>
+                  {optimizeSaving ? 'Saving…' : 'Save Optimize Settings'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* DragonDesk: Outreach — telephony */}
+          {activeTab === 'outreach' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>Telephony</h2>
+              <p className={styles.sectionDesc}>
+                Voice settings for DragonDesk: Outreach call campaigns.
+              </p>
+              <div className={styles.infoBox}>
+                There are no telephony settings yet. Outreach call campaigns are configured
+                per-campaign — the script, goal, and audience live on the campaign itself — and no
+                voice provider is connected at the platform level. When one is added, its
+                credentials will live here.
+                <br /><br />
+                Note that SMS is configured under DragonDesk: Engage, not here — text campaigns are
+                sent by Engage, while Outreach places calls.
+              </div>
+            </div>
+          )}
+
           {activeTab === 'theme' && (
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>Appearance</h2>

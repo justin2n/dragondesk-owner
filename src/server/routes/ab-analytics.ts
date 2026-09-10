@@ -3,6 +3,7 @@ import express from 'express';
 import { query, run } from '../models/database';
 import { computeSignificance } from '../utils/abStats';
 import { stampIfSignificant } from '../services/abSignificance';
+import { getOptimizeSettings } from '../services/optimizeSettings';
 
 const router = express.Router();
 
@@ -136,11 +137,13 @@ router.get('/:testId', async (req, res) => {
     const totalViews = analytics.reduce((s: number, v: any) => s + Number(v.views || 0), 0);
     const dailyViews = totalViews / days;
 
+    const optimizeSettings = await getOptimizeSettings();
     const significance = (A && B)
       ? computeSignificance(
           { views: Number(A.views) || 0, conversions: Number(A.leads) || 0 },
           { views: Number(B.views) || 0, conversions: Number(B.leads) || 0 },
           dailyViews,
+          optimizeSettings,
         )
       : null;
 

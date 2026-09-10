@@ -19,7 +19,8 @@ interface Significance {
   status: 'insufficient_data' | 'not_significant' | 'significant';
   confidence: number;
   pValue: number;
-  significanceLevel: 95 | 99 | null;
+  significanceLevel: 90 | 95 | 99 | null;
+  threshold: 90 | 95 | 99;
   winner: 'A' | 'B' | null;
   controlRate: number;
   treatmentRate: number;
@@ -132,7 +133,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
       sig.status === 'significant'
         ? `Statistically significant — ${sig.confidence}% confidence${sig.significanceLevel === 99 ? ' (99% milestone)' : ''}`
         : sig.status === 'not_significant'
-          ? `Not significant yet — ${sig.confidence}% confidence (need 95%)`
+          ? `Not significant yet — ${sig.confidence}% confidence (need ${sig.threshold}%)`
           : 'Collecting data';
     return (
       <div className={`${styles.sigBanner} ${cls}`}>
@@ -161,7 +162,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
         {sig.projection && (
           <p className={styles.sigProjection}>
             Prediction: ~{sig.projection.visitorsNeeded.toLocaleString()} more visitors
-            {sig.projection.daysRemaining != null ? ` (~${sig.projection.daysRemaining} day${sig.projection.daysRemaining === 1 ? '' : 's'} at current traffic)` : ''} to reach 95% for the current gap.
+            {sig.projection.daysRemaining != null ? ` (~${sig.projection.daysRemaining} day${sig.projection.daysRemaining === 1 ? '' : 's'} at current traffic)` : ''} to reach {sig.threshold}% for the current gap.
           </p>
         )}
       </div>

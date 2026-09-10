@@ -7,9 +7,30 @@
 // significant yet — an estimate of how many more visitors (and days, at the
 // current traffic rate) it'll take to get there.
 
-const Z_95 = 1.959964; // two-sided 95% confidence
-const Z_99 = 2.575829; // two-sided 99% confidence
+const Z_BY_LEVEL: Record<ConfidenceLevel, number> = {
+  90: 1.644854, // two-sided 90% confidence
+  95: 1.959964, // two-sided 95% confidence
+  99: 2.575829, // two-sided 99% confidence
+};
+const LEVELS: ConfidenceLevel[] = [90, 95, 99];
 const Z_POWER_80 = 0.8416212; // 80% power
+
+export type ConfidenceLevel = 90 | 95 | 99;
+
+// Studio-configurable Optimize settings. Defaults match the values these were
+// hardcoded to before they became settings, so an unconfigured studio is
+// unaffected.
+export interface SignificanceOptions {
+  confidenceThreshold?: ConfidenceLevel; // bar a test must clear to be called
+  minViewsPerArm?: number;               // data gate: views each arm needs
+  minTotalConversions?: number;          // data gate: conversions across arms
+}
+
+export const DEFAULT_SIGNIFICANCE_OPTIONS: Required<SignificanceOptions> = {
+  confidenceThreshold: 95,
+  minViewsPerArm: 30,
+  minTotalConversions: 5,
+};
 
 // Standard normal CDF via an erf approximation (Abramowitz & Stegun 7.1.26).
 function erf(x: number): number {
@@ -27,7 +48,8 @@ export interface SignificanceResult {
   status: 'insufficient_data' | 'not_significant' | 'significant';
   confidence: number;              // 0-100, = (1 - pValue) * 100
   pValue: number;
-  significanceLevel: 95 | 99 | null; // highest milestone crossed
+  significanceLevel: ConfidenceLevel | null; // highest standard milestone crossed
+  threshold: ConfidenceLevel;      // the bar this verdict was judged against
   winner: 'A' | 'B' | null;        // arm with the higher rate (only trust when significant)
   controlRate: number;             // % (variant A)
   treatmentRate: number;           // % (variant B)
@@ -35,7 +57,8 @@ export interface SignificanceResult {
   sample: { a: number; b: number };
   conversions: { a: number; b: number };
   recommendation: string;
-  // Forecast to reach 95% (null when already significant or not projectable).
+  // Forecast to reach the configured threshold (null when already significant
+  // or not projectable).
   projection: { visitorsNeeded: number; daysRemaining: number | null } | null;
   // Progress toward the minimum data a verdict needs. Only set while status is
   // 'insufficient_data' — past the gate, `projection` answers "how much longer?".
@@ -50,15 +73,9 @@ export interface DataGate {
   thresholds: { minViewsPerArm: number; minTotalConversions: number };
 }
 
-// Minimum data before we'll even attempt a verdict — below this, small-sample
-// swings make the z-test meaningless.
-const MIN_VIEWS_PER_ARM = 30;
-const MIN_TOTAL_CONVERSIONS = 5;
-
-export const DATA_GATE_THRESHOLDS = {
-  minViewsPerArm: MIN_VIEWS_PER_ARM,
-  minTotalConversions: MIN_TOTAL_CONVERSIONS,
-};
+// The minimum data gate and the confidence bar both come from options now — see
+// DEFAULT_SIGNIFICANCE_OPTIONS for the values they default to. Below the gate,
+// small-sample swings make the z-test meaningless.
 
 function joinList(parts: string[]): string {
   if (parts.length <= 1) return parts[0] || '';
@@ -71,7 +88,17 @@ export function computeSignificance(
   a: VariantStat,
   b: VariantStat,
   dailyViews?: number, // combined views/day, for the time forecast
+  options?: SignificanceOptions,
 ): SignificanceResult {
+  const { confidenceThreshold: requested, minViewsPerArm, minTotalConversions } = {
+    ...DEFAULT_SIGNIFICANCE_OPTIONS,
+    ...(options || {}),
+  };
+  // Normalise before use so the bar we report is the bar we actually applied.
+  const confidenceThreshold: ConfidenceLevel = Z_BY_LEVEL[requested]
+    ? requested
+    : DEFAULT_SIGNIFICANCE_OPTIONS.confidenceThreshold;
+  const zThreshold = Z_BY_LEVEL[confidenceThreshold];
   const nA = a.views, nB = b.views;
   const xA = a.conversions, xB = b.conversions;
   const rateA = nA > 0 ? xA / nA : 0;
@@ -88,12 +115,12 @@ export function computeSignificance(
     winner,
   };
 
-  if (nA < MIN_VIEWS_PER_ARM || nB < MIN_VIEWS_PER_ARM || xA + xB < MIN_TOTAL_CONVERSIONS) {
+  if (nA < minViewsPerArm || nB < minViewsPerArm || xA + xB < minTotalConversions) {
     // Below the gate the z-test is meaningless, but "not enough data" on its own
     // gives no sense of progress — so report exactly what's still missing.
-    const viewsNeededA = Math.max(0, MIN_VIEWS_PER_ARM - nA);
-    const viewsNeededB = Math.max(0, MIN_VIEWS_PER_ARM - nB);
-    const conversionsNeeded = Math.max(0, MIN_TOTAL_CONVERSIONS - (xA + xB));
+    const viewsNeededA = Math.max(0, minViewsPerArm - nA);
+    const viewsNeededB = Math.max(0, minViewsPerArm - nB);
+    const conversionsNeeded = Math.max(0, minTotalConversions - (xA + xB));
 
     // Time to clear the gate is bounded by whichever constraint is slower. With
     // no conversions yet there's no rate to extrapolate from, so don't guess.
@@ -119,6 +146,7 @@ export function computeSignificance(
       confidence: 0,
       pValue: 1,
       significanceLevel: null,
+      threshold: confidenceThreshold,
       recommendation: missing.length
         ? `Still collecting data — needs ${joinList(missing)} before a verdict is possible${
             daysRemaining != null ? ` (~${daysRemaining} day${daysRemaining === 1 ? '' : 's'} at current traffic)` : ''
@@ -130,7 +158,7 @@ export function computeSignificance(
         viewsNeededB,
         conversionsNeeded,
         daysRemaining,
-        thresholds: DATA_GATE_THRESHOLDS,
+        thresholds: { minViewsPerArm, minTotalConversions },
       },
     };
   }
@@ -141,8 +169,11 @@ export function computeSignificance(
   const z = se > 0 ? (rateB - rateA) / se : 0;
   const pValue = Math.min(1, 2 * (1 - normalCdf(Math.abs(z))));
   const confidence = Math.round((1 - pValue) * 1000) / 10;
-  const level: 95 | 99 | null = pValue < (1 - normalCdf(Z_99)) * 2 ? 99 : Math.abs(z) >= Z_95 ? 95 : null;
-  const significant = Math.abs(z) >= Z_95;
+  const absZ = Math.abs(z);
+  const level = LEVELS.reduce<ConfidenceLevel | null>(
+    (best, l) => (absZ >= Z_BY_LEVEL[l] ? l : best), null,
+  );
+  const significant = absZ >= zThreshold;
 
   let recommendation: string;
   let projection: SignificanceResult['projection'] = null;
@@ -152,13 +183,14 @@ export function computeSignificance(
       ? `Variant B is the winner with ${confidence}% confidence${base.relativeLift ? ` (${base.relativeLift > 0 ? '+' : ''}${base.relativeLift}% lift)` : ''}. Safe to ship it.`
       : `The control (A) is winning with ${confidence}% confidence — the change didn't help. Safe to stop.`;
   } else {
-    recommendation = 'No significant difference yet — keep it running or increase traffic.';
+    recommendation = `No significant difference yet — ${confidence}% confidence against a ${confidenceThreshold}% bar. Keep it running or increase traffic.`;
     // Estimate additional sample needed to detect the CURRENT observed effect at
-    // 95% confidence / 80% power, then how long that takes at recent traffic.
+    // the configured confidence / 80% power, then how long that takes at recent
+    // traffic.
     const diff = Math.abs(rateB - rateA);
     if (diff > 0) {
       const nPerArm = Math.ceil(
-        Math.pow(Z_95 + Z_POWER_80, 2) * (rateA * (1 - rateA) + rateB * (1 - rateB)) / (diff * diff),
+        Math.pow(zThreshold + Z_POWER_80, 2) * (rateA * (1 - rateA) + rateB * (1 - rateB)) / (diff * diff),
       );
       const visitorsNeeded = Math.max(0, nPerArm * 2 - (nA + nB));
       const daysRemaining = dailyViews && dailyViews > 0 ? Math.ceil(visitorsNeeded / dailyViews) : null;
@@ -172,6 +204,7 @@ export function computeSignificance(
     confidence,
     pValue: Math.round(pValue * 10000) / 10000,
     significanceLevel: level,
+    threshold: confidenceThreshold,
     recommendation,
     projection,
     dataGate: null,
