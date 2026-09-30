@@ -11,6 +11,7 @@ import { sendViaSes } from '../services/ses';
 import { getEmailConfig, invalidateEmailConfigCache, EmailConfig } from '../services/emailConfig';
 import { resolveAudienceMembers } from '../utils/audienceMembers';
 import { encryptSecret, isEncryptionConfigured } from '../utils/crypto';
+import { wrapLinksForClickTracking } from '../utils/emailClickTracking';
 
 const router = express.Router();
 
@@ -489,7 +490,7 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     // Build one SMTP transporter for the whole campaign (SendGrid is per-request HTTP).
     const campaignTransporter = cfg.provider === 'smtp' ? await createTransporter(emailSettings) : null;
 
-    // Absolute base for the open-tracking pixel (works behind Railway's proxy).
+    // Absolute base for the open pixel + click redirects (works behind Railway's proxy).
     const base = `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
 
     // Tag every link with campaign UTMs once, so email-driven form fills attribute
@@ -513,8 +514,10 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
           .replace(/\[Last Name\]/g, member.lastName || '')
           .replace(/\[Member Name\]/g, `${member.firstName} ${member.lastName}`.trim());
 
-        // Per-recipient open-tracking pixel.
+        // Per-recipient click tracking (links redirect via /api/tracking/click)
+        // and open-tracking pixel.
         const token = randomBytes(16).toString('hex');
+        personalizedBody = wrapLinksForClickTracking(personalizedBody, base, token);
         personalizedBody += `<img src="${base}/api/tracking/open/${token}" width="1" height="1" style="display:none" alt="">`;
 
         await deliver(cfg, {
@@ -539,7 +542,7 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
       }
     }
 
-    // Persist send totals + mark completed (opens accrue via the pixel endpoint).
+    // Persist send totals + mark completed (opens/clicks accrue via the tracking endpoints).
     await query(
       `UPDATE campaigns SET sent = ?, delivered = ?, status = 'completed',
          opens = 0, "openRate" = 0, "sentAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,

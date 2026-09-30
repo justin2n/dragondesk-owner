@@ -1249,14 +1249,18 @@ const DragonDeskEngage = () => {
     const sentCampaigns = campaigns.filter((c) => (c.sent || 0) > 0 || c.status === 'completed');
     const totalSent = sentCampaigns.reduce((s, c) => s + (c.sent || 0), 0);
     const totalOpens = sentCampaigns.reduce((s, c) => s + (c.opens || 0), 0);
+    const totalClicks = sentCampaigns.reduce((s, c) => s + (c.clicks || 0), 0);
     const totalConversions = sentCampaigns.reduce((s, c) => s + (c.conversions || 0), 0);
     const avgOpenRate = totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0;
+    const avgClickRate = totalSent > 0 ? Math.round((totalClicks / totalSent) * 100) : 0;
 
     const kpis = [
       { label: 'Campaigns Sent', value: String(sentCampaigns.length) },
       { label: 'Emails Sent', value: totalSent.toLocaleString() },
       { label: 'Total Opens', value: totalOpens.toLocaleString() },
       { label: 'Avg Open Rate', value: `${avgOpenRate}%` },
+      { label: 'Total Clicks', value: totalClicks.toLocaleString() },
+      { label: 'Avg CTR', value: `${avgClickRate}%` },
       { label: 'Conversions', value: totalConversions.toLocaleString() },
     ];
 
@@ -1280,16 +1284,17 @@ const DragonDeskEngage = () => {
       };
     };
 
-    const buckets = new Map<string, { label: string; sent: number; opens: number; conversions: number }>();
+    const buckets = new Map<string, { label: string; sent: number; opens: number; clicks: number; conversions: number }>();
     for (const c of sentCampaigns) {
       const when = c.sentAt || c.updatedAt || c.createdAt;
       if (!when) continue;
       const d = new Date(when);
       if (isNaN(d.getTime())) continue;
       const { key, label } = bucketOf(d);
-      const row = buckets.get(key) || { label, sent: 0, opens: 0, conversions: 0 };
+      const row = buckets.get(key) || { label, sent: 0, opens: 0, clicks: 0, conversions: 0 };
       row.sent += c.sent || 0;
       row.opens += c.opens || 0;
+      row.clicks += c.clicks || 0;
       row.conversions += c.conversions || 0;
       buckets.set(key, row);
     }
@@ -1299,6 +1304,7 @@ const DragonDeskEngage = () => {
         month: v.label,
         sent: v.sent,
         opens: v.opens,
+        clicks: v.clicks,
         conversions: v.conversions,
         openRate: v.sent > 0 ? Math.round((v.opens / v.sent) * 100) : 0,
       }));
@@ -1362,7 +1368,7 @@ const DragonDeskEngage = () => {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 28 }}>
                 <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
-                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Volume — Sent vs Opens</div>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Volume — Sent, Opens, Clicks</div>
                   <ResponsiveContainer width="100%" height={240}>
                     <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
@@ -1372,6 +1378,7 @@ const DragonDeskEngage = () => {
                       <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
                       <Line type="monotone" dataKey="sent" name="Emails Sent" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
                       <Line type="monotone" dataKey="opens" name="Opens" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="clicks" name="Clicks" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -1411,6 +1418,8 @@ const DragonDeskEngage = () => {
                     <th style={thR}>Sent</th>
                     <th style={thR}>Opens</th>
                     <th style={thR}>Open Rate</th>
+                    <th style={thR}>Clicks</th>
+                    <th style={thR}>CTR</th>
                     <th style={thR}>Conversions</th>
                   </tr>
                 </thead>
@@ -1421,6 +1430,8 @@ const DragonDeskEngage = () => {
                       <td style={tdR}>{(c.sent || 0).toLocaleString()}</td>
                       <td style={tdR}>{(c.opens || 0).toLocaleString()}</td>
                       <td style={tdR}>{c.openRate || 0}%</td>
+                      <td style={tdR}>{(c.clicks || 0).toLocaleString()}</td>
+                      <td style={tdR}>{c.clickThroughRate || 0}%</td>
                       <td style={tdR}>{c.conversions || 0}</td>
                     </tr>
                   ))}
@@ -1428,7 +1439,7 @@ const DragonDeskEngage = () => {
               </table>
             </div>
             <p style={{ fontSize: '0.8rem', color: dim, marginTop: 12 }}>
-              Opens depend on the recipient's mail client loading images, so they're a floor, not exact. Click tracking (CTR) is not yet available.
+              Opens depend on the recipient's mail client loading images, so they're a floor, not exact. Clicks and CTR count unique recipients who clicked any link, for campaigns sent after click tracking was enabled.
             </p>
           </>
         )}

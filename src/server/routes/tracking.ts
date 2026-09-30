@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { parseUtms } from '../utils/attribution';
+import { verifyClickSignature } from '../utils/emailClickTracking';
 
 const router = Router();
 
@@ -32,6 +33,35 @@ router.get('/open/:token', async (req: Request, res: Response) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.end(OPEN_PIXEL);
+});
+
+// ─── Email click tracking ───────────────────────────────────────────────────
+// Links in campaign emails are rewritten to this endpoint (see
+// utils/emailClickTracking.ts). Records the click on the recipient row, then
+// redirects to the original destination. A click implies an open, so openedAt is
+// also set — covers mail clients that block the pixel.
+router.get('/click/:token', async (req: Request, res: Response) => {
+  const { token } = req.params;
+  const url = typeof req.query.u === 'string' ? req.query.u : '';
+  const sig = typeof req.query.s === 'string' ? req.query.s : '';
+  if (!/^https?:\/\//i.test(url) || !verifyClickSignature(token, url, sig)) {
+    res.status(404).send('Link not found');
+    return;
+  }
+  try {
+    await pool.query(
+      `UPDATE campaign_recipients
+         SET "clickCount" = "clickCount" + 1,
+             "clickedAt" = COALESCE("clickedAt", CURRENT_TIMESTAMP),
+             "openedAt" = COALESCE("openedAt", CURRENT_TIMESTAMP)
+       WHERE token = $1`,
+      [token]
+    );
+  } catch {
+    // swallow — the redirect must always happen
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, url);
 });
 
 // ─── Tracking script ────────────────────────────────────────────────────────

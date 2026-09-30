@@ -12,7 +12,7 @@ router.use(authenticateToken);
 // open rate, and so conversions stay current as member statuses change.
 const RANK = (col: string) => `(CASE ${col} WHEN 'trialer' THEN 1 WHEN 'member' THEN 2 ELSE 0 END)`;
 
-interface CampaignMetric { sent: number; opens: number; openRate: number; trialers: number; members: number; conversions: number; }
+interface CampaignMetric { sent: number; opens: number; openRate: number; clicks: number; clickThroughRate: number; trialers: number; members: number; conversions: number; }
 
 async function campaignMetrics(campaignIds: number[]): Promise<Map<number, CampaignMetric>> {
   const map = new Map<number, CampaignMetric>();
@@ -22,6 +22,7 @@ async function campaignMetrics(campaignIds: number[]): Promise<Map<number, Campa
     `SELECT cr."campaignId",
        COUNT(*)::int AS sent,
        COUNT(*) FILTER (WHERE cr."openedAt" IS NOT NULL)::int AS opens,
+       COUNT(*) FILTER (WHERE cr."clickedAt" IS NOT NULL)::int AS clicks,
        COUNT(*) FILTER (WHERE m."accountStatus" = 'trialer' AND ${advanced})::int AS trialers,
        COUNT(*) FILTER (WHERE m."accountStatus" = 'member'  AND ${advanced})::int AS members
      FROM campaign_recipients cr
@@ -32,8 +33,9 @@ async function campaignMetrics(campaignIds: number[]): Promise<Map<number, Campa
   );
   for (const row of result.rows) {
     const openRate = row.sent > 0 ? Math.round((row.opens / row.sent) * 100) : 0;
+    const clickThroughRate = row.sent > 0 ? Math.round((row.clicks / row.sent) * 100) : 0;
     map.set(row.campaignId, {
-      sent: row.sent, opens: row.opens, openRate,
+      sent: row.sent, opens: row.opens, openRate, clicks: row.clicks, clickThroughRate,
       trialers: row.trialers, members: row.members, conversions: row.trialers + row.members,
     });
   }
@@ -44,7 +46,7 @@ async function campaignMetrics(campaignIds: number[]): Promise<Map<number, Campa
 function mergeMetrics(campaigns: any[], metrics: Map<number, CampaignMetric>) {
   for (const c of campaigns) {
     const m = metrics.get(c.id);
-    if (m) { c.sent = m.sent; c.opens = m.opens; c.openRate = m.openRate; c.trialers = m.trialers; c.members = m.members; c.conversions = m.conversions; }
+    if (m) { c.sent = m.sent; c.opens = m.opens; c.openRate = m.openRate; c.clicks = m.clicks; c.clickThroughRate = m.clickThroughRate; c.trialers = m.trialers; c.members = m.members; c.conversions = m.conversions; }
   }
 }
 
@@ -70,7 +72,7 @@ router.get('/', async (req: AuthRequest, res) => {
 
     const campaigns = await query(sql, params);
 
-    // Overlay live metrics (sent/opens/openRate/conversions) from recipients.
+    // Overlay live metrics (sent/opens/clicks/rates/conversions) from recipients.
     mergeMetrics(campaigns, await campaignMetrics(campaigns.map((c: any) => c.id)));
 
     res.json(campaigns);

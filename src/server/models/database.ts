@@ -1150,6 +1150,8 @@ async function initializeDatabase() {
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign ON campaign_recipients("campaignId")`);
+    await client.query(`ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS "clickedAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS "clickCount" INTEGER DEFAULT 0`);
 
     // ── Marketing attribution (first-touch) ────────────────────────────────────
     // One row per member, written once (first touch) and never overwritten, so a
