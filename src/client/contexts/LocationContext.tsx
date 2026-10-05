@@ -51,7 +51,10 @@ export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const savedLocationId = localStorage.getItem('selectedLocationId');
       const savedIsAllLocations = localStorage.getItem('isAllLocations');
 
-      if (savedIsAllLocations === 'true') {
+      // With one location the selector is hidden (Layout), so a saved single-
+      // location preference could never be changed back — and it would hide
+      // records with no location, like website leads. Always show everything.
+      if (data.length <= 1 || savedIsAllLocations === 'true') {
         setIsAllLocations(true);
         setSelectedLocationState(null);
       } else if (savedLocationId) {
