@@ -5,6 +5,8 @@ import { BrandingProvider } from './contexts/BrandingContext';
 import { LocationProvider } from './contexts/LocationContext';
 import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Audiences from './pages/Audiences';
@@ -78,6 +80,8 @@ const AppRoutes = () => {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/forgot" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
+      <Route path="/reset" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
 
       {/* Public lead form - no authentication required */}
       <Route path="/lead-form" element={<LeadForm />} />

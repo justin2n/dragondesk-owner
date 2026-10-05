@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { pool } from './models/database';
 import authRoutes from './routes/auth';
+import passwordResetRoutes from './routes/passwordReset';
 import membersRoutes from './routes/members';
 import audiencesRoutes from './routes/audiences';
 import campaignsRoutes from './routes/campaigns';
@@ -97,6 +98,8 @@ pool.query(`
 `).catch(() => {});
 
 const app = express();
+// Behind Railway's proxy: use the client IP from X-Forwarded-For (rate limits).
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
@@ -110,6 +113,7 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', passwordResetRoutes);
 app.use('/api/members', membersRoutes);
 app.use('/api/audiences', audiencesRoutes);
 app.use('/api/campaigns', campaignsRoutes);

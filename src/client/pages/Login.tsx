@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranding } from '../contexts/BrandingContext';
 import defaultLogo from '../assets/dragondesk-logo.png';
@@ -70,6 +71,9 @@ const Login = () => {
           <button type="submit" className={styles.submitBtn} disabled={isLoading}>
             {isLoading ? 'Logging in...' : 'Login'}
           </button>
+          <p style={{ textAlign: 'center', marginTop: '1rem', fontSize: 14 }}>
+            <Link to="/forgot" style={{ color: 'var(--color-red-light)' }}>Forgot your password?</Link>
+          </p>
         </form>
       </div>
     </div>
