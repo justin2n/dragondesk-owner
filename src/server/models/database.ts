@@ -99,6 +99,17 @@ async function initializeDatabase() {
       )
     `);
 
+    // Password reset tokens — only the SHA-256 is stored (routes/passwordReset.ts).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        "tokenHash" TEXT PRIMARY KEY,
+        "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        "expiresAt" TIMESTAMPTZ NOT NULL,
+        "usedAt" TIMESTAMPTZ,
+        "createdAt" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Members table
     await client.query(`
       CREATE TABLE IF NOT EXISTS members (
