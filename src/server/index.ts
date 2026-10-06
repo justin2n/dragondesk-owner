@@ -271,6 +271,19 @@ app.use('/api/tracking', (req, res, next) => {
   next();
 });
 
+// Same for public lead capture: marketing sites (e.g. the apex dragondeskapp.com,
+// which the subdomain rule below does not match) must pass the preflight.
+app.use('/api/public', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // CORS — allow any subdomain of dragondeskapp.com plus explicit overrides
 const extraOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
