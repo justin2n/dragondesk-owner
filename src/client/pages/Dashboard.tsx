@@ -18,16 +18,13 @@ import styles from './Dashboard.module.css';
 const Dashboard = () => {
   const { selectedLocation, isAllLocations } = useLocation();
   const [stats, setStats] = useState({
-    totalMembers: 0,
     leads: 0,
-    trialers: 0,
-    members: 0,
-    bjj: 0,
-    muayThai: 0,
-    taekwondo: 0,
+    activeTrials: 0,
+    accountHolders: 0,
+    participants: 0,
     programCounts: {} as Record<string, number>,
   });
-  const [programs, setPrograms] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
+  const [programs, setPrograms] = useState<{ id: number; name: string; isActive: boolean; ageGroup?: 'Kids' | 'Adult' | 'All' }[]>([]);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
@@ -50,22 +47,18 @@ const Dashboard = () => {
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
       const members: Member[] = await api.get(`/members?locationId=${locationId}`);
 
-      // Count active members per programType
-      const programCounts: Record<string, number> = {};
-      for (const m of members) {
-        if (m.accountStatus === 'member' && m.programType) {
-          programCounts[m.programType] = (programCounts[m.programType] || 0) + 1;
-        }
-      }
+      // Active members per program come from the member_programs junction
+      // (participants belong to 1+ programs; a participant counts in each).
+      const programCounts: Record<string, number> = await api
+        .get(`/programs/member-counts?locationId=${locationId}`)
+        .catch(() => ({}));
 
       setStats({
-        totalMembers: members.length,
         leads: members.filter(m => m.accountStatus === 'lead').length,
-        trialers: members.filter(m => m.accountStatus === 'trialer').length,
-        members: members.filter(m => m.accountStatus === 'member').length,
-        bjj: 0,
-        muayThai: 0,
-        taekwondo: 0,
+        activeTrials: members.filter(m => m.accountStatus === 'trialer').length,
+        // Account holder is the default when memberType is unset (legacy rows).
+        accountHolders: members.filter(m => (m.memberType || 'account_holder') === 'account_holder').length,
+        participants: members.filter(m => m.memberType === 'participant').length,
         programCounts,
       });
     } catch (error) {
@@ -133,16 +126,6 @@ const Dashboard = () => {
       <div className={styles.statsGrid}>
         <div className={styles.statCard}>
           <div className={styles.statIcon}>
-            <MembersIcon size={40} />
-          </div>
-          <div className={styles.statInfo}>
-            <div className={styles.statValue}>{stats.totalMembers}</div>
-            <div className={styles.statLabel}>Total Profiles</div>
-          </div>
-        </div>
-
-        <div className={styles.statCard}>
-          <div className={styles.statIcon}>
             <AudiencesIcon size={40} />
           </div>
           <div className={styles.statInfo}>
@@ -153,21 +136,31 @@ const Dashboard = () => {
 
         <div className={styles.statCard}>
           <div className={styles.statIcon}>
-            <AddPersonIcon size={40} />
+            <StarIcon size={40} />
           </div>
           <div className={styles.statInfo}>
-            <div className={styles.statValue}>{stats.trialers}</div>
-            <div className={styles.statLabel}>Trialers</div>
+            <div className={styles.statValue}>{stats.activeTrials}</div>
+            <div className={styles.statLabel}>Active Trials</div>
           </div>
         </div>
 
         <div className={styles.statCard}>
           <div className={styles.statIcon}>
-            <StarIcon size={40} />
+            <MembersIcon size={40} />
           </div>
           <div className={styles.statInfo}>
-            <div className={styles.statValue}>{stats.members}</div>
-            <div className={styles.statLabel}>Members</div>
+            <div className={styles.statValue}>{stats.accountHolders}</div>
+            <div className={styles.statLabel}>Account Holders</div>
+          </div>
+        </div>
+
+        <div className={styles.statCard}>
+          <div className={styles.statIcon}>
+            <AddPersonIcon size={40} />
+          </div>
+          <div className={styles.statInfo}>
+            <div className={styles.statValue}>{stats.participants}</div>
+            <div className={styles.statLabel}>Participants</div>
           </div>
         </div>
       </div>
@@ -191,22 +184,36 @@ const Dashboard = () => {
           </div>
         </div>
         <div className={styles.programsGrid}>
-          {programs.filter(p => {
-            const name = p.name.toLowerCase();
-            if (ageFilter === 'Kids') return name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
-            return !name.includes('kids') && !name.includes("children's") && !name.includes('youth') && !name.includes('young');
-          }).map(p => (
-            <div key={p.id} className={styles.programCard}>
-              <div className={styles.programHeader}><h3>{p.name}</h3></div>
-              <div className={styles.programValue}>{stats.programCounts[p.name] || 0}</div>
-              <div className={styles.programLabel}>Active Members</div>
-            </div>
-          ))}
-          {programs.length === 0 && (
-            <div className={styles.programCard}>
-              <div className={styles.programLabel}>No programs configured. Add programs in Settings.</div>
-            </div>
-          )}
+          {(() => {
+            const visible = programs.filter(p => {
+              // Hide dead tiles: a program with nobody enrolled adds only clutter.
+              if ((stats.programCounts[p.name] || 0) === 0) return false;
+              // Age group is configured per program in Settings. Fall back to the
+              // old name heuristic for programs not yet categorised, and always
+              // show 'All' programs in both tabs.
+              if (p.ageGroup === 'All') return true;
+              if (p.ageGroup === 'Kids' || p.ageGroup === 'Adult') return p.ageGroup === ageFilter;
+              const name = p.name.toLowerCase();
+              const looksKids = name.includes('kids') || name.includes("children's") || name.includes('youth') || name.includes('young');
+              return ageFilter === 'Kids' ? looksKids : !looksKids;
+            });
+            if (visible.length === 0) {
+              return (
+                <div className={styles.programCard}>
+                  <div className={styles.programLabel}>
+                    No {ageFilter === 'Kids' ? 'kids' : 'adult'} programs with active members.
+                  </div>
+                </div>
+              );
+            }
+            return visible.map(p => (
+              <div key={p.id} className={styles.programCard}>
+                <div className={styles.programHeader}><h3>{p.name}</h3></div>
+                <div className={styles.programValue}>{stats.programCounts[p.name] || 0}</div>
+                <div className={styles.programLabel}>Active Members</div>
+              </div>
+            ));
+          })()}
         </div>
       </div>
 

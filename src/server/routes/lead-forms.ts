@@ -1,6 +1,9 @@
+import { serverError } from '../utils/errors';
+import { isValidEmail, normalizeEmail } from '../utils/validate';
 import express from 'express';
-import { query, run, get } from '../models/database';
+import { query, run, get, pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { deriveChannel, hasAttribution, Utms } from '../utils/attribution';
 
 const router = express.Router();
 
@@ -17,7 +20,9 @@ router.post('/submit', async (req, res) => {
       membershipAge,
       notes,
       locationId,
-      source
+      source,
+      visitorId,
+      token: trackingToken,
     } = req.body;
 
     // Validate required fields
@@ -25,17 +30,18 @@ router.post('/submit', async (req, res) => {
       return res.status(400).json({ error: 'First name, last name, and email are required' });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
+    const normalizedEmail = normalizeEmail(email);
 
     // Check if member already exists
-    const existing = await get('SELECT id, accountStatus FROM members WHERE email = ?', [email]);
+    const existing = await get('SELECT id, accountStatus FROM members WHERE email = ?', [normalizedEmail]);
+
+    let memberId: number;
 
     if (existing) {
-      // Update existing member if they're still a lead
+      memberId = existing.id;
       if (existing.accountStatus === 'lead') {
         await run(
           `UPDATE members SET
@@ -50,55 +56,96 @@ router.post('/submit', async (req, res) => {
           WHERE id = ?`,
           [firstName, lastName, phone, programType, membershipAge, notes, locationId, existing.id]
         );
+      }
+    } else {
+      // Create new lead
+      const result = await run(
+        `INSERT INTO members (
+          firstName, lastName, email, phone,
+          accountStatus, accountType, programType, membershipAge,
+          ranking, notes, locationId, tags
+        ) VALUES (?, ?, ?, ?, 'lead', 'basic', ?, ?, 'White Belt', ?, ?, ?)`,
+        [
+          firstName, lastName, normalizedEmail, phone || null,
+          programType || 'Adult BJJ', membershipAge || 'Adult',
+          notes || null, locationId || null,
+          source ? JSON.stringify([source]) : JSON.stringify(['Web Form']),
+        ]
+      );
+      memberId = result.id;
+    }
 
-        return res.status(200).json({
-          success: true,
-          message: 'Lead information updated successfully',
-          leadId: existing.id
-        });
-      } else {
-        // Member already exists and is not a lead
-        return res.status(200).json({
-          success: true,
-          message: 'Thank you! We already have your information.',
-          leadId: existing.id
-        });
+    // Identity resolution: link anonymous visitor to this contact
+    if (visitorId && trackingToken) {
+      const { pool } = await import('../models/database.js');
+      try {
+        // Link by email
+        await pool.query(`
+          INSERT INTO visitor_identities ("visitorId", token, type, value, "memberId")
+          VALUES ($1, $2, 'email', $3, $4)
+          ON CONFLICT ("visitorId", token, type) DO UPDATE SET value = EXCLUDED.value, "memberId" = EXCLUDED."memberId"
+        `, [visitorId, trackingToken, normalizedEmail, memberId]);
+
+        // Link by phone if provided
+        if (phone) {
+          await pool.query(`
+            INSERT INTO visitor_identities ("visitorId", token, type, value, "memberId")
+            VALUES ($1, $2, 'phone', $3, $4)
+            ON CONFLICT ("visitorId", token, type) DO UPDATE SET value = EXCLUDED.value, "memberId" = EXCLUDED."memberId"
+          `, [visitorId, trackingToken, phone, memberId]);
+        }
+      } catch (idErr) {
+        console.error('Identity link error (non-fatal):', idErr);
       }
     }
 
-    // Create new lead
-    const result = await run(
-      `INSERT INTO members (
-        firstName,
-        lastName,
-        email,
-        phone,
-        accountStatus,
-        accountType,
-        programType,
-        membershipAge,
-        ranking,
-        notes,
-        locationId,
-        tags
-      ) VALUES (?, ?, ?, ?, 'lead', 'basic', ?, ?, 'White Belt', ?, ?, ?)`,
-      [
-        firstName,
-        lastName,
-        email,
-        phone || null,
-        programType || 'Adult BJJ',
-        membershipAge || 'Adult',
-        notes || null,
-        locationId || null,
-        source ? JSON.stringify([source]) : JSON.stringify(['Web Form'])
-      ]
-    );
+    // ── First-touch attribution ──────────────────────────────────────────────
+    // Prefer UTMs the form passed (from its URL / _dd_attr cookie); otherwise
+    // fall back to the visitor's first-touch captured by the tracking script.
+    try {
+      let attr: Utms = (req.body.attribution || {}) as Utms;
+      if (!hasAttribution(attr) && visitorId && trackingToken) {
+        const v = await get(
+          'SELECT * FROM tracking_visitors WHERE "visitorId" = ? AND token = ?',
+          [visitorId, trackingToken]
+        );
+        if (v) {
+          attr = {
+            utmSource: v.utmSource, utmMedium: v.utmMedium, utmCampaign: v.utmCampaign,
+            utmTerm: v.utmTerm, utmContent: v.utmContent, gclid: v.gclid, fbclid: v.fbclid,
+            landingPage: v.landingPage, referrer: v.referrer,
+          };
+        }
+      }
+      const channel = deriveChannel(attr);
+      // Write once — first touch wins, never overwritten.
+      await pool.query(
+        `INSERT INTO member_attribution
+           ("memberId","utmSource","utmMedium","utmCampaign","utmTerm","utmContent",gclid,fbclid,channel,"landingPage",referrer)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT ("memberId") DO NOTHING`,
+        [memberId, attr.utmSource || null, attr.utmMedium || null, attr.utmCampaign || null,
+         attr.utmTerm || null, attr.utmContent || null, attr.gclid || null, attr.fbclid || null,
+         channel, attr.landingPage || null, attr.referrer || null]
+      );
+      // Backfill leadSource on the member when it's empty.
+      await pool.query(
+        `UPDATE members SET "leadSource" = $1 WHERE id = $2 AND ("leadSource" IS NULL OR "leadSource" = '')`,
+        [channel, memberId]
+      );
+    } catch (attrErr) {
+      console.error('Attribution capture error (non-fatal):', attrErr);
+    }
 
-    res.status(201).json({
+    const isNew = !existing;
+    res.status(isNew ? 201 : 200).json({
       success: true,
-      message: 'Lead submitted successfully! We will contact you soon.',
-      leadId: result.id
+      message: isNew
+        ? 'Lead submitted successfully! We will contact you soon.'
+        : existing?.accountStatus === 'lead'
+          ? 'Lead information updated successfully'
+          : 'Thank you! We already have your information.',
+      leadId: memberId,
     });
 
   } catch (error: any) {
@@ -132,7 +179,7 @@ router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching form config:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -210,7 +257,7 @@ router.get('/stats', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching form stats:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

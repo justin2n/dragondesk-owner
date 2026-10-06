@@ -15,9 +15,33 @@ interface VariantAnalytics {
   bounceRate: string;
 }
 
+interface Significance {
+  status: 'insufficient_data' | 'not_significant' | 'significant';
+  confidence: number;
+  pValue: number;
+  significanceLevel: 90 | 95 | 99 | null;
+  threshold: 90 | 95 | 99;
+  winner: 'A' | 'B' | null;
+  controlRate: number;
+  treatmentRate: number;
+  relativeLift: number;
+  sample: { a: number; b: number };
+  conversions: { a: number; b: number };
+  recommendation: string;
+  projection: { visitorsNeeded: number; daysRemaining: number | null } | null;
+  dataGate: {
+    viewsNeededA: number;
+    viewsNeededB: number;
+    conversionsNeeded: number;
+    daysRemaining: number | null;
+    thresholds: { minViewsPerArm: number; minTotalConversions: number };
+  } | null;
+}
+
 interface AnalyticsData {
   summary: VariantAnalytics[];
   timeSeries: any[];
+  significance?: Significance | null;
 }
 
 interface ABTestAnalyticsProps {
@@ -96,7 +120,54 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
 
   const variantA = getVariantData('A');
   const variantB = getVariantData('B');
-  const winner = calculateWinner();
+  const sig = analytics.significance || null;
+  // Prefer the statistically-sound winner; fall back to the raw-rate compare.
+  const winner = sig?.status === 'significant' ? sig.winner : calculateWinner();
+
+  const renderSignificance = () => {
+    if (!sig) return null;
+    const cls =
+      sig.status === 'significant' ? styles.sigSignificant :
+      sig.status === 'not_significant' ? styles.sigPending : styles.sigCollecting;
+    const heading =
+      sig.status === 'significant'
+        ? `Statistically significant — ${sig.confidence}% confidence${sig.significanceLevel === 99 ? ' (99% milestone)' : ''}`
+        : sig.status === 'not_significant'
+          ? `Not significant yet — ${sig.confidence}% confidence (need ${sig.threshold}%)`
+          : 'Collecting data';
+    return (
+      <div className={`${styles.sigBanner} ${cls}`}>
+        <div className={styles.sigHead}>
+          <span className={styles.sigDot} />
+          <strong>{heading}</strong>
+        </div>
+        <p className={styles.sigRec}>{sig.recommendation}</p>
+        <div className={styles.sigStats}>
+          <span>A: {sig.controlRate.toFixed(2)}% ({sig.conversions.a}/{sig.sample.a})</span>
+          <span>B: {sig.treatmentRate.toFixed(2)}% ({sig.conversions.b}/{sig.sample.b})</span>
+          {sig.status !== 'insufficient_data' && (
+            <span>Lift: {sig.relativeLift > 0 ? '+' : ''}{sig.relativeLift}%</span>
+          )}
+        </div>
+        {sig.dataGate && (
+          <p className={styles.sigProjection}>
+            Needs {[
+              sig.dataGate.viewsNeededA > 0 ? `${sig.dataGate.viewsNeededA} more visitor${sig.dataGate.viewsNeededA === 1 ? '' : 's'} on A` : null,
+              sig.dataGate.viewsNeededB > 0 ? `${sig.dataGate.viewsNeededB} more visitor${sig.dataGate.viewsNeededB === 1 ? '' : 's'} on B` : null,
+              sig.dataGate.conversionsNeeded > 0 ? `${sig.dataGate.conversionsNeeded} more conversion${sig.dataGate.conversionsNeeded === 1 ? '' : 's'}` : null,
+            ].filter(Boolean).join(', ')} before a verdict is possible
+            {sig.dataGate.daysRemaining != null ? ` (~${sig.dataGate.daysRemaining} day${sig.dataGate.daysRemaining === 1 ? '' : 's'} at current traffic)` : ''}.
+          </p>
+        )}
+        {sig.projection && (
+          <p className={styles.sigProjection}>
+            Prediction: ~{sig.projection.visitorsNeeded.toLocaleString()} more visitors
+            {sig.projection.daysRemaining != null ? ` (~${sig.projection.daysRemaining} day${sig.projection.daysRemaining === 1 ? '' : 's'} at current traffic)` : ''} to reach {sig.threshold}% for the current gap.
+          </p>
+        )}
+      </div>
+    );
+  };
 
   if (compact) {
     // Compact view for cards
@@ -110,7 +181,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </span>
           </div>
           <div className={styles.compactMetric}>
-            <span className={styles.compactLabel}>Leads:</span>
+            <span className={styles.compactLabel}>Conversions:</span>
             <span className={styles.compactValue}>
               {(variantA?.leads || 0) + (variantB?.leads || 0)}
             </span>
@@ -129,6 +200,13 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </span>
           </div>
         </div>
+        {sig && sig.status !== 'insufficient_data' && (
+          <div className={`${styles.compactSig} ${sig.status === 'significant' ? styles.sigSignificant : styles.sigPending}`}>
+            {sig.status === 'significant'
+              ? `Significant · ${sig.confidence}% · ${sig.winner} wins`
+              : `${sig.confidence}% confidence`}
+          </div>
+        )}
       </div>
     );
   }
@@ -140,10 +218,12 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
         <h3 className={styles.title}>Analytics Dashboard</h3>
         {winner && (
           <div className={styles.winnerBadge}>
-            Variant {winner} is winning
+            {sig?.status === 'significant' ? `Variant ${winner} wins` : `Variant ${winner} is ahead`}
           </div>
         )}
       </div>
+
+      {renderSignificance()}
 
       <div className={styles.variantsComparison}>
         {/* Variant A */}
@@ -165,7 +245,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </div>
 
             <div className={styles.metric}>
-              <div className={styles.metricLabel}>Leads</div>
+              <div className={styles.metricLabel}>Conversions</div>
               <div className={styles.metricValue}>{variantA?.leads || 0}</div>
             </div>
 
@@ -217,7 +297,7 @@ const ABTestAnalytics: React.FC<ABTestAnalyticsProps> = ({ testId, testName, com
             </div>
 
             <div className={styles.metric}>
-              <div className={styles.metricLabel}>Leads</div>
+              <div className={styles.metricLabel}>Conversions</div>
               <div className={styles.metricValue}>{variantB?.leads || 0}</div>
             </div>
 

@@ -20,9 +20,15 @@ export interface Location {
 
 export type AccountStatus = 'lead' | 'trialer' | 'member' | 'cancelled';
 
+// DEPRECATED: superseded by membership seats (see MembershipSeat). A contact's
+// plan is no longer a single value — an account holder buys one seat per
+// participant they cover. Retained only for legacy CSV-import rows.
 export type AccountType = 'basic' | 'premium' | 'elite' | 'family';
 
+// Programs are configured in Settings, so this union is only the Dragon Gym
+// defaults — treat any program name as valid.
 export type ProgramType =
+  | (string & {})
   | 'No Program Selected'
   | "Children's Martial Arts"
   | 'Adult BJJ'
@@ -54,16 +60,17 @@ export interface User {
   certifications?: string;
   specialties?: string;
   locationId?: number;
+  mustChangePassword?: boolean;
 }
 
 export interface Member {
   id: number;
   firstName: string;
   lastName: string;
-  email: string;
+  email: string | null;
   phone: string;
-  accountStatus: AccountStatus;
-  accountType: AccountType;
+  accountStatus: AccountStatus;  // the contact's Stage: lead | trialer | member
+  accountType?: AccountType;     // deprecated, see MembershipSeat
   programType: ProgramType | null;
   membershipAge: MembershipAge;
   ranking: string;
@@ -78,8 +85,69 @@ export interface Member {
   memberStartDate?: string;
   pricingPlanId?: number;
   companyName?: string | null;
+  memberType?: 'account_holder' | 'participant';
+  accountHolderId?: number | null;
+  participants?: ParticipantSummary[];
+  accountHolder?: { id: number; firstName: string; lastName: string; email: string | null } | null;
+  // Lead-stage product: what they enquired about (from the lead form).
+  programInterestId?: number | null;
+  // Populated by GET /members/:id.
+  seats?: MembershipSeat[];
+  monthlyCost?: number;           // cents, summed across active seats
+  quickStart?: QuickStartEnrollment | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// One purchased membership license. The account holder pays for it; the
+// participant occupying it trains under it. A family-plan seat has no
+// participant and covers everyone on the account.
+export interface MembershipSeat {
+  id: number;
+  accountHolderId: number;
+  membershipId: number;
+  membershipName: string;
+  participantId: number | null;
+  participantFirstName: string | null;
+  participantLastName: string | null;
+  priceAmount: number;            // cents, snapshotted at purchase
+  isFamilyPlan: boolean;
+  maxProgramsPerParticipant: number | null;  // null = unlimited
+  status: 'active' | 'cancelled';
+  startDate: string;
+  endDate: string | null;
+}
+
+// The Trial-stage product: a priced trial into one program, measured in
+// classes rather than days. Check-ins consume classesUsed; the trial ends when
+// it reaches classesIncluded.
+export interface QuickStartEnrollment {
+  id: number;
+  memberId: number;
+  programId: number | null;
+  programName?: string | null;
+  priceAmount: number;            // cents
+  classesIncluded: number;
+  classesUsed: number;
+  status: 'active' | 'converted' | 'expired';
+  startDate: string;
+  endDate: string | null;         // when it actually finished, not a planned expiry
+}
+
+export interface ParticipantSummary {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string;
+  programType: ProgramType | null;
+  membershipAge: MembershipAge;
+  ranking: string;
+  accountStatus: AccountStatus;
+  memberType: 'participant';
+  trialStartDate?: string;
+  memberStartDate?: string;
+  createdAt: string;
 }
 
 export interface Audience {
@@ -94,8 +162,13 @@ export interface Audience {
 
 export interface AudienceFilter {
   accountStatus?: AccountStatus[];
+  /** @deprecated superseded by membershipId (membership seats). Kept for old saved audiences. */
   accountType?: AccountType[];
   programType?: ProgramType[];
+  /** Lead-stage product: the program a lead enquired about (program ids). */
+  programInterestId?: number[];
+  /** Member-stage product: matches the account holder of an active seat of these membership plans. */
+  membershipId?: number[];
   membershipAge?: MembershipAge[];
   ranking?: string[];
   leadSource?: LeadSource[];
@@ -103,6 +176,7 @@ export interface AudienceFilter {
   locationIds?: number[];
   eventIds?: number[];
   eventAttendanceStatus?: ('registered' | 'attended' | 'no-show' | 'cancelled')[];
+  memberType?: ('account_holder' | 'participant')[];
 }
 
 export interface ChurnMetric {
@@ -130,6 +204,7 @@ export interface Campaign {
   createdBy: number;
   createdAt: string;
   updatedAt: string;
+  sentAt?: string | null;
   // Analytics fields
   sent?: number;
   delivered?: number;
@@ -140,6 +215,7 @@ export interface Campaign {
   leads?: number;
   trialers?: number;
   members?: number;
+  conversions?: number;
 }
 
 export interface ABTest {

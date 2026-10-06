@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import NodeRSA from 'node-rsa';
 import { query, run, get } from '../models/database';
@@ -76,7 +77,7 @@ router.post('/generate', authenticateToken, authorizeAdmin, async (req, res) => 
     });
   } catch (error: any) {
     console.error('Error generating DKIM keys:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -87,7 +88,7 @@ router.get('/config', authenticateToken, authorizeAdmin, async (req, res) => {
     res.json(configs);
   } catch (error: any) {
     console.error('Error fetching DKIM config:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -114,7 +115,7 @@ router.get('/config/:domain', authenticateToken, authorizeAdmin, async (req, res
     res.json({ ...config, dnsRecord });
   } catch (error: any) {
     console.error('Error fetching DKIM config:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -173,7 +174,7 @@ router.post('/verify/:domain', authenticateToken, authorizeAdmin, async (req, re
     }
   } catch (error: any) {
     console.error('Error verifying DKIM DNS:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -191,7 +192,7 @@ router.patch('/config/:domain/toggle', authenticateToken, authorizeAdmin, async 
     res.json({ success: true, message: `DKIM signing ${isActive ? 'enabled' : 'disabled'} for ${domain}` });
   } catch (error: any) {
     console.error('Error toggling DKIM status:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -205,7 +206,7 @@ router.delete('/config/:domain', authenticateToken, authorizeAdmin, async (req, 
     res.json({ success: true, message: 'DKIM configuration deleted successfully' });
   } catch (error: any) {
     console.error('Error deleting DKIM config:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 

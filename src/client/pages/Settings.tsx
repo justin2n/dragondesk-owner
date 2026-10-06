@@ -52,10 +52,279 @@ interface Program {
   id: number;
   name: string;
   description?: string;
+  ageGroup?: 'Kids' | 'Adult' | 'All';
+  // Every martial art has a Quick Start — the priced trial into this program.
+  quickStartPriceAmount?: number | null; // cents
+  // A Quick Start is a number of classes, not a time window.
+  quickStartClassCount?: number | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+interface Membership {
+  id: number;
+  name: string;
+  description?: string;
+  locationId?: number | null;
+  priceAmount?: number | null; // monthly price in cents
+  // One seat covers the whole account rather than a single participant.
+  isFamilyPlan?: boolean;
+  // How many programs one seat covers; null = unlimited.
+  maxProgramsPerParticipant?: number | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── POS Settings Panel ────────────────────────────────────────────────────────
+
+interface PosProduct {
+  id: number; name: string; description?: string; price: number;
+  sku?: string; category: string; isActive: boolean; inventory: number | null;
+}
+interface PosTransaction {
+  id: number; createdAt: string; total: number; paymentMethod: string;
+  status: string; memberName?: string;
+  items: { productName: string; quantity: number; subtotal: number }[];
+}
+
+const POSSettingsPanel: React.FC = () => {
+  const { toast } = useToast();
+  const [posTab, setPosTab] = useState<'products' | 'transactions'>('products');
+  const [products, setProducts] = useState<PosProduct[]>([]);
+  const [transactions, setTransactions] = useState<PosTransaction[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingTx, setLoadingTx] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<PosProduct | null>(null);
+  const [productForm, setProductForm] = useState({
+    name: '', description: '', price: '', sku: '', category: 'General',
+    inventory: '', isActive: true,
+  });
+
+  useEffect(() => { loadProducts(); }, []);
+
+  const loadProducts = async () => {
+    setLoadingProducts(true);
+    try {
+      const data = await api.get('/pos/products?activeOnly=false');
+      setProducts(data);
+    } finally { setLoadingProducts(false); }
+  };
+
+  const loadTransactions = async () => {
+    setLoadingTx(true);
+    try {
+      const data = await api.get('/pos/transactions?limit=100');
+      setTransactions(data);
+    } finally { setLoadingTx(false); }
+  };
+
+  const openProductModal = (product?: PosProduct) => {
+    if (product) {
+      setEditingProduct(product);
+      setProductForm({
+        name: product.name, description: product.description || '',
+        price: (product.price / 100).toFixed(2), sku: product.sku || '',
+        category: product.category, isActive: product.isActive,
+        inventory: product.inventory != null ? String(product.inventory) : '',
+      });
+    } else {
+      setEditingProduct(null);
+      setProductForm({ name: '', description: '', price: '', sku: '', category: 'General', inventory: '', isActive: true });
+    }
+    setShowProductModal(true);
+  };
+
+  const saveProduct = async () => {
+    if (!productForm.name || !productForm.price) { toast('Name and price are required.', 'error'); return; }
+    const body = {
+      name: productForm.name, description: productForm.description || null,
+      price: Math.round(parseFloat(productForm.price) * 100),
+      sku: productForm.sku || null, category: productForm.category || 'General',
+      isActive: productForm.isActive,
+      inventory: productForm.inventory !== '' ? parseInt(productForm.inventory) : null,
+    };
+    try {
+      if (editingProduct) await api.put(`/pos/products/${editingProduct.id}`, body);
+      else await api.post('/pos/products', body);
+      toast(editingProduct ? 'Product updated.' : 'Product created.', 'success');
+      setShowProductModal(false);
+      loadProducts();
+    } catch (err: any) { toast(err.message || 'Failed to save product.', 'error'); }
+  };
+
+  const deleteProduct = async (id: number) => {
+    try {
+      await api.delete(`/pos/products/${id}`);
+      toast('Product deactivated.', 'success');
+      loadProducts();
+    } catch (err: any) { toast(err.message || 'Failed to delete product.', 'error'); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+        <div>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Point of Sale</h2>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginTop: '0.25rem' }}>
+            Manage products and view sales — open the register at <strong>/pos</strong>
+          </p>
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.75rem' }}>
+        {(['products', 'transactions'] as const).map(t => (
+          <button key={t} onClick={() => { setPosTab(t); if (t === 'transactions') loadTransactions(); }}
+            style={{ padding: '0.4rem 1rem', borderRadius: '6px', border: '1px solid var(--color-border)',
+              background: posTab === t ? 'var(--color-accent)' : 'transparent',
+              color: posTab === t ? '#fff' : 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.875rem' }}>
+            {t === 'products' ? 'Products' : 'Transactions'}
+          </button>
+        ))}
+      </div>
+
+      {/* Products Tab */}
+      {posTab === 'products' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+            <button onClick={() => openProductModal()} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
+              padding: '0.5rem 1rem', borderRadius: '8px', border: 'none',
+              background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>
+              <AddIcon size={15} /> Add Product
+            </button>
+          </div>
+          {loadingProducts ? <p>Loading…</p> : products.length === 0 ? (
+            <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: '2rem' }}>
+              No products yet. Add your first product to get started.
+            </p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+              {products.map(p => (
+                <div key={p.id} style={{ padding: '1rem', background: 'var(--color-bg-secondary)', borderRadius: '10px',
+                  border: '1px solid var(--color-border)', opacity: p.isActive ? 1 : 0.5 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{p.name}</div>
+                      <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>{p.category}{p.sku ? ` · ${p.sku}` : ''}</div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: 'var(--color-accent)' }}>${(p.price / 100).toFixed(2)}</div>
+                  </div>
+                  {p.inventory != null && (
+                    <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: p.inventory <= 3 ? '#f59e0b' : 'var(--color-text-secondary)' }}>
+                      Stock: {p.inventory}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <button onClick={() => openProductModal(p)} style={{ flex: 1, padding: '0.4rem', borderRadius: '6px',
+                      border: '1px solid var(--color-border)', background: 'transparent',
+                      color: 'var(--color-text-primary)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => deleteProduct(p.id)} style={{ padding: '0.4rem 0.75rem', borderRadius: '6px',
+                      border: '1px solid var(--color-border)', background: 'transparent',
+                      color: '#ef4444', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      Deactivate
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Transactions Tab */}
+      {posTab === 'transactions' && (
+        <>
+          {loadingTx ? <p>Loading…</p> : transactions.length === 0 ? (
+            <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: '2rem' }}>No transactions yet.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  {['Date', 'Member', 'Items', 'Total', 'Method', 'Status'].map(h => (
+                    <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: 'left', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map(tx => (
+                  <tr key={tx.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>{new Date(tx.createdAt).toLocaleString()}</td>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>{tx.memberName || '—'}</td>
+                    <td style={{ padding: '0.6rem 0.75rem', color: 'var(--color-text-secondary)' }}>
+                      {tx.items?.map((i: any) => `${i.quantity}× ${i.productName}`).join(', ')}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>${(tx.total / 100).toFixed(2)}</td>
+                    <td style={{ padding: '0.6rem 0.75rem', textTransform: 'capitalize' }}>{tx.paymentMethod}</td>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>
+                      <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem',
+                        background: tx.status === 'completed' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                        color: tx.status === 'completed' ? '#22c55e' : '#ef4444' }}>
+                        {tx.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {/* Product Modal */}
+      {showProductModal && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent} style={{ maxWidth: '440px', padding: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{editingProduct ? 'Edit Product' : 'Add Product'}</h3>
+              <button onClick={() => setShowProductModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--color-text-secondary)' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { label: 'Name *', key: 'name', type: 'text', placeholder: 'Dragon Gym T-Shirt' },
+                { label: 'Price * ($)', key: 'price', type: 'number', placeholder: '29.99' },
+                { label: 'Category', key: 'category', type: 'text', placeholder: 'Apparel' },
+                { label: 'SKU', key: 'sku', type: 'text', placeholder: 'DG-SHIRT-M' },
+                { label: 'Inventory (leave blank for unlimited)', key: 'inventory', type: 'number', placeholder: '50' },
+                { label: 'Description', key: 'description', type: 'text', placeholder: 'Optional description' },
+              ].map(({ label, key, type, placeholder }) => (
+                <div key={key}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '0.25rem' }}>{label}</label>
+                  <input type={type} placeholder={placeholder}
+                    value={(productForm as any)[key]}
+                    onChange={e => setProductForm(f => ({ ...f, [key]: e.target.value }))}
+                    style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: '8px',
+                      border: '1px solid var(--color-border)', background: 'var(--color-bg-primary)',
+                      color: 'var(--color-text-primary)', fontSize: '0.875rem', boxSizing: 'border-box' as const }} />
+                </div>
+              ))}
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={productForm.isActive}
+                  onChange={e => setProductForm(f => ({ ...f, isActive: e.target.checked }))} />
+                Active (visible in POS)
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button onClick={() => setShowProductModal(false)} style={{ flex: 1, padding: '0.6rem', borderRadius: '8px',
+                border: '1px solid var(--color-border)', background: 'transparent',
+                color: 'var(--color-text-secondary)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={saveProduct} style={{ flex: 2, padding: '0.6rem', borderRadius: '8px', border: 'none',
+                background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+                {editingProduct ? 'Save Changes' : 'Add Product'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const Settings = () => {
   const { user } = useAuth();
@@ -76,8 +345,21 @@ const Settings = () => {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [showProgramModal, setShowProgramModal] = useState(false);
   const [editingProgram, setEditingProgram] = useState<Program | null>(null);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [showMembershipModal, setShowMembershipModal] = useState(false);
+  const [editingMembership, setEditingMembership] = useState<Membership | null>(null);
+  // Mirrors the family-plan checkbox so the program-limit field can hide: a
+  // family seat is unlimited by definition, so asking for a limit is nonsense.
+  const [familyPlanChecked, setFamilyPlanChecked] = useState(false);
+  const [unassignedParticipants, setUnassignedParticipants] = useState<{
+    id: number; firstName: string; lastName: string; programType: string | null;
+    accountHolderFirstName: string | null; accountHolderLastName: string | null;
+  }[]>([]);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [reassignFrom, setReassignFrom] = useState<string>('null');
+  const [reassignTo, setReassignTo] = useState<string>('');
+  const [reassignLoading, setReassignLoading] = useState(false);
 
   // MyStudio API Settings
   const [myStudioConfig, setMyStudioConfig] = useState({
@@ -90,8 +372,7 @@ const Settings = () => {
 
   // API Integrations
   const [integrations, setIntegrations] = useState<ApiIntegration[]>([
-    { id: 'sendgrid', name: 'SendGrid (Email)', enabled: false, apiKey: '' },
-    { id: 'twilio', name: 'Twilio (SMS/Voice)', enabled: false, apiKey: '', apiSecret: '', endpoint: '' },
+    // SendGrid lives under Email Settings, Twilio under SMS (Twilio) — not here.
     { id: 'stripe', name: 'Stripe (Payments)', enabled: false, apiKey: '', apiSecret: '' },
     { id: 'google-analytics', name: 'Google Analytics', enabled: false, apiKey: '' },
   ]);
@@ -111,6 +392,43 @@ const Settings = () => {
   const [smtpStatus, setSmtpStatus] = useState<any>(null);
   const [smtpTestStatus, setSmtpTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [smtpTestMessage, setSmtpTestMessage] = useState('');
+
+  // Twilio SMS config (DB-encrypted, self-serve)
+  const [smsSettings, setSmsSettings] = useState<any>(null);
+
+  // DragonDesk: Optimize — experiment settings
+  const [optimizeForm, setOptimizeForm] = useState({
+    confidenceThreshold: 95,
+    minViewsPerArm: 30,
+    minTotalConversions: 5,
+  });
+  const [optimizeDefaults, setOptimizeDefaults] = useState({
+    confidenceThreshold: 95,
+    minViewsPerArm: 30,
+    minTotalConversions: 5,
+  });
+  const [optimizeLevels, setOptimizeLevels] = useState<number[]>([90, 95, 99]);
+  const [optimizeSaving, setOptimizeSaving] = useState(false);
+  const [smsForm, setSmsForm] = useState({ accountSid: '', authToken: '', fromNumber: '', messagingServiceSid: '' });
+  const [smsSaving, setSmsSaving] = useState(false);
+
+  // Editable email provider config (default provider, SendGrid key, from-address)
+  const [emailSettings, setEmailSettings] = useState<any>(null);
+  const [emailForm, setEmailForm] = useState({
+    provider: 'smtp', fromEmail: '', fromName: '',
+    sendgridApiKey: '', mailgunApiKey: '', mailgunDomain: '', mailgunRegion: 'us',
+    sesAccessKeyId: '', sesSecretAccessKey: '', sesRegion: '',
+  });
+  const [emailSaving, setEmailSaving] = useState(false);
+
+  // SendGrid Admin Email Settings
+  const [sgStatus, setSgStatus] = useState<any>(null);
+  const [sgTestStatus, setSgTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [sgTestMessage, setSgTestMessage] = useState('');
+  const [sgTestEmail, setSgTestEmail] = useState('');
+  const [sgAlert, setSgAlert] = useState({ to: '', subject: '', message: '' });
+  const [sgAlertStatus, setSgAlertStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [sgAlertMessage, setSgAlertMessage] = useState('');
 
   // Social Media Accounts
   const [socialAccounts, setSocialAccounts] = useState<any[]>([]);
@@ -207,11 +525,14 @@ const Settings = () => {
     loadUsers();
     loadLocationsData();
     loadPrograms();
+    loadMemberships();
+    loadUnassignedParticipants();
     loadSettings();
     loadSocialAccounts();
     loadDkimConfigs();
     loadBillingSettings();
     loadPricingPlans();
+    loadOptimizeSettings();
     api.get('/webhooks/keys').then(setWebhookKeys).catch(() => {});
   }, []);
 
@@ -245,9 +566,14 @@ const Settings = () => {
   const handleSaveProgram = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const form = e.target as any;
       const programData = {
-        name: (e.target as any).programName.value,
-        description: (e.target as any).programDescription.value || '',
+        name: form.programName.value,
+        description: form.programDescription.value || '',
+        ageGroup: form.programAgeGroup?.value || 'All',
+        // Prices are stored in cents so rounding never drifts.
+        quickStartPriceAmount: Math.round(parseFloat(form.programQuickStartPrice?.value || '0') * 100) || 0,
+        quickStartClassCount: parseInt(form.programQuickStartClasses?.value || '3') || 3,
       };
 
       if (editingProgram) {
@@ -278,6 +604,32 @@ const Settings = () => {
     }
   };
 
+  // Remove every program with no members, enrollments, or lead interest — the
+  // "dead" programs that clutter the dashboard and dropdowns. Shows the list and
+  // confirms first, since deletion is irreversible.
+  const handlePruneUnusedPrograms = async () => {
+    try {
+      const unused: { id: number; name: string }[] = await api.get('/programs/unused');
+      if (unused.length === 0) {
+        toast('No unused programs to remove — every program has members or interest.', 'success');
+        return;
+      }
+      const names = unused.map(u => u.name).join(', ');
+      const ok = await confirm({
+        title: `Remove ${unused.length} unused program${unused.length === 1 ? '' : 's'}?`,
+        message: `These have no members, enrollments, or lead interest and will be permanently deleted:\n\n${names}`,
+        confirmLabel: 'Remove them',
+        danger: true,
+      });
+      if (!ok) return;
+      const result = await api.post('/programs/prune-unused', {});
+      await loadPrograms();
+      showSaveMessage(`Removed ${result.deleted} unused program${result.deleted === 1 ? '' : 's'}.`);
+    } catch (error: any) {
+      toast(error.message || 'Failed to remove unused programs', 'error');
+    }
+  };
+
   const handleToggleProgramActive = async (program: Program) => {
     try {
       await api.put(`/programs/${program.id}`, { isActive: !program.isActive });
@@ -285,6 +637,66 @@ const Settings = () => {
       showSaveMessage(`Program ${!program.isActive ? 'activated' : 'deactivated'} successfully!`);
     } catch (error: any) {
       toast(error.message || 'Failed to update program status', 'error');
+    }
+  };
+
+  const loadMemberships = async () => {
+    try {
+      const response = await api.get('/memberships');
+      setMemberships(response);
+    } catch (error) {
+      console.error('Failed to load memberships:', error);
+    }
+  };
+
+  const loadUnassignedParticipants = async () => {
+    try {
+      const response = await api.get('/members/participants/unassigned');
+      setUnassignedParticipants(response);
+    } catch (error) {
+      console.error('Failed to load unassigned participants:', error);
+    }
+  };
+
+  const handleSaveMembership = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const form = e.target as any;
+      const priceDollars = parseFloat(form.membershipPrice.value);
+      const isFamilyPlan = !!form.membershipIsFamily?.checked;
+      const limitRaw = parseInt(form.membershipProgramLimit?.value || '');
+      const data = {
+        name: form.membershipName.value,
+        description: form.membershipDescription.value || '',
+        priceAmount: Number.isFinite(priceDollars) ? Math.round(priceDollars * 100) : 0,
+        isFamilyPlan,
+        // Blank or family plan means unlimited programs.
+        maxProgramsPerParticipant: isFamilyPlan || !Number.isFinite(limitRaw) ? null : limitRaw,
+      };
+      if (editingMembership) {
+        await api.put(`/memberships/${editingMembership.id}`, data);
+        showSaveMessage('Membership updated successfully!');
+      } else {
+        await api.post('/memberships', data);
+        showSaveMessage('Membership created successfully!');
+      }
+      setShowMembershipModal(false);
+      setEditingMembership(null);
+      await loadMemberships();
+    } catch (error: any) {
+      toast(error.message || 'Failed to save membership', 'error');
+    }
+  };
+
+  const handleDeleteMembership = async (id: number) => {
+    if (!await confirm({ title: 'Delete Membership', message: 'Delete this membership plan? Plans with active seats cannot be deleted \u2014 deactivate them instead.', confirmLabel: 'Delete', danger: true })) return;
+    try {
+      await api.delete(`/memberships/${id}`);
+      await loadMemberships();
+      await loadPrograms();
+      showSaveMessage('Membership deleted successfully!');
+    } catch (error: any) {
+      toast(error.message || 'Failed to delete membership', 'error');
     }
   };
 
@@ -303,7 +715,8 @@ const Settings = () => {
 
     const savedIntegrations = localStorage.getItem('integrations');
     if (savedIntegrations) {
-      setIntegrations(JSON.parse(savedIntegrations));
+      // Drop any legacy SendGrid entry — it now lives under Email Settings.
+      setIntegrations(JSON.parse(savedIntegrations).filter((i: ApiIntegration) => i.id !== 'sendgrid' && i.id !== 'twilio'));
     }
 
     const savedDatabase = localStorage.getItem('databaseConfig');
@@ -313,6 +726,21 @@ const Settings = () => {
 
     // Load server-side SMTP config status
     api.get('/email/config-status').then(setSmtpStatus).catch(() => {});
+    api.get('/sms-campaigns/config').then((d: any) => {
+      setSmsSettings(d);
+      setSmsForm({ accountSid: d.accountSid || '', authToken: '', fromNumber: d.fromNumber || '', messagingServiceSid: d.messagingServiceSid || '' });
+    }).catch(() => {});
+    api.get('/email/settings').then((d: any) => {
+      setEmailSettings(d);
+      setEmailForm({
+        provider: d.provider || 'smtp', fromEmail: d.fromEmail || '', fromName: d.fromName || '',
+        sendgridApiKey: '', mailgunApiKey: '',
+        mailgunDomain: d.mailgunDomain || '', mailgunRegion: d.mailgunRegion || 'us',
+        sesAccessKeyId: d.sesAccessKeyId || '', sesSecretAccessKey: '', sesRegion: d.sesRegion || '',
+      });
+    }).catch(() => {});
+    // Load SendGrid admin email config status
+    api.get('/admin-emails/config-status').then(setSgStatus).catch(() => {});
   };
 
   const handleThemeChange = (newTheme: 'light' | 'dark') => {
@@ -399,6 +827,83 @@ const Settings = () => {
     showSaveMessage('Database settings saved');
   };
 
+  const handleSaveSmsSettings = async () => {
+    setSmsSaving(true);
+    try {
+      const payload: any = {
+        accountSid: smsForm.accountSid,
+        fromNumber: smsForm.fromNumber,
+        messagingServiceSid: smsForm.messagingServiceSid,
+      };
+      if (smsForm.authToken.trim()) payload.authToken = smsForm.authToken.trim();
+      const updated = await api.put('/sms-campaigns/config', payload);
+      setSmsSettings(updated);
+      setSmsForm({ accountSid: updated.accountSid || '', authToken: '', fromNumber: updated.fromNumber || '', messagingServiceSid: updated.messagingServiceSid || '' });
+      showSaveMessage('SMS settings saved');
+    } catch (error: any) {
+      toast(error.message || 'Failed to save SMS settings', 'error');
+    } finally {
+      setSmsSaving(false);
+    }
+  };
+
+  const loadOptimizeSettings = async () => {
+    try {
+      const data = await api.get('/optimize-settings');
+      setOptimizeForm(data.settings);
+      setOptimizeDefaults(data.defaults);
+      setOptimizeLevels(data.allowedConfidenceLevels);
+    } catch {
+      // Non-fatal: the form keeps the defaults it was initialised with.
+    }
+  };
+
+  const handleSaveOptimizeSettings = async () => {
+    setOptimizeSaving(true);
+    try {
+      const { settings } = await api.put('/optimize-settings', optimizeForm);
+      setOptimizeForm(settings);
+      showSaveMessage('Optimize settings saved');
+    } catch (error: any) {
+      toast(error.message || 'Failed to save Optimize settings', 'error');
+    } finally {
+      setOptimizeSaving(false);
+    }
+  };
+
+  const handleSaveEmailSettings = async () => {
+    setEmailSaving(true);
+    try {
+      // Only send API keys when the admin actually typed a new one.
+      const payload: any = {
+        provider: emailForm.provider,
+        fromEmail: emailForm.fromEmail,
+        fromName: emailForm.fromName,
+        mailgunDomain: emailForm.mailgunDomain,
+        mailgunRegion: emailForm.mailgunRegion,
+        sesAccessKeyId: emailForm.sesAccessKeyId,
+        sesRegion: emailForm.sesRegion,
+      };
+      if (emailForm.sendgridApiKey.trim()) payload.sendgridApiKey = emailForm.sendgridApiKey.trim();
+      if (emailForm.mailgunApiKey.trim()) payload.mailgunApiKey = emailForm.mailgunApiKey.trim();
+      if (emailForm.sesSecretAccessKey.trim()) payload.sesSecretAccessKey = emailForm.sesSecretAccessKey.trim();
+
+      const updated = await api.put('/email/settings', payload);
+      setEmailSettings(updated);
+      setEmailForm({
+        provider: updated.provider || 'smtp', fromEmail: updated.fromEmail || '', fromName: updated.fromName || '',
+        sendgridApiKey: '', mailgunApiKey: '',
+        mailgunDomain: updated.mailgunDomain || '', mailgunRegion: updated.mailgunRegion || 'us',
+        sesAccessKeyId: updated.sesAccessKeyId || '', sesSecretAccessKey: '', sesRegion: updated.sesRegion || '',
+      });
+      showSaveMessage('Email settings saved');
+    } catch (error: any) {
+      toast(error.message || 'Failed to save email settings', 'error');
+    } finally {
+      setEmailSaving(false);
+    }
+  };
+
   const handleTestSmtpConnection = async () => {
     setSmtpTestStatus('testing');
     setSmtpTestMessage('Testing connection...');
@@ -421,6 +926,41 @@ const Settings = () => {
       setSmtpTestStatus('idle');
       setSmtpTestMessage('');
     }, 5000);
+  };
+
+  const handleSendgridTest = async () => {
+    setSgTestStatus('testing');
+    setSgTestMessage('Sending test email...');
+    try {
+      const to = sgTestEmail || (user as any)?.email || '';
+      const response = await api.post('/admin-emails/send-test', { to });
+      setSgTestStatus('success');
+      setSgTestMessage(response.message || 'Test email sent successfully.');
+    } catch (err: any) {
+      setSgTestStatus('error');
+      setSgTestMessage(`Failed: ${err.message || 'Could not send test email'}`);
+    }
+    setTimeout(() => { setSgTestStatus('idle'); setSgTestMessage(''); }, 6000);
+  };
+
+  const handleSendgridAlert = async () => {
+    if (!sgAlert.to || !sgAlert.subject || !sgAlert.message) {
+      setSgAlertStatus('error');
+      setSgAlertMessage('All fields are required.');
+      return;
+    }
+    setSgAlertStatus('sending');
+    setSgAlertMessage('Sending alert...');
+    try {
+      await api.post('/admin-emails/send-alert', sgAlert);
+      setSgAlertStatus('success');
+      setSgAlertMessage('Alert sent successfully.');
+      setSgAlert({ to: '', subject: '', message: '' });
+    } catch (err: any) {
+      setSgAlertStatus('error');
+      setSgAlertMessage(`Failed: ${err.message || 'Could not send alert'}`);
+    }
+    setTimeout(() => { setSgAlertStatus('idle'); setSgAlertMessage(''); }, 6000);
   };
 
   // Billing/Stripe Settings Functions
@@ -904,6 +1444,21 @@ const Settings = () => {
     }
   };
 
+  const handleReassignMembers = async () => {
+    if (!reassignTo) return;
+    setReassignLoading(true);
+    try {
+      const fromLocationId = reassignFrom === 'null' ? null : parseInt(reassignFrom);
+      const result = await api.post('/locations/reassign-members', { fromLocationId, toLocationId: parseInt(reassignTo) });
+      toast(`${result.updated} member(s) reassigned successfully`, 'success');
+      loadLocations();
+    } catch (error: any) {
+      toast(error.message || 'Failed to reassign members', 'error');
+    } finally {
+      setReassignLoading(false);
+    }
+  };
+
   const tabGroups = [
     {
       label: 'General',
@@ -916,16 +1471,41 @@ const Settings = () => {
       label: 'Gym Settings',
       tabs: [
         { id: 'locations', label: 'Locations' },
+        { id: 'memberships', label: 'Membership Plans' },
         { id: 'programs', label: 'Programs' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Engage',
+      tabs: [
+        { id: 'email', label: 'Email Settings' },
+        { id: 'sms', label: 'SMS (Twilio)' },
+        { id: 'admin-email', label: 'Admin Email' },
+        { id: 'dkim', label: 'DKIM Authentication' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Social',
+      tabs: [
+        { id: 'social', label: 'Social Accounts' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Optimize',
+      tabs: [
+        { id: 'optimize', label: 'Experiment Settings' },
+      ]
+    },
+    {
+      label: 'DragonDesk: Outreach',
+      tabs: [
+        { id: 'outreach', label: 'Telephony' },
       ]
     },
     {
       label: 'Integrations',
       tabs: [
         { id: 'mystudio', label: 'MyStudio API' },
-        { id: 'email', label: 'Email Settings' },
-        { id: 'dkim', label: 'DKIM Authentication' },
-        { id: 'social', label: 'Social Settings' },
         { id: 'integrations', label: 'API Integrations' },
         { id: 'leadforms', label: 'Lead Forms' },
       ]
@@ -934,7 +1514,7 @@ const Settings = () => {
       label: 'Billing',
       tabs: [
         { id: 'stripe', label: 'Stripe Payments' },
-        { id: 'pricing', label: 'Pricing Plans' },
+        { id: 'pos', label: 'Point of Sale' },
       ]
     },
     {
@@ -1181,6 +1761,39 @@ const Settings = () => {
                 )}
               </div>
 
+              {locations.length > 1 && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subsectionTitle}>Reassign Members</h3>
+                  <p className={styles.sectionDesc}>Move all members from one location to another. Use "Unassigned" as the source to catch members with no location set.</p>
+                  <div className={styles.formRow}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label}>From</label>
+                      <select className={styles.input} value={reassignFrom} onChange={e => setReassignFrom(e.target.value)}>
+                        <option value="null">Unassigned (no location)</option>
+                        {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label}>To</label>
+                      <select className={styles.input} value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
+                        <option value="">Select destination...</option>
+                        {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label}>&nbsp;</label>
+                      <button
+                        className={styles.primaryBtn}
+                        onClick={handleReassignMembers}
+                        disabled={!reassignTo || reassignLoading}
+                      >
+                        {reassignLoading ? 'Reassigning...' : 'Reassign'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {showLocationModal && (
                 <div className={styles.modal}>
                   <div className={styles.modalContent}>
@@ -1355,6 +1968,146 @@ const Settings = () => {
             </div>
           )}
 
+          {/* Memberships Management */}
+          {activeTab === 'memberships' && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h2 className={styles.sectionTitle}>Membership Plans</h2>
+                  <p className={styles.sectionDesc}>
+                    The paid plans account holders subscribe to. Each plan's monthly price drives the financial metrics in DragonDesk: Analytics.
+                  </p>
+                </div>
+                <button onClick={() => { setEditingMembership(null); setFamilyPlanChecked(false); setShowMembershipModal(true); }} className={styles.primaryBtn}>
+                  <AddIcon size={20} />
+                  Add Membership Plan
+                </button>
+              </div>
+
+              <div className={styles.locationsList}>
+                {memberships.map((membership) => (
+                  <div key={membership.id} className={styles.locationCard}>
+                    <div className={styles.locationInfo} style={{ flex: 1 }}>
+                      <div className={styles.locationHeader}>
+                        <h3 className={styles.locationName}>{membership.name}</h3>
+                        <div className={styles.locationBadges}>
+                          <span className={styles.primaryBadge}>
+                            ${((membership.priceAmount || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo
+                          </span>
+                          {membership.isFamilyPlan && <span className={styles.primaryBadge}>Family</span>}
+                          {!membership.isActive && <span className={styles.inactiveBadge}>Inactive</span>}
+                        </div>
+                      </div>
+                      {membership.description && (
+                        <p className={styles.locationAddress}>{membership.description}</p>
+                      )}
+                      <div style={{ marginTop: '0.75rem' }}>
+                        <p className={styles.sectionDesc} style={{ margin: 0 }}>
+                          {membership.isFamilyPlan
+                            ? 'One seat covers every participant on the account, in unlimited programs.'
+                            : `One seat per participant, covering ${
+                                membership.maxProgramsPerParticipant == null
+                                  ? 'unlimited programs'
+                                  : `${membership.maxProgramsPerParticipant} program${membership.maxProgramsPerParticipant === 1 ? '' : 's'}`
+                              }.`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className={styles.locationActions}>
+                      <button onClick={() => { setEditingMembership(membership); setFamilyPlanChecked(!!membership.isFamilyPlan); setShowMembershipModal(true); }} className={styles.editBtn}>
+                        <EditIcon size={18} /> Edit
+                      </button>
+                      <button onClick={() => handleDeleteMembership(membership.id)} className={styles.deleteBtn}>
+                        <DeleteIcon size={18} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {memberships.length === 0 && (
+                  <div className={styles.emptyState}>
+                    <p>No membership plans yet. Add your first plan to get started!</p>
+                  </div>
+                )}
+              </div>
+
+              {showMembershipModal && (
+                <div className={styles.modal}>
+                  <div className={styles.modalContent}>
+                    <div className={styles.modalHeader}>
+                      <h2>{editingMembership ? 'Edit Membership Plan' : 'Add New Membership Plan'}</h2>
+                      <button onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.closeBtn}>×</button>
+                    </div>
+                    <form onSubmit={handleSaveMembership}>
+                      <div className={styles.modalBody}>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Membership Name *</label>
+                          <input type="text" name="membershipName" defaultValue={editingMembership?.name || ''} className={styles.input} placeholder="e.g., Family Plan" required />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Monthly Price ($) *</label>
+                          <input
+                            type="number"
+                            name="membershipPrice"
+                            min="0"
+                            step="0.01"
+                            defaultValue={editingMembership?.priceAmount != null ? (editingMembership.priceAmount / 100).toFixed(2) : ''}
+                            className={styles.input}
+                            placeholder="e.g., 149.00"
+                            required
+                          />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Description</label>
+                          <textarea name="membershipDescription" defaultValue={editingMembership?.description || ''} className={styles.textarea} placeholder="Brief description" rows={3} />
+                        </div>
+
+                        {/* Entitlement: how many programs one seat covers, and
+                            whether a single seat covers the whole household. */}
+                        <div className={styles.formGroup}>
+                          <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input
+                              type="checkbox"
+                              name="membershipIsFamily"
+                              defaultChecked={editingMembership?.isFamilyPlan || false}
+                              onChange={(e) => setFamilyPlanChecked(e.target.checked)}
+                            />
+                            Family plan
+                          </label>
+                          <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                            One seat at this price covers every participant on the account, each in unlimited programs.
+                            Without this, the account holder buys one seat per participant.
+                          </p>
+                        </div>
+
+                        {!familyPlanChecked && (
+                          <div className={styles.formGroup}>
+                            <label className={styles.label}>Programs Per Participant</label>
+                            <input
+                              type="number"
+                              name="membershipProgramLimit"
+                              min="1"
+                              step="1"
+                              defaultValue={editingMembership?.maxProgramsPerParticipant ?? 1}
+                              className={styles.input}
+                              placeholder="Leave blank for unlimited"
+                            />
+                            <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                              How many martial arts one seat covers. Leave blank for unlimited.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      <div className={styles.modalActions}>
+                        <button type="button" onClick={() => { setShowMembershipModal(false); setEditingMembership(null); }} className={styles.secondaryBtn}>Cancel</button>
+                        <button type="submit" className={styles.saveBtn}>{editingMembership ? 'Update Membership Plan' : 'Create Membership Plan'}</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Programs Management */}
           {activeTab === 'programs' && (
             <div className={styles.section}>
@@ -1365,16 +2118,21 @@ const Settings = () => {
                     Manage your martial arts programs and disciplines.
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEditingProgram(null);
-                    setShowProgramModal(true);
-                  }}
-                  className={styles.primaryBtn}
-                >
-                  <AddIcon size={20} />
-                  Add Program
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button onClick={handlePruneUnusedPrograms} className={styles.secondaryBtn}>
+                    Remove Unused
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingProgram(null);
+                      setShowProgramModal(true);
+                    }}
+                    className={styles.primaryBtn}
+                  >
+                    <AddIcon size={20} />
+                    Add Program
+                  </button>
+                </div>
               </div>
 
               <div className={styles.locationsList}>
@@ -1384,6 +2142,11 @@ const Settings = () => {
                       <div className={styles.locationHeader}>
                         <h3 className={styles.locationName}>{program.name}</h3>
                         <div className={styles.locationBadges}>
+                          <span className={styles.primaryBadge}>{program.ageGroup || 'All'}</span>
+                          <span className={styles.primaryBadge}>
+                            Quick Start ${((program.quickStartPriceAmount || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            {' '}/ {program.quickStartClassCount || 3} classes
+                          </span>
                           {!program.isActive && (
                             <span className={styles.inactiveBadge}>Inactive</span>
                           )}
@@ -1428,6 +2191,38 @@ const Settings = () => {
                 )}
               </div>
 
+              {/* Participants not linked to a program offering */}
+              {unassignedParticipants.length > 0 && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subsectionTitle}>
+                    Participants Without a Program ({unassignedParticipants.length})
+                  </h3>
+                  <p className={styles.sectionDesc}>
+                    These participants have no matching program offering (blank, "No Program Selected",
+                    or a program name not in the list above). Set their program on the contact to assign them.
+                  </p>
+                  <div className={styles.locationsList}>
+                    {unassignedParticipants.map((p) => (
+                      <div key={p.id} className={styles.locationCard} style={{ padding: '0.75rem 1rem' }}>
+                        <div className={styles.locationInfo}>
+                          <span className={styles.locationName} style={{ fontSize: '0.95rem' }}>
+                            {p.firstName} {p.lastName}
+                          </span>
+                          {(p.accountHolderFirstName || p.accountHolderLastName) && (
+                            <p className={styles.locationAddress} style={{ margin: 0 }}>
+                              Account holder: {p.accountHolderFirstName} {p.accountHolderLastName}
+                            </p>
+                          )}
+                        </div>
+                        <span className={styles.inactiveBadge}>
+                          {p.programType || 'No program'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {showProgramModal && (
                 <div className={styles.modal}>
                   <div className={styles.modalContent}>
@@ -1468,6 +2263,49 @@ const Settings = () => {
                             rows={3}
                           />
                         </div>
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Age Group</label>
+                          <select name="programAgeGroup" defaultValue={editingProgram?.ageGroup || 'All'} className={styles.input}>
+                            <option value="All">All Ages</option>
+                            <option value="Kids">Kids</option>
+                            <option value="Adult">Adult</option>
+                          </select>
+                        </div>
+
+                        {/* Every martial art starts with a Quick Start trial, so
+                            the offer lives on the program itself. */}
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Quick Start Price ($)</label>
+                          <input
+                            type="number"
+                            name="programQuickStartPrice"
+                            min="0"
+                            step="0.01"
+                            defaultValue={editingProgram?.quickStartPriceAmount != null
+                              ? (editingProgram.quickStartPriceAmount / 100).toFixed(2)
+                              : '0.00'}
+                            className={styles.input}
+                            placeholder="e.g., 99.00"
+                          />
+                          <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                            What a trialer pays to start this program. Feeds Quick Start revenue in DragonDesk: Analytics.
+                          </p>
+                        </div>
+
+                        <div className={styles.formGroup}>
+                          <label className={styles.label}>Quick Start Classes</label>
+                          <input
+                            type="number"
+                            name="programQuickStartClasses"
+                            min="1"
+                            step="1"
+                            defaultValue={editingProgram?.quickStartClassCount ?? 3}
+                            className={styles.input}
+                          />
+                          <p className={styles.sectionDesc} style={{ marginTop: '0.35rem' }}>
+                            How many classes the trial includes. It ends once they're used up, however long that takes.
+                          </p>
+                        </div>
                       </div>
 
                       <div className={styles.modalActions}>
@@ -1492,7 +2330,6 @@ const Settings = () => {
             </div>
           )}
 
-          {/* MyStudio API Configuration */}
           {activeTab === 'mystudio' && (
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>MyStudio API Integration</h2>
@@ -1572,9 +2409,209 @@ const Settings = () => {
           {/* Email/SMTP Settings */}
           {activeTab === 'email' && (
             <div className={styles.section}>
-              <h2 className={styles.sectionTitle}>Email Settings (SMTP)</h2>
+              <h2 className={styles.sectionTitle}>Email Settings</h2>
               <p className={styles.sectionDesc}>
-                SMTP credentials are managed via server environment variables. Set these in your Railway project variables to configure email sending.
+                Pick your email service provider, then fill in that provider's settings. SendGrid and Mailgun can be configured here with your own account and domain; SMTP credentials are managed via Railway environment variables.
+              </p>
+
+              {/* Editable provider config */}
+              <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Email Service Provider</label>
+                    <select
+                      value={emailForm.provider}
+                      onChange={(e) => setEmailForm({ ...emailForm, provider: e.target.value })}
+                      className={styles.input}
+                    >
+                      <option value="smtp">SMTP{emailSettings?.smtpConfigured ? '' : ' (not configured)'}</option>
+                      <option value="sendgrid">SendGrid{emailSettings?.sendgridConfigured ? '' : ' (needs API key + from)'}</option>
+                      <option value="mailgun">Mailgun{emailSettings?.mailgunConfigured ? '' : ' (needs API key + domain)'}</option>
+                      <option value="ses">Amazon SES{emailSettings?.sesConfigured ? '' : ' (needs access keys + region)'}</option>
+                    </select>
+                  </div>
+                </div>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>From Email</label>
+                    <input
+                      type="email"
+                      value={emailForm.fromEmail}
+                      onChange={(e) => setEmailForm({ ...emailForm, fromEmail: e.target.value })}
+                      className={styles.input}
+                      placeholder="e.g., hello@yourgym.com (must be on your verified domain)"
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>From Name</label>
+                    <input
+                      type="text"
+                      value={emailForm.fromName}
+                      onChange={(e) => setEmailForm({ ...emailForm, fromName: e.target.value })}
+                      className={styles.input}
+                      placeholder="e.g., Your Gym"
+                    />
+                  </div>
+                </div>
+
+                {/* SendGrid-specific */}
+                {emailForm.provider === 'sendgrid' && (
+                  <div className={styles.formRow}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label}>
+                        SendGrid API Key {emailSettings?.sendgridApiKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                      </label>
+                      <input
+                        type="password"
+                        value={emailForm.sendgridApiKey}
+                        onChange={(e) => setEmailForm({ ...emailForm, sendgridApiKey: e.target.value })}
+                        className={styles.input}
+                        placeholder={emailSettings?.sendgridApiKey ? '••••••••  (leave blank to keep current key)' : 'SG.xxxxx…'}
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Mailgun-specific */}
+                {emailForm.provider === 'mailgun' && (
+                  <>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>
+                          Mailgun API Key {emailSettings?.mailgunApiKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                        </label>
+                        <input
+                          type="password"
+                          value={emailForm.mailgunApiKey}
+                          onChange={(e) => setEmailForm({ ...emailForm, mailgunApiKey: e.target.value })}
+                          className={styles.input}
+                          placeholder={emailSettings?.mailgunApiKey ? '••••••••  (leave blank to keep current key)' : 'key-xxxxx…'}
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>Mailgun Sending Domain</label>
+                        <input
+                          type="text"
+                          value={emailForm.mailgunDomain}
+                          onChange={(e) => setEmailForm({ ...emailForm, mailgunDomain: e.target.value })}
+                          className={styles.input}
+                          placeholder="e.g., mg.yourgym.com"
+                        />
+                      </div>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>Region</label>
+                        <select
+                          value={emailForm.mailgunRegion}
+                          onChange={(e) => setEmailForm({ ...emailForm, mailgunRegion: e.target.value })}
+                          className={styles.input}
+                        >
+                          <option value="us">US</option>
+                          <option value="eu">EU</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Amazon SES-specific */}
+                {emailForm.provider === 'ses' && (
+                  <>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>AWS Access Key ID</label>
+                        <input
+                          type="text"
+                          value={emailForm.sesAccessKeyId}
+                          onChange={(e) => setEmailForm({ ...emailForm, sesAccessKeyId: e.target.value })}
+                          className={styles.input}
+                          placeholder="AKIA…"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>Region</label>
+                        <input
+                          type="text"
+                          value={emailForm.sesRegion}
+                          onChange={(e) => setEmailForm({ ...emailForm, sesRegion: e.target.value })}
+                          className={styles.input}
+                          placeholder="e.g., us-east-1"
+                        />
+                      </div>
+                    </div>
+                    <div className={styles.formRow}>
+                      <div className={styles.formGroup}>
+                        <label className={styles.label}>
+                          AWS Secret Access Key {emailSettings?.sesSecretAccessKey && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                        </label>
+                        <input
+                          type="password"
+                          value={emailForm.sesSecretAccessKey}
+                          onChange={(e) => setEmailForm({ ...emailForm, sesSecretAccessKey: e.target.value })}
+                          className={styles.input}
+                          placeholder={emailSettings?.sesSecretAccessKey ? '••••••••  (leave blank to keep current key)' : 'wJalrXUtn…'}
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {emailSettings && !emailSettings.encryptionConfigured && emailForm.provider !== 'smtp' && (
+                  <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
+                    Set APP_ENCRYPTION_KEY (Railway) before saving an API key — it's encrypted at rest.
+                  </span>
+                )}
+
+                <div className={styles.buttonGroup}>
+                  <button onClick={handleSaveEmailSettings} className={styles.saveBtn} disabled={emailSaving}>
+                    {emailSaving ? 'Saving…' : 'Save Email Settings'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Use your own domain — provider-specific steps */}
+              {emailForm.provider === 'sendgrid' && (
+                <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                  <h3 className={styles.subsectionTitle}>Use your own domain (SendGrid)</h3>
+                  <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>In your SendGrid account: <strong>Settings → Sender Authentication → Authenticate Your Domain</strong>.</li>
+                    <li>Add the CNAME records SendGrid gives you to your domain's DNS, then verify.</li>
+                    <li>Create an API key (Mail Send permission) and paste it above.</li>
+                    <li>Set <strong>From Email</strong> to an address on that authenticated domain.</li>
+                  </ol>
+                </div>
+              )}
+              {emailForm.provider === 'mailgun' && (
+                <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                  <h3 className={styles.subsectionTitle}>Use your own domain (Mailgun)</h3>
+                  <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>In Mailgun: <strong>Sending → Domains → Add New Domain</strong> (e.g. <code>mg.yourgym.com</code>).</li>
+                    <li>Add the DNS records Mailgun provides (TXT/SPF/DKIM + MX) to your domain, then verify.</li>
+                    <li>Copy your <strong>Sending API key</strong> (Mailgun → API Keys) and paste it above.</li>
+                    <li>Enter the sending domain, pick your region (US/EU), and set <strong>From Email</strong> to an address on that domain.</li>
+                  </ol>
+                </div>
+              )}
+              {emailForm.provider === 'ses' && (
+                <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                  <h3 className={styles.subsectionTitle}>Use your own domain (Amazon SES)</h3>
+                  <ol className={styles.sectionDesc} style={{ paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>In the AWS SES console (your chosen region): <strong>Verified identities → Create identity</strong> and verify your domain (add the DKIM CNAMEs to DNS) or a single email address.</li>
+                    <li>If your account is in the SES sandbox, request <strong>production access</strong> to send to unverified recipients.</li>
+                    <li>Create an IAM user with the <strong>ses:SendEmail</strong> permission and generate an access key. Paste the Access Key ID + Secret Access Key above and set the Region (e.g. <code>us-east-1</code>).</li>
+                    <li>Set <strong>From Email</strong> to a verified SES identity (an address on your verified domain).</li>
+                  </ol>
+                </div>
+              )}
+
+              <h3 className={styles.subsectionTitle}>SMTP (environment variables)</h3>
+              <p className={styles.sectionDesc}>
+                SMTP credentials are set in your Railway project variables.
               </p>
 
               <div className={styles.envVarTable}>
@@ -1636,6 +2673,176 @@ const Settings = () => {
                 <div className={styles.warning}>
                   <WarningIcon size={20} />
                   <span>SMTP is not fully configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables.</span>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* SMS (Twilio) */}
+          {activeTab === 'sms' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>SMS (Twilio)</h2>
+              <p className={styles.sectionDesc}>
+                Configure your own Twilio account to send SMS campaigns. Credentials are encrypted at rest.
+              </p>
+
+              <div className={styles.subsection} style={{ marginBottom: 24 }}>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Account SID</label>
+                    <input type="text" value={smsForm.accountSid} onChange={(e) => setSmsForm({ ...smsForm, accountSid: e.target.value })}
+                      className={styles.input} placeholder="AC…" autoComplete="off" />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>
+                      Auth Token {smsSettings?.authToken && <span className={styles.configured}>(set — leave blank to keep)</span>}
+                    </label>
+                    <input type="password" value={smsForm.authToken} onChange={(e) => setSmsForm({ ...smsForm, authToken: e.target.value })}
+                      className={styles.input} placeholder={smsSettings?.authToken ? '••••••••  (leave blank to keep)' : 'Twilio auth token'} autoComplete="off" />
+                  </div>
+                </div>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>From Number</label>
+                    <input type="text" value={smsForm.fromNumber} onChange={(e) => setSmsForm({ ...smsForm, fromNumber: e.target.value })}
+                      className={styles.input} placeholder="+15551234567" />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Messaging Service SID <span className={styles.helpText}>(optional)</span></label>
+                    <input type="text" value={smsForm.messagingServiceSid} onChange={(e) => setSmsForm({ ...smsForm, messagingServiceSid: e.target.value })}
+                      className={styles.input} placeholder="MG… (overrides From Number)" />
+                  </div>
+                </div>
+                {smsSettings && !smsSettings.encryptionConfigured && (
+                  <span className={styles.notSet} style={{ fontSize: '0.85rem' }}>
+                    Set APP_ENCRYPTION_KEY (Railway) before saving the auth token — it's encrypted at rest.
+                  </span>
+                )}
+                <div className={styles.buttonGroup}>
+                  <button onClick={handleSaveSmsSettings} className={styles.saveBtn} disabled={smsSaving}>
+                    {smsSaving ? 'Saving…' : 'Save SMS Settings'}
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.infoBox}>
+                <h4>Compliance &amp; setup</h4>
+                <ul style={{ paddingLeft: 18, lineHeight: 1.7, margin: 0 }}>
+                  <li>Campaigns automatically append "Reply STOP to opt out" and suppress anyone who has opted out.</li>
+                  <li>In Twilio, point your number's <strong>Messaging → inbound webhook</strong> to <code>{`${window.location.origin}/api/sms-campaigns/inbound`}</code> so STOP/START stay in sync.</li>
+                  <li>US A2P 10DLC brand/campaign registration is required by carriers — complete it in your Twilio console.</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* SendGrid Admin Email */}
+          {activeTab === 'admin-email' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>SendGrid Admin Emails</h2>
+              <p className={styles.sectionDesc}>
+                Used for platform alerts and welcome emails with login credentials when you create a new user.
+                Configured via Railway environment variables — your SendGrid API key never touches the browser.
+              </p>
+
+              <div className={styles.envVarTable}>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SENDGRID_API_KEY</div>
+                  <div className={styles.envVarValue}>
+                    {sgStatus?.apiKeySet
+                      ? <span className={styles.configured}>configured</span>
+                      : <span className={styles.notSet}>not set</span>}
+                  </div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SENDGRID_FROM_EMAIL</div>
+                  <div className={styles.envVarValue}>{sgStatus?.fromEmail || <span className={styles.notSet}>not set</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>SENDGRID_FROM_NAME</div>
+                  <div className={styles.envVarValue}>{sgStatus?.fromName || <span className={styles.notSet}>DragonDesk (default)</span>}</div>
+                </div>
+                <div className={styles.envVarRow}>
+                  <div className={styles.envVarName}>APP_URL</div>
+                  <div className={styles.envVarValue}><span className={styles.notSet}>used in welcome email login link</span></div>
+                </div>
+              </div>
+
+              {!sgStatus?.configured && (
+                <div className={styles.warning} style={{ marginTop: 16 }}>
+                  <WarningIcon size={20} />
+                  <span>SendGrid is not configured. Add SENDGRID_API_KEY and SENDGRID_FROM_EMAIL to your Railway environment variables.</span>
+                </div>
+              )}
+
+              <h3 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600, marginTop: 28, marginBottom: 12 }}>Send Test Email</h3>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', maxWidth: 480 }}>
+                <input
+                  type="email"
+                  placeholder="Recipient email address"
+                  value={sgTestEmail}
+                  onChange={e => setSgTestEmail(e.target.value)}
+                  className={styles.input}
+                  style={{ flex: 1 }}
+                  disabled={!sgStatus?.configured}
+                />
+                <button
+                  onClick={handleSendgridTest}
+                  className={styles.testBtn}
+                  disabled={sgTestStatus === 'testing' || !sgStatus?.configured}
+                >
+                  {sgTestStatus === 'testing' ? 'Sending...' : 'Send Test'}
+                </button>
+              </div>
+              {sgTestMessage && (
+                <div className={sgTestStatus === 'success' ? styles.successMessage : sgTestStatus === 'error' ? styles.errorMessage : styles.infoMessage} style={{ marginTop: 10 }}>
+                  {sgTestMessage}
+                </div>
+              )}
+
+              <h3 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600, marginTop: 32, marginBottom: 12 }}>Send Platform Alert</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: 14 }}>
+                Send a one-off admin notification to any address — useful for urgent platform alerts.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+                <input
+                  type="email"
+                  placeholder="Recipient email"
+                  value={sgAlert.to}
+                  onChange={e => setSgAlert(a => ({ ...a, to: e.target.value }))}
+                  className={styles.input}
+                  disabled={!sgStatus?.configured}
+                />
+                <input
+                  type="text"
+                  placeholder="Subject"
+                  value={sgAlert.subject}
+                  onChange={e => setSgAlert(a => ({ ...a, subject: e.target.value }))}
+                  className={styles.input}
+                  disabled={!sgStatus?.configured}
+                />
+                <textarea
+                  placeholder="Message body"
+                  value={sgAlert.message}
+                  onChange={e => setSgAlert(a => ({ ...a, message: e.target.value }))}
+                  className={styles.input}
+                  rows={4}
+                  style={{ resize: 'vertical' }}
+                  disabled={!sgStatus?.configured}
+                />
+                <button
+                  onClick={handleSendgridAlert}
+                  className={styles.saveBtn}
+                  disabled={sgAlertStatus === 'sending' || !sgStatus?.configured}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {sgAlertStatus === 'sending' ? 'Sending...' : 'Send Alert'}
+                </button>
+              </div>
+              {sgAlertMessage && (
+                <div className={sgAlertStatus === 'success' ? styles.successMessage : sgAlertStatus === 'error' ? styles.errorMessage : styles.infoMessage} style={{ marginTop: 10 }}>
+                  {sgAlertMessage}
                 </div>
               )}
             </div>
@@ -2049,6 +3256,98 @@ const Settings = () => {
           )}
 
           {/* Theme Settings */}
+          {/* DragonDesk: Optimize — experiment settings */}
+          {activeTab === 'optimize' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>Experiment Settings</h2>
+              <p className={styles.sectionDesc}>
+                Controls how DragonDesk: Optimize decides an experiment has a winner. These apply
+                to every experience across the studio.
+              </p>
+
+              <div className={styles.form}>
+                <div className={styles.formGroup}>
+                  <label className={styles.label}>Confidence Threshold</label>
+                  <select
+                    className={styles.select}
+                    value={optimizeForm.confidenceThreshold}
+                    onChange={e => setOptimizeForm({ ...optimizeForm, confidenceThreshold: Number(e.target.value) })}
+                  >
+                    {optimizeLevels.map(level => (
+                      <option key={level} value={level}>
+                        {level}%{level === optimizeDefaults.confidenceThreshold ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <span className={styles.helpText}>
+                    How sure the test must be before a variant is called the winner. A lower bar
+                    calls winners sooner but is wrong more often; 95% is the usual standard.
+                  </span>
+                </div>
+
+                <h3 className={styles.subsectionTitle}>Minimum Data</h3>
+                <p className={styles.sectionDesc}>
+                  Below these amounts no verdict is attempted at all — small samples swing too
+                  wildly to mean anything. Until an experience clears both, its analytics show how
+                  much more data it needs.
+                </p>
+
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Visitors per Variant</label>
+                    <input
+                      type="number" min="1" max="100000" className={styles.input}
+                      value={optimizeForm.minViewsPerArm}
+                      onChange={e => setOptimizeForm({ ...optimizeForm, minViewsPerArm: Number(e.target.value) })}
+                    />
+                    <span className={styles.helpText}>Default: {optimizeDefaults.minViewsPerArm}</span>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label className={styles.label}>Total Conversions</label>
+                    <input
+                      type="number" min="1" max="100000" className={styles.input}
+                      value={optimizeForm.minTotalConversions}
+                      onChange={e => setOptimizeForm({ ...optimizeForm, minTotalConversions: Number(e.target.value) })}
+                    />
+                    <span className={styles.helpText}>
+                      Across both variants combined. Default: {optimizeDefaults.minTotalConversions}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={styles.infoBox}>
+                  Changing these re-judges running experiments from here on. Experiments already
+                  marked significant keep that record — it reflects the bar in force when they
+                  crossed it.
+                </div>
+
+                <button onClick={handleSaveOptimizeSettings} className={styles.saveBtn} disabled={optimizeSaving}>
+                  {optimizeSaving ? 'Saving…' : 'Save Optimize Settings'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* DragonDesk: Outreach — telephony */}
+          {activeTab === 'outreach' && (
+            <div className={styles.section}>
+              <h2 className={styles.sectionTitle}>Telephony</h2>
+              <p className={styles.sectionDesc}>
+                Voice settings for DragonDesk: Outreach call campaigns.
+              </p>
+              <div className={styles.infoBox}>
+                There are no telephony settings yet. Outreach call campaigns are configured
+                per-campaign — the script, goal, and audience live on the campaign itself — and no
+                voice provider is connected at the platform level. When one is added, its
+                credentials will live here.
+                <br /><br />
+                Note that SMS is configured under DragonDesk: Engage, not here — text campaigns are
+                sent by Engage, while Outreach places calls.
+              </div>
+            </div>
+          )}
+
           {activeTab === 'theme' && (
             <div className={styles.section}>
               <h2 className={styles.sectionTitle}>Appearance</h2>
@@ -3213,6 +4512,11 @@ const Settings = () => {
             </div>
           )}
 
+          {/* POS Section */}
+          {activeTab === 'pos' && (
+            <POSSettingsPanel />
+          )}
+
           {/* Lead Forms Section */}
           {activeTab === 'leadforms' && (
             <div className={styles.section}>
@@ -3226,6 +4530,17 @@ const Settings = () => {
                 <p>
                   Copy the embed code below and paste it into your website where you want the lead form to appear.
                   Or use the direct link to send prospects to a standalone form page.
+                </p>
+              </div>
+
+              <div className={styles.infoBox}>
+                <h4>Campaign attribution (automatic)</h4>
+                <p>
+                  UTM parameters are captured automatically for first-touch attribution. Add
+                  <code> utm_source</code>, <code>utm_medium</code>, and <code>utm_campaign</code> to your ad and
+                  email links (e.g. <code>?utm_source=meta&amp;utm_medium=paid-social&amp;utm_campaign=summer_bjj</code>).
+                  When a prospect fills out the form, DragonDesk records where they came from and reports it under
+                  DragonDesk: Analytics → <strong>Marketing</strong>. Email campaigns tag their own links automatically.
                 </p>
               </div>
 
@@ -3254,16 +4569,17 @@ const Settings = () => {
               </div>
 
               <div className={styles.formGroup}>
-                <label className={styles.label}>Embed Code (iframe)</label>
+                <label className={styles.label}>Embed Code (with Identity Stitching)</label>
                 <textarea
-                  value={`<iframe src="${window.location.origin}/lead-form" width="100%" height="800" frameborder="0" style="border: none; border-radius: 8px;"></iframe>`}
+                  value={`<script>\n(function(){\n  var base='${window.location.origin}/lead-form';\n  var vid=window.__ddVid||'';\n  var token=window.__ddToken||'';\n  var qs=(vid?'vid='+encodeURIComponent(vid):'')+(token?'&token='+encodeURIComponent(token):'');\n  var f=document.createElement('iframe');\n  f.src=base+(qs?'?'+qs:'');\n  f.width='100%';f.height='800';f.frameBorder='0';\n  f.style.cssText='border:none;border-radius:8px;';\n  document.currentScript.parentNode.insertBefore(f,document.currentScript);\n})();\n<\/script>`}
                   readOnly
                   className={styles.dnsTextarea}
-                  rows={4}
+                  rows={8}
                 />
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`<iframe src="${window.location.origin}/lead-form" width="100%" height="800" frameborder="0" style="border: none; border-radius: 8px;"></iframe>`);
+                    const code = `<script>\n(function(){\n  var base='${window.location.origin}/lead-form';\n  var vid=window.__ddVid||'';\n  var token=window.__ddToken||'';\n  var qs=(vid?'vid='+encodeURIComponent(vid):'')+(token?'&token='+encodeURIComponent(token):'');\n  var f=document.createElement('iframe');\n  f.src=base+(qs?'?'+qs:'');\n  f.width='100%';f.height='800';f.frameBorder='0';\n  f.style.cssText='border:none;border-radius:8px;';\n  document.currentScript.parentNode.insertBefore(f,document.currentScript);\n})();\n<\/script>`;
+                    navigator.clipboard.writeText(code);
                     showSaveMessage('Embed code copied to clipboard!');
                   }}
                   className={styles.copyBtn}
@@ -3271,7 +4587,7 @@ const Settings = () => {
                   Copy Embed Code
                 </button>
                 <span className={styles.helpText}>
-                  Paste this code into your website's HTML to embed the lead form.
+                  Paste this into your website's HTML. If the DragonDesk tracking script is also installed, anonymous visitor IDs will automatically be linked to leads when they submit this form.
                 </span>
               </div>
 

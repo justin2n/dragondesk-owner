@@ -1,13 +1,88 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import nodemailer from 'nodemailer';
+import { randomBytes } from 'crypto';
 import { query, get } from '../models/database';
 import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth';
 import { getDKIMConfig, extractDomain } from '../utils/dkim-signer';
+import { sendViaSendgrid } from '../services/sendgrid';
+import { sendViaMailgun } from '../services/mailgun';
+import { sendViaSes } from '../services/ses';
+import { getEmailConfig, invalidateEmailConfigCache, EmailConfig } from '../services/emailConfig';
+import { resolveAudienceMembers } from '../utils/audienceMembers';
+import { encryptSecret, isEncryptionConfigured } from '../utils/crypto';
+import { wrapLinksForClickTracking } from '../utils/emailClickTracking';
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(authenticateToken);
+
+const MASK = '••••••••';
+
+// Append UTM params to absolute links in campaign HTML so email-driven form
+// fills attribute back to the campaign. Skips relative/mailto/anchor links and
+// links that already carry a utm_source.
+function addUtmsToLinks(html: string, utm: Record<string, string>): string {
+  const qs = Object.entries(utm).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  if (!qs || !html) return html;
+  return html.replace(/href\s*=\s*"([^"]*)"/gi, (m, url) => {
+    if (!/^https?:\/\//i.test(url) || /[?&]utm_source=/i.test(url)) return m;
+    return `href="${url}${url.includes('?') ? '&' : '?'}${qs}"`;
+  });
+}
+
+// Deliver one email through the resolved provider. SendGrid uses its own verified
+// sender + API key; SMTP builds a transporter (the test panel may pass per-request
+// SMTP settings). Returns the provider message id when available.
+async function deliver(
+  cfg: EmailConfig,
+  opts: { to: string; subject: string; html: string; emailSettings?: any },
+  reuseTransporter?: any
+): Promise<{ messageId?: string }> {
+  if (cfg.provider === 'sendgrid') {
+    return await sendViaSendgrid({
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      apiKey: cfg.sendgrid.apiKey || undefined,
+      fromEmail: cfg.fromEmail || undefined,
+      fromName: cfg.fromName || undefined,
+    });
+  }
+  if (cfg.provider === 'mailgun') {
+    return await sendViaMailgun({
+      apiKey: cfg.mailgun.apiKey || '',
+      domain: cfg.mailgun.domain || '',
+      region: cfg.mailgun.region,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      fromEmail: cfg.fromEmail || '',
+      fromName: cfg.fromName || undefined,
+    });
+  }
+  if (cfg.provider === 'ses') {
+    return await sendViaSes({
+      accessKeyId: cfg.ses.accessKeyId || '',
+      secretAccessKey: cfg.ses.secretAccessKey || '',
+      region: cfg.ses.region || '',
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      fromEmail: cfg.fromEmail || '',
+      fromName: cfg.fromName || undefined,
+    });
+  }
+  const transporter = reuseTransporter || await createTransporter(opts.emailSettings);
+  const fromEmail = opts.emailSettings?.fromEmail || cfg.fromEmail;
+  const fromName = opts.emailSettings?.fromName || cfg.fromName || 'DragonDesk CRM';
+  const fromField = fromEmail
+    ? `"${fromName}" <${fromEmail}>`
+    : `"${fromName}" <noreply@dragondesk.com>`;
+  const info = await transporter.sendMail({ from: fromField, to: opts.to, subject: opts.subject, html: opts.html });
+  return { messageId: info.messageId };
+}
 
 // Create email transporter (configure with your SMTP settings)
 const createTransporter = async (settings?: any) => {
@@ -48,6 +123,12 @@ const createTransporter = async (settings?: any) => {
       pass: password,
     },
     dkim: dkimOptions,
+    // Fail fast instead of hanging when the SMTP host is unreachable (many
+    // PaaS hosts block outbound SMTP ports) — otherwise the request stays
+    // pending forever and the real error never surfaces to the client.
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 };
 
@@ -63,6 +144,140 @@ router.get('/config-status', async (req: AuthRequest, res) => {
     fromName: process.env.SMTP_FROM_NAME || null,
     configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
   });
+});
+
+// Helper: build the masked client view of the resolved email config.
+async function settingsView(locationId?: number) {
+  const cfg = await getEmailConfig(locationId);
+  return {
+    provider: cfg.provider,
+    fromEmail: cfg.fromEmail,
+    fromName: cfg.fromName,
+    sendgridApiKey: cfg.sendgrid.apiKey ? MASK : null,
+    sendgridConfigured: cfg.sendgrid.configured,
+    mailgunApiKey: cfg.mailgun.apiKey ? MASK : null,
+    mailgunDomain: cfg.mailgun.domain,
+    mailgunRegion: cfg.mailgun.region,
+    mailgunConfigured: cfg.mailgun.configured,
+    sesAccessKeyId: cfg.ses.accessKeyId,
+    sesSecretAccessKey: cfg.ses.secretAccessKey ? MASK : null,
+    sesRegion: cfg.ses.region,
+    sesConfigured: cfg.ses.configured,
+    smtpConfigured: cfg.smtp.configured,
+    encryptionConfigured: isEncryptionConfigured(),
+  };
+}
+
+// Editable email provider config (default provider, SendGrid key, from-address).
+// The API key is never returned — only whether one is set (masked).
+router.get('/settings', async (req: AuthRequest, res) => {
+  const locationId = req.query.locationId ? Number(req.query.locationId) : undefined;
+  res.json(await settingsView(locationId));
+});
+
+router.put('/settings', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
+  try {
+    const { locationId, provider, fromEmail, fromName, sendgridApiKey,
+            mailgunApiKey, mailgunDomain, mailgunRegion,
+            sesAccessKeyId, sesSecretAccessKey, sesRegion } = req.body;
+    const locId: number | null = locationId ? Number(locationId) : null;
+
+    if (provider && !['smtp', 'sendgrid', 'mailgun', 'ses'].includes(provider)) {
+      return res.status(400).json({ error: "provider must be 'smtp', 'sendgrid', 'mailgun', or 'ses'" });
+    }
+
+    const existing = locId
+      ? await get(`SELECT * FROM email_settings WHERE "locationId" = $1`, [locId])
+      : await get(`SELECT * FROM email_settings WHERE "locationId" IS NULL`);
+
+    // Preserve a stored key when the incoming value is masked/empty; otherwise encrypt.
+    const resolveKey = (incoming: any, stored: string | null): string | null => {
+      if (typeof incoming === 'string' && incoming.trim() && !incoming.includes('•')) {
+        if (!isEncryptionConfigured()) throw new Error('ENCRYPTION_REQUIRED');
+        return encryptSecret(incoming.trim());
+      }
+      return stored;
+    };
+
+    let sendgridKeyToStore: string | null;
+    let mailgunKeyToStore: string | null;
+    let sesSecretToStore: string | null;
+    try {
+      sendgridKeyToStore = resolveKey(sendgridApiKey, existing?.sendgridApiKey ?? null);
+      mailgunKeyToStore = resolveKey(mailgunApiKey, existing?.mailgunApiKey ?? null);
+      sesSecretToStore = resolveKey(sesSecretAccessKey, existing?.sesSecretAccessKey ?? null);
+    } catch {
+      return res.status(400).json({ error: 'Set APP_ENCRYPTION_KEY (32-byte hex/base64) before storing an API key.' });
+    }
+
+    const resolvedProvider = provider || existing?.provider || 'smtp';
+    const resolvedFromEmail = fromEmail !== undefined ? (fromEmail || null) : (existing?.fromEmail ?? null);
+    const resolvedFromName = fromName !== undefined ? (fromName || null) : (existing?.fromName ?? null);
+    const resolvedMgDomain = mailgunDomain !== undefined ? (mailgunDomain || null) : (existing?.mailgunDomain ?? null);
+    const resolvedMgRegion = mailgunRegion || existing?.mailgunRegion || 'us';
+    // SES access key id + region are not secret (like a username) — stored plaintext.
+    const resolvedSesKeyId = sesAccessKeyId !== undefined ? (sesAccessKeyId || null) : (existing?.sesAccessKeyId ?? null);
+    const resolvedSesRegion = sesRegion !== undefined ? (sesRegion || null) : (existing?.sesRegion ?? null);
+
+    // Validate the chosen provider has what it needs to actually send.
+    if (resolvedProvider === 'sendgrid') {
+      if (!sendgridKeyToStore && !process.env.SENDGRID_API_KEY) {
+        return res.status(400).json({ error: 'Add a SendGrid API key before choosing SendGrid.' });
+      }
+      if (!resolvedFromEmail && !process.env.SENDGRID_FROM_EMAIL) {
+        return res.status(400).json({ error: 'Set a From Email (verified in SendGrid) before using SendGrid.' });
+      }
+    }
+    if (resolvedProvider === 'mailgun') {
+      if (!mailgunKeyToStore && !process.env.MAILGUN_API_KEY) {
+        return res.status(400).json({ error: 'Add a Mailgun API key before choosing Mailgun.' });
+      }
+      if (!resolvedMgDomain && !process.env.MAILGUN_DOMAIN) {
+        return res.status(400).json({ error: 'Set your Mailgun sending domain before using Mailgun.' });
+      }
+      if (!resolvedFromEmail && !process.env.MAILGUN_FROM_EMAIL) {
+        return res.status(400).json({ error: 'Set a From Email on your Mailgun domain before using Mailgun.' });
+      }
+    }
+    if (resolvedProvider === 'ses') {
+      if ((!resolvedSesKeyId && !process.env.AWS_ACCESS_KEY_ID) || (!sesSecretToStore && !process.env.AWS_SECRET_ACCESS_KEY)) {
+        return res.status(400).json({ error: 'Add your AWS access key ID and secret access key before choosing SES.' });
+      }
+      if (!resolvedSesRegion && !process.env.AWS_SES_REGION && !process.env.AWS_REGION) {
+        return res.status(400).json({ error: 'Set your SES region (e.g. us-east-1) before using SES.' });
+      }
+      if (!resolvedFromEmail && !process.env.SES_FROM_EMAIL) {
+        return res.status(400).json({ error: 'Set a From Email verified as an SES identity before using SES.' });
+      }
+    }
+
+    if (existing) {
+      await query(
+        `UPDATE email_settings SET provider = $1, "sendgridApiKey" = $2,
+           "mailgunApiKey" = $3, "mailgunDomain" = $4, "mailgunRegion" = $5,
+           "sesAccessKeyId" = $6, "sesSecretAccessKey" = $7, "sesRegion" = $8,
+           "fromEmail" = $9, "fromName" = $10, "isActive" = true, "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $11`,
+        [resolvedProvider, sendgridKeyToStore, mailgunKeyToStore, resolvedMgDomain, resolvedMgRegion,
+         resolvedSesKeyId, sesSecretToStore, resolvedSesRegion,
+         resolvedFromEmail, resolvedFromName, existing.id]
+      );
+    } else {
+      await query(
+        `INSERT INTO email_settings ("locationId", provider, "sendgridApiKey",
+           "mailgunApiKey", "mailgunDomain", "mailgunRegion",
+           "sesAccessKeyId", "sesSecretAccessKey", "sesRegion", "fromEmail", "fromName")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [locId, resolvedProvider, sendgridKeyToStore, mailgunKeyToStore, resolvedMgDomain, resolvedMgRegion,
+         resolvedSesKeyId, sesSecretToStore, resolvedSesRegion, resolvedFromEmail, resolvedFromName]
+      );
+    }
+
+    invalidateEmailConfigCache(locId ?? undefined);
+    res.json(await settingsView(locId ?? undefined));
+  } catch (error: any) {
+    serverError(res, error);
+  }
 });
 
 // Test server-side SMTP connection (uses env vars only)
@@ -102,6 +317,9 @@ router.post('/test-connection', async (req: AuthRequest, res) => {
         user: username,
         pass: password,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
 
     // Verify connection
@@ -140,39 +358,86 @@ router.post('/send-test', requireRole(['super_admin', 'admin']), async (req: Aut
       return res.status(400).json({ error: 'Missing required fields: to, subject, body' });
     }
 
-    const transporter = await createTransporter(emailSettings);
+    const cfg = await getEmailConfig();
 
-    // Build the "from" field: explicit settings > env vars > default
-    const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
-    const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
-    const fromField = fromEmail
-      ? `"${fromName}" <${fromEmail}>`
-      : `"${fromName}" <noreply@dragondesk.com>`;
+    // Ethereal only matters for SMTP (dev-only fake inbox).
+    if (cfg.provider === 'smtp') {
+      const resolvedHost = emailSettings?.host || process.env.SMTP_HOST || '';
+      if (resolvedHost.includes('ethereal')) {
+        return res.status(400).json({
+          error: 'Ethereal (test) SMTP detected — emails will not be delivered.',
+          details: 'Your SMTP_HOST is set to smtp.ethereal.email, which is a development-only fake inbox. Replace SMTP_HOST, SMTP_USER, and SMTP_PASS in your Railway environment variables with a real email provider (e.g. SendGrid, Postmark, or Gmail SMTP).',
+        });
+      }
+    }
 
-    const info = await transporter.sendMail({
-      from: fromField,
-      to,
-      subject,
-      html: body,
-    });
+    const info = await deliver(cfg, { to, subject, html: body, emailSettings });
 
-    console.log('Test email sent:', info.messageId);
+    console.log(`Test email sent via ${cfg.provider}:`, info.messageId);
 
+    const providerLabel: Record<string, string> = { sendgrid: 'SendGrid', mailgun: 'Mailgun', ses: 'Amazon SES', smtp: 'SMTP' };
     res.json({
-      message: 'Test email sent successfully',
+      message: `Test email sent successfully via ${providerLabel[cfg.provider] || cfg.provider}`,
       messageId: info.messageId,
-      previewUrl: nodemailer.getTestMessageUrl(info) || undefined,
     });
   } catch (error: any) {
     console.error('Error sending test email:', error);
+    // Surface the real reason (SMTP auth/connection/config) — the client only
+    // shows `error`, so a generic message hid the actual cause.
     res.status(500).json({
-      error: 'Failed to send test email',
-      details: error.message
+      error: `Failed to send test email: ${error.message || 'unknown error'}`,
+      details: error.message,
     });
   }
 });
 
-// Send campaign to all members in audience
+// Preview how many recipients a campaign would actually email — the exact set
+// the send uses (audience filters via the shared resolver + has an email). Used
+// to show the count in the send confirmation so it can never surprise you.
+router.get('/send-campaign/:campaignId/preview', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
+  try {
+    const campaign = await get(`SELECT * FROM campaigns WHERE id = ? AND type = 'email'`, [req.params.campaignId]);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const resolved = await resolveAudienceMembers(campaign.audienceId, { columns: 'id, email' });
+    if (!resolved) return res.status(404).json({ error: 'Audience not found' });
+
+    const withEmail = resolved.members.filter((m: any) => m.email && String(m.email).trim());
+    res.json({
+      recipientCount: withEmail.length,
+      totalMatched: resolved.members.length,
+      filterCount: resolved.filterCount, // 0 = audience has no filters (all members)
+    });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
+// Full recipient list a campaign would email — the exact set the send uses.
+// Powers the "Preview Recipients" view so you can eyeball who receives it.
+router.get('/send-campaign/:campaignId/recipients', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
+  try {
+    const campaign = await get(`SELECT * FROM campaigns WHERE id = ? AND type = 'email'`, [req.params.campaignId]);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const resolved = await resolveAudienceMembers(campaign.audienceId, {
+      columns: 'id, firstName, lastName, email, accountStatus, programType',
+    });
+    if (!resolved) return res.status(404).json({ error: 'Audience not found' });
+
+    const recipients = resolved.members.filter((m: any) => m.email && String(m.email).trim());
+    res.json({
+      recipientCount: recipients.length,
+      totalMatched: resolved.members.length,
+      filterCount: resolved.filterCount,
+      recipients,
+    });
+  } catch (error: any) {
+    serverError(res, error);
+  }
+});
+
+// Send campaign to the campaign's audience
 router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']), async (req: AuthRequest, res) => {
   try {
     const { campaignId } = req.params;
@@ -192,55 +457,49 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
       ? JSON.parse(campaign.content)
       : campaign.content;
 
-    // Get audience
-    const audience = await get('SELECT * FROM audiences WHERE id = ?', [campaign.audienceId]);
-
-    if (!audience) {
+    // Resolve the audience via the shared resolver so this ALWAYS applies the
+    // same full filter set as the Audiences preview (ranking, leadSource, tags,
+    // location, memberType, …) — never a partial filter that silently emails
+    // everyone.
+    const resolved = await resolveAudienceMembers(campaign.audienceId, {
+      columns: 'id, email, firstName, lastName, accountStatus',
+    });
+    if (!resolved) {
       return res.status(404).json({ error: 'Audience not found' });
     }
 
-    const filters = typeof audience.filters === 'string'
-      ? JSON.parse(audience.filters)
-      : audience.filters;
-
-    // Build query to get members based on audience filters
-    let sql = 'SELECT email, firstName, lastName FROM members WHERE 1=1';
-    const params: any[] = [];
-
-    if (filters.accountStatus && filters.accountStatus.length > 0) {
-      sql += ` AND accountStatus IN (${filters.accountStatus.map(() => '?').join(',')})`;
-      params.push(...filters.accountStatus);
+    // Fail closed: an audience with zero filters matches ALL members. Refuse
+    // unless the caller explicitly confirms an all-members send.
+    if (resolved.filterCount === 0 && !req.body.confirmSendAll) {
+      return res.status(400).json({
+        error: `This audience has no filters, so it would email ALL ${resolved.members.length} members. Refused — confirm to send to everyone.`,
+        requiresConfirmAll: true,
+        recipientCount: resolved.members.length,
+      });
     }
 
-    if (filters.accountType && filters.accountType.length > 0) {
-      sql += ` AND accountType IN (${filters.accountType.map(() => '?').join(',')})`;
-      params.push(...filters.accountType);
-    }
-
-    if (filters.programType && filters.programType.length > 0) {
-      sql += ` AND programType IN (${filters.programType.map(() => '?').join(',')})`;
-      params.push(...filters.programType);
-    }
-
-    if (filters.membershipAge && filters.membershipAge.length > 0) {
-      sql += ` AND membershipAge IN (${filters.membershipAge.map(() => '?').join(',')})`;
-      params.push(...filters.membershipAge);
-    }
-
-    const members = await query(sql, params);
+    // Only email members that actually have an address (participants may not).
+    const members = resolved.members.filter((m: any) => m.email && String(m.email).trim());
 
     if (members.length === 0) {
-      return res.status(400).json({ error: 'No members found in audience' });
+      return res.status(400).json({ error: 'No members with an email address matched this audience.' });
     }
 
-    const transporter = await createTransporter(emailSettings);
+    const cfg = await getEmailConfig();
 
-    // Build the "from" field: explicit settings > env vars > default
-    const fromEmail = emailSettings?.fromEmail || process.env.SMTP_FROM_EMAIL;
-    const fromName = emailSettings?.fromName || process.env.SMTP_FROM_NAME || 'DragonDesk CRM';
-    const fromField = fromEmail
-      ? `"${fromName}" <${fromEmail}>`
-      : `"${fromName}" <noreply@dragondesk.com>`;
+    // Build one SMTP transporter for the whole campaign (SendGrid is per-request HTTP).
+    const campaignTransporter = cfg.provider === 'smtp' ? await createTransporter(emailSettings) : null;
+
+    // Absolute base for the open pixel + click redirects (works behind Railway's proxy).
+    const base = `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
+
+    // Tag every link with campaign UTMs once, so email-driven form fills attribute
+    // back to this campaign (utm_medium=email).
+    const campaignSlug = String(campaign.name || `campaign-${campaignId}`)
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `campaign-${campaignId}`;
+    const bodyWithUtms = addUtmsToLinks(content.body || '', {
+      utm_source: 'email', utm_medium: 'email', utm_campaign: campaignSlug,
+    });
 
     let sent = 0;
     let failed = 0;
@@ -250,25 +509,45 @@ router.post('/send-campaign/:campaignId', requireRole(['super_admin', 'admin']),
     for (const member of members) {
       try {
         // Personalize email body
-        let personalizedBody = content.body
+        let personalizedBody = bodyWithUtms
           .replace(/\[First Name\]/g, member.firstName || '')
           .replace(/\[Last Name\]/g, member.lastName || '')
           .replace(/\[Member Name\]/g, `${member.firstName} ${member.lastName}`.trim());
 
-        await transporter.sendMail({
-          from: fromField,
+        // Per-recipient click tracking (links redirect via /api/tracking/click)
+        // and open-tracking pixel.
+        const token = randomBytes(16).toString('hex');
+        personalizedBody = wrapLinksForClickTracking(personalizedBody, base, token);
+        personalizedBody += `<img src="${base}/api/tracking/open/${token}" width="1" height="1" style="display:none" alt="">`;
+
+        await deliver(cfg, {
           to: member.email,
           subject: content.subject,
           html: personalizedBody,
-        });
+          emailSettings,
+        }, campaignTransporter);
+
+        // Record the recipient (baseline status drives conversion attribution).
+        await query(
+          `INSERT INTO campaign_recipients ("campaignId", "memberId", email, token, "statusAtSend")
+           VALUES (?, ?, ?, ?, ?)`,
+          [campaignId, member.id, member.email, token, member.accountStatus]
+        ).catch(() => {});
 
         sent++;
       } catch (error: any) {
         failed++;
-        errors.push(`Failed to send to ${member.email}: ${error.message}`);
-        console.error(`Failed to send to ${member.email}:`, error);
+        errors.push(`Failed to send to member #${member.id}: ${error.message}`);
+        console.error(`Failed to send email to member #${member.id}:`, error.message);
       }
     }
+
+    // Persist send totals + mark completed (opens/clicks accrue via the tracking endpoints).
+    await query(
+      `UPDATE campaigns SET sent = ?, delivered = ?, status = 'completed',
+         opens = 0, "openRate" = 0, "sentAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
+      [sent, sent, campaignId]
+    ).catch((e: any) => console.error('Failed to persist campaign send totals:', e?.message));
 
     res.json({
       message: 'Campaign sent',

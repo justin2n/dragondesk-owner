@@ -21,6 +21,8 @@ import {
   WorkforceIcon,
   BillingIcon,
   CheckIcon,
+  SalesSignalsIcon,
+  BellIcon,
 } from './Icons';
 import styles from './Layout.module.css';
 import AIAssistant from './AIAssistant';
@@ -33,6 +35,24 @@ const Layout = () => {
   const { locations, selectedLocation, isAllLocations, setSelectedLocation, setAllLocations, loadLocations } = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showLocationMenu, setShowLocationMenu] = useState(false);
+  const [signalCount, setSignalCount] = useState(0);
+  const [alerts, setAlerts] = useState<{ type: string; message: string; severity: string }[]>([]);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('dd_dismissed_alerts') || '{}'); } catch { return {}; }
+  });
+
+  const dismissAlert = (type: string) => {
+    const updated = { ...dismissedAlerts, [type]: Date.now() };
+    setDismissedAlerts(updated);
+    localStorage.setItem('dd_dismissed_alerts', JSON.stringify(updated));
+  };
+
+  const visibleAlerts = alerts.filter(a => {
+    const dismissedAt = dismissedAlerts[a.type];
+    if (!dismissedAt) return true;
+    return Date.now() - dismissedAt > 24 * 60 * 60 * 1000;
+  });
 
   // Load locations when Layout mounts (user is authenticated at this point)
   useEffect(() => {
@@ -41,12 +61,51 @@ const Layout = () => {
     }
   }, []);
 
+  // Poll signal count for sidebar badge
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/sales-signals/count', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSignalCount(data.count || 0);
+        }
+      } catch {}
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll system alerts every 5 minutes
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/alerts', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAlerts(data.alerts || []);
+        }
+      } catch {}
+    };
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const navItems = [
     { path: '/', label: 'Dashboard', Icon: DashboardIcon },
     { path: '/members', label: 'Contacts', Icon: MembersIcon },
     { path: '/audiences', label: 'Audiences', Icon: AudiencesIcon },
     { path: '/events', label: 'Events & Calendar', Icon: CalendarIcon },
     { path: '/attendance', label: 'Attendance', Icon: CheckIcon },
+    { path: '/sales-signals', label: 'DragonDesk: Pulse', Icon: SalesSignalsIcon, badge: signalCount },
     { path: '/optimize', label: 'DragonDesk: Optimize', Icon: OptimizeIcon },
     { path: '/engage', label: 'DragonDesk: Engage', Icon: EngageIcon },
     { path: '/outreach', label: 'DragonDesk: Outreach', Icon: OutreachIcon },
@@ -105,18 +164,63 @@ const Layout = () => {
                 <item.Icon size={20} />
               </span>
               {isSidebarOpen && <span>{item.label}</span>}
+              {isSidebarOpen && (item as any).badge > 0 && (
+                <span className={styles.navBadge}>{(item as any).badge}</span>
+              )}
+              {!isSidebarOpen && (item as any).badge > 0 && (
+                <span className={styles.navBadgeDot} />
+              )}
             </Link>
           ))}
         </nav>
         <div className={styles.sidebarFooter}>
-          {isSidebarOpen && (
-            <div className={styles.userInfo}>
-              <div className={styles.userName}>
-                {user?.firstName} {user?.lastName}
+          <div className={styles.footerUserRow}>
+            {isSidebarOpen && (
+              <div className={styles.userInfo}>
+                <div className={styles.userName}>
+                  {user?.firstName} {user?.lastName}
+                </div>
+                <div className={styles.userRole}>{user?.role}</div>
               </div>
-              <div className={styles.userRole}>{user?.role}</div>
+            )}
+            <div className={styles.bellWrapper}>
+              <button
+                className={`${styles.bellBtn} ${visibleAlerts.length > 0 ? styles.bellActive : ''}`}
+                onClick={() => setShowAlerts(v => !v)}
+                aria-label="System alerts"
+              >
+                <BellIcon size={20} />
+                {visibleAlerts.length > 0 && isSidebarOpen && (
+                  <span className={styles.bellBadge}>{visibleAlerts.length}</span>
+                )}
+                {visibleAlerts.length > 0 && !isSidebarOpen && (
+                  <span className={styles.bellDot} />
+                )}
+              </button>
+              {showAlerts && (
+                <div className={styles.alertDropdown}>
+                  <div className={styles.alertDropdownTitle}>System Alerts</div>
+                  {visibleAlerts.length === 0 ? (
+                    <div className={styles.alertEmpty}>No active alerts</div>
+                  ) : (
+                    visibleAlerts.map((alert, i) => (
+                      <div key={i} className={`${styles.alertItem} ${styles[`alertSev_${alert.severity}`]}`}>
+                        <span className={styles.alertItemDot} />
+                        <span className={styles.alertItemMsg}>{alert.message}</span>
+                        <button
+                          className={styles.alertDismissBtn}
+                          onClick={() => dismissAlert(alert.type)}
+                          aria-label="Dismiss alert"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
           <button onClick={logout} className={styles.logoutBtn}>
             <LogoutIcon size={20} />
             {isSidebarOpen && <span>Logout</span>}

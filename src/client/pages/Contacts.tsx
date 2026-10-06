@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
-import { Member, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
+import { Member, ParticipantSummary, AccountStatus, AccountType, ProgramType, MembershipAge, LeadSource, Subscription, Invoice, PaymentMethod, PricingPlan } from '../types';
 import { CardViewIcon, TableViewIcon, AddIcon, CheckIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import { useLocation } from '../contexts/LocationContext';
@@ -28,53 +29,188 @@ const RANKINGS: Record<string, string[]> = {
 };
 
 const BULK_FIELD_LABELS: Record<string, string> = {
-  accountStatus: 'Status',
+  accountStatus: 'Stage',
   programType: 'Program',
   membershipAge: 'Age Group',
   ranking: 'Ranking',
   locationId: 'Location',
 };
 
+// The three stages a contact moves through, plus the terminal Cancelled state.
+// The stored value stays 'trialer' for back-compat; only the label reads "Trial".
+const STAGE_LABELS: Record<string, string> = {
+  lead: 'Lead',
+  trialer: 'Trial',
+  member: 'Member',
+  cancelled: 'Cancelled',
+};
+
 const BULK_VALUE_LABELS: Record<string, Record<string, string>> = {
-  accountStatus: { lead: 'Lead', trialer: 'Trialer', member: 'Member', cancelled: 'Cancelled' },
+  accountStatus: STAGE_LABELS,
   membershipAge: { Adult: 'Adult', Kids: 'Kids' },
 };
+
+// Intent tiers mirror DragonDesk: Pulse (SalesSignals.tsx). WARM starts at 10 —
+// Pulse's default "min events" floor — so a card badge means the same "worth a
+// call" bar as Pulse, and quiet contacts stay unbadged.
+const INTENT_TIERS = [
+  { min: 50, label: 'ON FIRE', cls: 'intentFire' },
+  { min: 25, label: 'HOT', cls: 'intentHot' },
+  { min: 10, label: 'WARM', cls: 'intentWarm' },
+] as const;
+
+const intentTier = (count: number | undefined) =>
+  count == null ? null : INTENT_TIERS.find(t => count >= t.min) || null;
+
+// Which product each stage exposes. Later-stage fields still render, greyed out,
+// so the path ahead is visible rather than hidden. Mirrors stageAllows() in
+// server/routes/members.ts, which enforces the same rules on write.
+const stageAllows = (stage: string, product: 'quickStart' | 'membership' | 'programs') => {
+  switch (product) {
+    case 'quickStart': return stage === 'trialer' || stage === 'member';
+    case 'membership':
+    case 'programs':   return stage === 'member';
+    default:           return false;
+  }
+};
+
+const STAGE_HINT: Record<string, string> = {
+  quickStart: 'Available at the Trial stage',
+  membership: 'Available at the Member stage',
+  programs: 'Available at the Member stage',
+};
+
+const money = (cents: number | null | undefined) =>
+  `$${((cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+// Wraps a stage-gated field: greys it out and explains why, instead of hiding it.
+const GatedField = ({
+  allowed, hint, label, children,
+}: { allowed: boolean; hint: string; label: string; children: React.ReactNode }) => (
+  <div style={{ opacity: allowed ? 1 : 0.45 }}>
+    <label className={styles.formLabel}>
+      {label}
+      {!allowed && (
+        <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', marginLeft: 6 }}>
+          — {hint}
+        </span>
+      )}
+    </label>
+    <fieldset disabled={!allowed} style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}>
+      {children}
+    </fieldset>
+  </div>
+);
+
+interface ProgramOption {
+  id: number;
+  name: string;
+  ageGroup?: 'Kids' | 'Adult' | 'All';
+  quickStartPriceAmount?: number | null;
+  quickStartClassCount?: number | null;
+}
+
+interface MembershipOption {
+  id: number;
+  name: string;
+  priceAmount?: number | null;
+  isFamilyPlan?: boolean;
+  maxProgramsPerParticipant?: number | null;
+}
+
+// One purchased membership license on an account.
+interface Seat {
+  id: number;
+  accountHolderId: number;
+  membershipId: number;
+  membershipName: string;
+  participantId: number | null;
+  participantFirstName: string | null;
+  participantLastName: string | null;
+  priceAmount: number;
+  isFamilyPlan: boolean;
+  maxProgramsPerParticipant: number | null;
+  status: string;
+}
+
+interface QuickStart {
+  id: number;
+  programId: number | null;
+  programName: string | null;
+  priceAmount: number;
+  classesIncluded: number;
+  classesUsed: number;
+  status: 'active' | 'converted' | 'expired';
+  startDate: string;
+  endDate: string | null;
+}
 
 const Contacts = () => {
   const { selectedLocation, isAllLocations, locations } = useLocation();
   const { toast, confirm } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkHandled = useRef(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
+  const [collapsedHolders, setCollapsedHolders] = useState<Set<number>>(new Set());
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [memberToCancel, setMemberToCancel] = useState<Member | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [viewingMember, setViewingMember] = useState<Member | null>(null);
-  const [viewTab, setViewTab] = useState<'details' | 'billing' | 'attendance'>('details');
+  const [viewTab, setViewTab] = useState<'details' | 'billing' | 'attendance' | 'history'>('details');
+  const [memberHistory, setMemberHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [webActivity, setWebActivity] = useState<any[]>([]);
+  const [webActivityLoading, setWebActivityLoading] = useState(false);
   const [memberQRCode, setMemberQRCode] = useState<{ qrCode: string; qrCodeData: string } | null>(null);
   const [memberCheckIns, setMemberCheckIns] = useState<any[]>([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
   const [memberSubscription, setMemberSubscription] = useState<Subscription | null>(null);
   const [memberPaymentMethods, setMemberPaymentMethods] = useState<PaymentMethod[]>([]);
   const [memberInvoices, setMemberInvoices] = useState<Invoice[]>([]);
   const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
   const [allPricingPlans, setAllPricingPlans] = useState<PricingPlan[]>([]);
+  const [memberships, setMemberships] = useState<MembershipOption[]>([]);
+  const [programs, setPrograms] = useState<ProgramOption[]>([]);
+  // Seats held by the account being edited, plus its active Quick Start.
+  const [seats, setSeats] = useState<Seat[]>([]);
+  const [quickStart, setQuickStart] = useState<QuickStart | null>(null);
+  const [seatBusy, setSeatBusy] = useState(false);
+  const [convertTarget, setConvertTarget] = useState<Member | null>(null);
+  const [convertProgramId, setConvertProgramId] = useState('');
+  const [convertMembershipId, setConvertMembershipId] = useState('');
+  const [convertBusy, setConvertBusy] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importProgram, setImportProgram] = useState('');
   const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<any>(null);
+  const [importResults, setImportResults] = useState<any[]>([]);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [contactType, setContactType] = useState<'all' | 'account_holders' | 'participants'>('all');
+  const [accountHolders, setAccountHolders] = useState<Member[]>([]);
+  // Intent score (recent tracking-event count) per member, the same engagement
+  // signal DragonDesk: Pulse uses — surfaced here so staff spot hot leads
+  // without opening Pulse. Keyed by member id; only "warm+" scores are shown.
+  const [intentScores, setIntentScores] = useState<Record<number, number>>({});
   const [filters, setFilters] = useState({
     accountStatus: '',
     programType: '',
     membershipAge: '',
+    search: '',
+    sort: 'newest',
   });
+  const [searchInput, setSearchInput] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkField, setBulkField] = useState('');
   const [bulkValue, setBulkValue] = useState('');
@@ -86,7 +222,6 @@ const Contacts = () => {
     email: '',
     phone: '',
     accountStatus: 'lead' as AccountStatus,
-    accountType: 'basic' as AccountType,
     programType: 'Adult BJJ' as ProgramType,
     membershipAge: 'Adult' as MembershipAge,
     ranking: 'White',
@@ -101,17 +236,68 @@ const Contacts = () => {
     memberStartDate: '',
     pricingPlanId: '' as string,
     companyName: '',
+    memberType: 'account_holder' as 'account_holder' | 'participant',
+    accountHolderId: '' as string,
+    programIds: [] as number[],
+    programInterestId: '' as string,
   });
 
   useEffect(() => {
     loadMembers();
-  }, [filters, selectedLocation, isAllLocations]);
+  }, [filters, selectedLocation, isAllLocations, contactType]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setFilters({ ...filters, search: searchInput }), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     api.get('/pricing-plans?isActive=true').then(setAllPricingPlans).catch(() => {});
+    api.get('/memberships?isActive=true').then(setMemberships).catch(() => {});
+    api.get('/programs/active').then(setPrograms).catch(() => {});
+    api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
   }, []);
 
+  // Intent scores over the last 24h (same window Pulse defaults to). Fail-soft:
+  // a missing map just means no badges, never a broken Contacts list.
+  useEffect(() => {
+    api.get('/sales-signals/by-member?hours=24')
+      .then((scores: Record<number, { count: number }>) => {
+        const flat: Record<number, number> = {};
+        for (const [id, v] of Object.entries(scores)) flat[Number(id)] = v.count;
+        setIntentScores(flat);
+      })
+      .catch(() => setIntentScores({}));
+  }, []);
+
+  // Deep-link: ?member=<id> auto-opens the profile modal
+  useEffect(() => {
+    const targetId = searchParams.get('member');
+    if (!targetId || deepLinkHandled.current) return;
+
+    const open = (member: Member) => {
+      deepLinkHandled.current = true;
+      handleViewMember(member); // defaults to the 'details' tab
+      // Optional ?tab= deep-link (e.g. from Pulse → open straight to History)
+      const tab = searchParams.get('tab');
+      if (tab === 'history') { setViewTab('history'); loadWebActivity(member.id); }
+      else if (tab === 'attendance') { setViewTab('attendance'); loadMemberAttendanceData(member.id); }
+      else if (tab === 'billing') { setViewTab('billing'); }
+      setSearchParams({}, { replace: true });
+    };
+
+    const inList = members.find(m => m.id === parseInt(targetId));
+    if (inList) {
+      open(inList);
+      return;
+    }
+
+    // Member may not be in the current filtered list — fetch directly
+    api.get(`/members/${targetId}`).then(open).catch(() => {});
+  }, [members, searchParams]);
+
   const loadMembers = async () => {
+    setIsLoading(true);
     try {
       const params = new URLSearchParams();
       const locationId = isAllLocations ? 'all' : selectedLocation?.id;
@@ -119,6 +305,10 @@ const Contacts = () => {
       if (filters.accountStatus) params.append('accountStatus', filters.accountStatus);
       if (filters.programType) params.append('programType', filters.programType);
       if (filters.membershipAge) params.append('membershipAge', filters.membershipAge);
+      if (filters.search) params.append('search', filters.search);
+      if (filters.sort) params.append('sort', filters.sort);
+      if (contactType === 'account_holders') params.append('memberType', 'account_holder');
+      if (contactType === 'participants') params.append('memberType', 'participant');
 
       const queryString = params.toString();
       const data = await api.get(`/members${queryString ? `?${queryString}` : ''}`);
@@ -130,16 +320,24 @@ const Contacts = () => {
     }
   };
 
-  const handleOpenModal = (member?: Member) => {
+  const handleOpenModal = async (member?: Member) => {
     if (member) {
+      let programIds: number[] = ((member as any).programs || []).map((p: any) => p.id);
+      // List rows don't carry the programs array — fetch detail for participants.
+      if (member.memberType === 'participant' && programIds.length === 0) {
+        try {
+          const full = await api.get(`/members/${member.id}`);
+          programIds = (full.programs || []).map((p: any) => p.id);
+        } catch { /* leave empty */ }
+      }
       setEditingMember(member);
+      loadSeats(member);
       setFormData({
         firstName: member.firstName,
         lastName: member.lastName,
         email: member.email,
         phone: member.phone,
         accountStatus: member.accountStatus,
-        accountType: member.accountType,
         programType: member.programType || 'No Program Selected',
         membershipAge: member.membershipAge,
         ranking: member.ranking,
@@ -154,17 +352,22 @@ const Contacts = () => {
         memberStartDate: member.memberStartDate || '',
         pricingPlanId: member.pricingPlanId?.toString() || '',
         companyName: member.companyName || '',
+        memberType: (member.memberType as 'account_holder' | 'participant') || 'account_holder',
+        accountHolderId: member.accountHolderId?.toString() || '',
+        programIds,
+        programInterestId: (member as any).programInterestId?.toString() || '',
       });
     } else {
       setEditingMember(null);
+      setSeats([]);
+      setQuickStart(null);
       setFormData({
         firstName: '',
         lastName: '',
         email: '',
         phone: '',
         accountStatus: 'lead',
-        accountType: 'basic',
-        programType: 'Adult BJJ',
+        programType: 'No Program Selected',
         membershipAge: 'Adult',
         ranking: 'White',
         leadSource: '',
@@ -177,6 +380,11 @@ const Contacts = () => {
         trialStartDate: '',
         memberStartDate: '',
         pricingPlanId: '',
+        companyName: '',
+        memberType: contactType === 'participants' ? 'participant' : 'account_holder',
+        accountHolderId: '',
+        programIds: [],
+        programInterestId: '',
       });
     }
     setIsModalOpen(true);
@@ -185,7 +393,119 @@ const Contacts = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingMember(null);
+    setSeats([]);
+    setQuickStart(null);
   };
+
+  // Seats hang off the account holder, so a participant's seats are looked up
+  // against their holder — that's the account actually being billed.
+  const loadSeats = async (member: Member) => {
+    const accountId = member.accountHolderId ?? member.id;
+    try {
+      const [seatRows, detail] = await Promise.all([
+        api.get(`/membership-seats?accountHolderId=${accountId}&status=active`),
+        api.get(`/members/${member.id}`),
+      ]);
+      setSeats(seatRows);
+      setQuickStart(detail.quickStart || null);
+    } catch {
+      setSeats([]);
+      setQuickStart(null);
+    }
+  };
+
+  const handleAddSeat = async (membershipId: string, participantId: string) => {
+    if (!editingMember || !membershipId) return;
+    setSeatBusy(true);
+    try {
+      await api.post('/membership-seats', {
+        accountHolderId: editingMember.accountHolderId ?? editingMember.id,
+        membershipId: parseInt(membershipId),
+        participantId: participantId ? parseInt(participantId) : null,
+      });
+      await loadSeats(editingMember);
+      toast('Seat added.', 'success');
+    } catch (error: any) {
+      toast(error.message || 'Failed to add seat.', 'error');
+    } finally {
+      setSeatBusy(false);
+    }
+  };
+
+  const handleAssignSeat = async (seatId: number, participantId: string) => {
+    if (!editingMember) return;
+    setSeatBusy(true);
+    try {
+      await api.put(`/membership-seats/${seatId}`, {
+        participantId: participantId ? parseInt(participantId) : null,
+      });
+      await loadSeats(editingMember);
+    } catch (error: any) {
+      toast(error.message || 'Failed to assign seat.', 'error');
+    } finally {
+      setSeatBusy(false);
+    }
+  };
+
+  const handleRemoveSeat = async (seatId: number) => {
+    if (!editingMember) return;
+    if (!await confirm({
+      title: 'Cancel Seat',
+      message: 'Cancel this membership seat? It stops counting toward monthly revenue but stays on record.',
+      confirmLabel: 'Cancel Seat',
+      danger: true,
+    })) return;
+    setSeatBusy(true);
+    try {
+      await api.delete(`/membership-seats/${seatId}`);
+      await loadSeats(editingMember);
+    } catch (error: any) {
+      toast(error.message || 'Failed to cancel seat.', 'error');
+    } finally {
+      setSeatBusy(false);
+    }
+  };
+
+  // One-click stage advance. The server does the whole thing transactionally,
+  // so a contact never lands mid-stage without the product it requires.
+  const openConvert = (member: Member) => {
+    setConvertTarget(member);
+    setConvertProgramId('');
+    setConvertMembershipId('');
+  };
+
+  const handleConvert = async () => {
+    if (!convertTarget) return;
+    const toTrial = convertTarget.accountStatus === 'lead';
+    setConvertBusy(true);
+    try {
+      await api.post(`/members/${convertTarget.id}/convert`, {
+        programId: toTrial ? (convertProgramId ? parseInt(convertProgramId) : null) : null,
+        membershipId: !toTrial ? (convertMembershipId ? parseInt(convertMembershipId) : null) : null,
+      });
+      toast(`Converted to ${toTrial ? 'Trial' : 'Member'}.`, 'success');
+      setConvertTarget(null);
+      loadMembers();
+      if (editingMember?.id === convertTarget.id) handleCloseModal();
+    } catch (error: any) {
+      toast(error.message || 'Failed to convert contact.', 'error');
+    } finally {
+      setConvertBusy(false);
+    }
+  };
+
+  // What the seat covering this contact entitles them to. Shown next to the
+  // program picker so the limit is visible before the server rejects the save.
+  const seatLimitNote = (() => {
+    if (!editingMember || !stageAllows(formData.accountStatus, 'programs')) return '';
+    const covering = seats.find(s =>
+      s.isFamilyPlan || s.participantId === editingMember.id);
+    if (!covering) return 'No membership seat covers this contact yet — assign one to enroll them.';
+    if (covering.isFamilyPlan) return `Covered by ${covering.membershipName}: unlimited programs.`;
+    const limit = covering.maxProgramsPerParticipant;
+    if (limit == null) return `Covered by ${covering.membershipName}: unlimited programs.`;
+    return `Covered by ${covering.membershipName}: ${limit} program${limit === 1 ? '' : 's'} (${formData.programIds.length} selected).`;
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,6 +522,7 @@ const Contacts = () => {
         ...formData,
         locationId: formData.locationId ? parseInt(formData.locationId) : null,
         pricingPlanId: formData.pricingPlanId ? parseInt(formData.pricingPlanId) : null,
+        programInterestId: formData.programInterestId ? parseInt(formData.programInterestId) : null,
       };
 
       if (editingMember) {
@@ -211,6 +532,7 @@ const Contacts = () => {
       }
       handleCloseModal();
       loadMembers();
+      api.get('/members?memberType=account_holder').then(setAccountHolders).catch(() => {});
       toast(editingMember ? 'Contact updated successfully.' : 'Contact added successfully.', 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to save contact.', 'error');
@@ -232,7 +554,6 @@ const Contacts = () => {
         firstName: memberToCancel.firstName,
         lastName: memberToCancel.lastName,
         email: memberToCancel.email,
-        accountType: memberToCancel.accountType,
         programType: memberToCancel.programType,
         membershipAge: memberToCancel.membershipAge,
         cancellationReason: cancellationReason,
@@ -249,32 +570,35 @@ const Contacts = () => {
     }
   };
 
-  const handleImport = async () => {
-    if (!importFile) return;
+  const handleImport = async (preview = false) => {
+    if (!importFiles.length) return;
     setImportLoading(true);
-    setImportResult(null);
-    try {
-      const formData = new FormData();
-      formData.append('file', importFile);
-      if (importProgram) formData.append('program', importProgram);
-      const locationId = isAllLocations ? '' : String(selectedLocation?.id || '');
-      if (locationId) formData.append('locationId', locationId);
+    setImportResults([]);
+    const locationId = isAllLocations ? '' : String(selectedLocation?.id || '');
+    const results: any[] = [];
 
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/import-csv', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Import failed');
-      setImportResult(result);
-      loadMembers();
-    } catch (err: any) {
-      setImportResult({ error: err.message });
-    } finally {
-      setImportLoading(false);
+    for (let i = 0; i < importFiles.length; i++) {
+      setImportProgress({ current: i + 1, total: importFiles.length });
+      const file = importFiles[i];
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (importProgram) formData.append('program', importProgram);
+        if (locationId) formData.append('locationId', locationId);
+        if (preview) formData.append('preview', 'true');
+        // api.upload handles auth + token refresh on 401 (a raw fetch here was
+        // sending a stale token and getting 401s that surfaced as "Failed to fetch").
+        const result = await api.upload('/import-csv', formData);
+        results.push({ fileName: file.name, ...result });
+      } catch (err: any) {
+        results.push({ fileName: file.name, error: err.message || 'Import failed' });
+      }
     }
+
+    setImportResults(results);
+    setImportProgress(null);
+    setImportLoading(false);
+    if (!preview) loadMembers(); // preview writes nothing, so no need to refresh
   };
 
   const handleDelete = async (id: number) => {
@@ -368,11 +692,36 @@ const Contacts = () => {
     }
   };
 
+  const loadMemberHistory = async (memberId: number) => {
+    setHistoryLoading(true);
+    try {
+      const data = await api.get(`/members/${memberId}/history`);
+      setMemberHistory(data);
+    } catch {
+      setMemberHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const loadWebActivity = async (memberId: number) => {
+    setWebActivityLoading(true);
+    try {
+      const data = await api.get(`/members/${memberId}/web-activity`);
+      setWebActivity(Array.isArray(data) ? data : []);
+    } catch {
+      setWebActivity([]);
+    } finally {
+      setWebActivityLoading(false);
+    }
+  };
+
   const handleViewMember = (member: Member) => {
     setViewingMember(member);
     setViewTab('details');
     loadMemberBillingData(member.id);
     loadMemberAttendanceData(member.id);
+    loadMemberHistory(member.id);
   };
 
   const handleCloseViewModal = () => {
@@ -382,8 +731,10 @@ const Contacts = () => {
     setMemberInvoices([]);
     setMemberQRCode(null);
     setMemberCheckIns([]);
+    setAttendanceError(null);
     setShowAddPaymentModal(false);
     setShowSubscribeModal(false);
+    setWebActivity([]);
   };
 
   const loadMemberBillingData = async (memberId: number) => {
@@ -412,16 +763,17 @@ const Contacts = () => {
 
   const loadMemberAttendanceData = async (memberId: number) => {
     setAttendanceLoading(true);
+    setAttendanceError(null);
     try {
-      const [qrCode, checkInsData] = await Promise.all([
-        api.get(`/qr-codes/member/${memberId}`).catch(() => null),
-        api.get(`/check-ins/member/${memberId}?limit=10`)
-      ]);
-
+      const qrCode = await api.get(`/qr-codes/member/${memberId}`).catch(() => null);
       setMemberQRCode(qrCode);
-      setMemberCheckIns(checkInsData?.checkIns || []);
-    } catch (error) {
-      console.error('Failed to load attendance data:', error);
+    } catch {}
+    try {
+      const checkInsData = await api.get(`/check-ins?memberId=${memberId}&limit=50`);
+      setMemberCheckIns(Array.isArray(checkInsData) ? checkInsData : (checkInsData?.checkIns || []));
+    } catch (error: any) {
+      console.error('Failed to load check-ins:', error);
+      setAttendanceError(error?.message || 'Failed to load check-in history');
     } finally {
       setAttendanceLoading(false);
     }
@@ -504,14 +856,242 @@ const Contacts = () => {
     return location ? location.name : 'N/A';
   };
 
+  const typeLabel = contactType === 'account_holders' ? 'Account Holders'
+    : contactType === 'participants' ? 'Participants' : 'All Contacts';
+
+  // Group participants under their account holder for nested/stacked display.
+  // Participants whose holder isn't in the current (filtered) view are shown
+  // standalone so nothing is hidden.
+  const groupedMembers = useMemo(() => {
+    const holders = members.filter(m => m.memberType !== 'participant');
+    const holderIds = new Set(holders.map(h => h.id));
+    const byHolder = new Map<number, Member[]>();
+    const orphans: Member[] = [];
+    for (const m of members) {
+      if (m.memberType !== 'participant') continue;
+      const ahId = m.accountHolderId ?? null;
+      if (ahId != null && holderIds.has(ahId)) {
+        const arr = byHolder.get(ahId) || [];
+        arr.push(m);
+        byHolder.set(ahId, arr);
+      } else {
+        orphans.push(m);
+      }
+    }
+    const groups: { holder: Member | null; participants: Member[] }[] =
+      holders.map(h => ({ holder: h, participants: byHolder.get(h.id) || [] }));
+    // Each orphan participant is its own group so progressive rendering windows
+    // them individually (e.g. the Participants tab, which is all orphans).
+    for (const o of orphans) groups.push({ holder: null, participants: [o] });
+    return groups;
+  }, [members]);
+
+  const collapsibleHolderIds = useMemo(
+    () => groupedMembers.filter(g => g.holder && g.participants.length > 0).map(g => g.holder!.id),
+    [groupedMembers],
+  );
+  const allCollapsed = collapsibleHolderIds.length > 0 && collapsibleHolderIds.every(id => collapsedHolders.has(id));
+  const toggleHolderCollapse = (id: number) =>
+    setCollapsedHolders(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAllCollapse = () =>
+    setCollapsedHolders(allCollapsed ? new Set() : new Set(collapsibleHolderIds));
+
+  // Progressive rendering: only mount the first N holder groups, then grow as
+  // the user scrolls near the bottom. Keeps initial DOM small on big lists.
+  const visibleGroups = useMemo(() => groupedMembers.slice(0, visibleCount), [groupedMembers, visibleCount]);
+  const hasMoreGroups = visibleCount < groupedMembers.length;
+  // Reset the window whenever the underlying list changes (filter/search/sort/location).
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [members]);
+  useEffect(() => {
+    if (!hasMoreGroups) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) setVisibleCount((c) => Math.min(c + PAGE_SIZE, groupedMembers.length)); },
+      { rootMargin: '800px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+    // visibleCount in deps: re-observe after each page so we keep loading while
+    // the sentinel remains in view (IO won't re-fire if it never leaves view).
+  }, [hasMoreGroups, groupedMembers.length, visibleCount]);
+
+  // O(1) lookups so per-row rendering doesn't scan these lists for every member.
+  const pricingPlanById = useMemo(() => {
+    const m = new Map<number, PricingPlan>();
+    for (const p of allPricingPlans) m.set(p.id, p);
+    return m;
+  }, [allPricingPlans]);
+  const accountHolderById = useMemo(() => {
+    const m = new Map<number, Member>();
+    for (const ah of accountHolders) m.set(ah.id, ah);
+    return m;
+  }, [accountHolders]);
+  const planName = (id?: number | null) => (id != null ? pricingPlanById.get(id)?.name : undefined) || '—';
+
+  const renderMemberCard = (member: Member, stacked = false) => (
+    <div
+      key={member.id}
+      className={`${styles.card} ${member.memberType === 'participant' ? styles.participantCard : ''} ${stacked ? styles.stackedCard : ''}`}
+    >
+      <div className={styles.cardHeader} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <h3 className={styles.cardTitle}>{member.firstName} {member.lastName}</h3>
+          {member.memberType === 'participant' && (
+            <span className={styles.memberTypeChip}>Participant</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {(() => {
+            const tier = intentTier(intentScores[member.id]);
+            return tier ? (
+              <span
+                className={`${styles.intentBadge} ${styles[tier.cls]}`}
+                title={`${intentScores[member.id]} site events in the last 24h (from DragonDesk: Pulse)`}
+              >
+                {tier.label}
+              </span>
+            ) : null;
+          })()}
+          <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
+        </div>
+      </div>
+      <div className={styles.cardBody} onClick={() => handleViewMember(member)} style={{ cursor: 'pointer' }}>
+        {member.memberType !== 'participant' && member.email && (
+          <div className={styles.info}><span className={styles.label}>Email:</span><span>{member.email}</span></div>
+        )}
+        {member.memberType !== 'participant' && (
+          <div className={styles.info}><span className={styles.label}>Phone:</span><span>{member.phone || '—'}</span></div>
+        )}
+        {member.memberType === 'participant' && !stacked && (
+          <div className={styles.info}>
+            <span className={styles.label}>Account Holder:</span>
+            <span>{(() => {
+              const ah = member.accountHolderId != null ? accountHolderById.get(member.accountHolderId) : undefined;
+              return ah ? `${ah.firstName} ${ah.lastName}` : '—';
+            })()}</span>
+          </div>
+        )}
+        <div className={styles.info}>
+          <span className={styles.label}>{member.memberType === 'participant' ? 'Programs:' : 'Program:'}</span>
+          {(member as any).programs?.length ? (
+            <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+              {(member as any).programs.map((p: any) => (
+                <span key={p.id} className={styles.memberTypeChip}>{p.name}</span>
+              ))}
+            </span>
+          ) : (
+            <span>{member.programType || '—'}</span>
+          )}
+        </div>
+        <div className={styles.info}><span className={styles.label}>Ranking:</span><span>{member.ranking}</span></div>
+        {member.accountStatus === 'lead' && (member as any).programInterestId && (
+          <div className={styles.info}>
+            <span className={styles.label}>Interested in:</span>
+            <span>{programs.find(p => p.id === (member as any).programInterestId)?.name || '—'}</span>
+          </div>
+        )}
+        {member.memberType !== 'participant' && (
+          <div className={styles.info}><span className={styles.label}>Plan:</span><span>{planName(member.pricingPlanId)}</span></div>
+        )}
+        <div className={styles.info}><span className={styles.label}>Age Group:</span><span>{member.membershipAge}</span></div>
+      </div>
+      <div className={styles.cardFooter}>
+        {(member.accountStatus === 'lead' || member.accountStatus === 'trialer') && (
+          <button onClick={() => openConvert(member)} className={styles.editBtn}>
+            Convert to {member.accountStatus === 'lead' ? 'Trial' : 'Member'}
+          </button>
+        )}
+        <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>Edit</button>
+        <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>Delete</button>
+      </div>
+    </div>
+  );
+
+  const renderMemberRow = (
+    member: Member,
+    isChild = false,
+    holderToggle?: { count: number; collapsed: boolean; onToggle: () => void },
+  ) => (
+    <tr
+      key={member.id}
+      onClick={() => handleViewMember(member)}
+      style={{ cursor: 'pointer' }}
+      className={`${selectedIds.has(member.id) ? styles.selectedRow : ''} ${isChild ? styles.childRow : ''}`}
+    >
+      <td onClick={e => e.stopPropagation()} className={styles.checkboxCol}>
+        <input type="checkbox" checked={selectedIds.has(member.id)} onChange={() => toggleSelect(member.id)} />
+      </td>
+      <td className={`${styles.nameCell} ${isChild ? styles.childName : ''}`}>
+        {holderToggle && (
+          <button
+            type="button"
+            className={styles.rowToggle}
+            onClick={(e) => { e.stopPropagation(); holderToggle.onToggle(); }}
+            aria-label={holderToggle.collapsed ? 'Expand participants' : 'Collapse participants'}
+          >
+            <span className={`${styles.chev} ${holderToggle.collapsed ? styles.chevCollapsed : ''}`} />
+          </button>
+        )}
+        {isChild && <span className={styles.treeBranch}>↳</span>}
+        {member.firstName} {member.lastName}
+        {member.memberType === 'participant' && <span className={styles.memberTypeChip} style={{ marginLeft: 8 }}>Participant</span>}
+        {holderToggle && <span className={styles.countBadge}>{holderToggle.count}</span>}
+      </td>
+      <td>{member.email}</td>
+      <td>{member.phone}</td>
+      <td>
+        <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
+        {(() => {
+          const tier = intentTier(intentScores[member.id]);
+          return tier ? (
+            <span
+              className={`${styles.intentBadge} ${styles[tier.cls]}`}
+              style={{ marginLeft: 6 }}
+              title={`${intentScores[member.id]} site events in the last 24h (from DragonDesk: Pulse)`}
+            >
+              {tier.label}
+            </span>
+          ) : null;
+        })()}
+      </td>
+      <td>{member.programType}</td>
+      <td>{member.ranking}</td>
+      <td>{planName(member.pricingPlanId)}</td>
+      <td>{member.membershipAge}</td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <div className={styles.tableActions}>
+          {(member.accountStatus === 'lead' || member.accountStatus === 'trialer') && (
+            <button onClick={() => openConvert(member)} className={styles.editBtn}>
+              Convert
+            </button>
+          )}
+          <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>Edit</button>
+          <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>Delete</button>
+        </div>
+      </td>
+    </tr>
+  );
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Contacts</h1>
-          <p className={styles.subtitle}>Manage leads, trialers, and members</p>
+          <p className={styles.subtitle}>Manage leads, trials, and members</p>
         </div>
         <div className={styles.headerActions}>
+          <input
+            type="text"
+            placeholder="Search by name, email, or phone…"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            className={styles.searchInput}
+          />
           <div className={styles.viewToggle}>
             <button
               onClick={() => setViewMode('card')}
@@ -528,13 +1108,30 @@ const Contacts = () => {
               <TableViewIcon size={20} />
             </button>
           </div>
-          <button onClick={() => { setShowImportModal(true); setImportResult(null); setImportFile(null); }} className={styles.importBtn}>
+          {collapsibleHolderIds.length > 0 && (
+            <button onClick={toggleAllCollapse} className={styles.collapseAllBtn} type="button">
+              {allCollapsed ? 'Expand all' : 'Collapse all'}
+            </button>
+          )}
+          <button onClick={() => { setShowImportModal(true); setImportResults([]); setImportFiles([]); }} className={styles.importBtn}>
             Import CSV
           </button>
           <button onClick={() => handleOpenModal()} className={styles.addBtn}>
             + Add Contact
           </button>
         </div>
+      </div>
+
+      <div className={styles.typeTabs}>
+        {(['all', 'account_holders', 'participants'] as const).map(t => (
+          <button
+            key={t}
+            className={`${styles.typeTab} ${contactType === t ? styles.typeTabActive : ''}`}
+            onClick={() => setContactType(t)}
+          >
+            {t === 'all' ? 'All' : t === 'account_holders' ? 'Account Holders' : 'Participants'}
+          </button>
+        ))}
       </div>
 
       <div className={styles.filters}>
@@ -545,7 +1142,7 @@ const Contacts = () => {
         >
           <option value="">All Account Statuses</option>
           <option value="lead">Lead</option>
-          <option value="trialer">Trialer</option>
+          <option value="trialer">Trial</option>
           <option value="member">Member</option>
           <option value="cancelled">Cancelled</option>
         </select>
@@ -556,20 +1153,10 @@ const Contacts = () => {
           className={styles.select}
         >
           <option value="">All Programs</option>
-          <option value="Children's Martial Arts">Children's Martial Arts</option>
-          <option value="Adult BJJ">Adult BJJ</option>
-          <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-          <option value="DG Barbell">DG Barbell</option>
-          <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-          <option value="The Ashtanga Club">The Ashtanga Club</option>
-          <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-          <option value="Kids BJJ">Kids BJJ</option>
-          <option value="Kids Muay Thai">Kids Muay Thai</option>
-          <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-          <option value="DG Workspace">DG Workspace</option>
-          <option value="Dragon Launch">Dragon Launch</option>
-          <option value="Personal Training">Personal Training</option>
-          <option value="DGMT Private Training">DGMT Private Training</option>
+          <option value="No Program Selected">No Program Selected (unassigned)</option>
+          {programs.map(p => (
+            <option key={p.id} value={p.name}>{p.name}</option>
+          ))}
         </select>
 
         <select
@@ -580,6 +1167,18 @@ const Contacts = () => {
           <option value="">All Ages</option>
           <option value="Adult">Adult</option>
           <option value="Kids">Kids</option>
+        </select>
+
+        <select
+          value={filters.sort}
+          onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
+          className={styles.select}
+        >
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="name_az">Name A–Z</option>
+          <option value="name_za">Name Z–A</option>
+          <option value="status">Status</option>
         </select>
       </div>
 
@@ -592,60 +1191,26 @@ const Contacts = () => {
         </div>
       ) : viewMode === 'card' ? (
         <div className={styles.grid}>
-          {members.map((member) => (
-            <div key={member.id} className={styles.card}>
-              <div
-                className={styles.cardHeader}
-                onClick={() => handleViewMember(member)}
-                style={{ cursor: 'pointer' }}
-              >
-                <h3 className={styles.cardTitle}>
-                  {member.firstName} {member.lastName}
-                </h3>
-                <span className={`${styles.badge} ${styles[member.accountStatus]}`}>
-                  {member.accountStatus}
-                </span>
+          {visibleGroups.map((group) => {
+            if (!group.holder) {
+              // Orphan participants (account holder not in the current view)
+              return group.participants.map((p) => renderMemberCard(p));
+            }
+            const hasParticipants = group.participants.length > 0;
+            const collapsed = collapsedHolders.has(group.holder.id);
+            return (
+              <div key={`h${group.holder.id}`} className={hasParticipants ? styles.cardStack : undefined}>
+                {renderMemberCard(group.holder)}
+                {hasParticipants && (
+                  <button type="button" className={styles.stackToggle} onClick={() => toggleHolderCollapse(group.holder!.id)}>
+                    <span className={`${styles.chev} ${collapsed ? styles.chevCollapsed : ''}`} />
+                    {collapsed ? 'Show' : 'Hide'} {group.participants.length} participant{group.participants.length > 1 ? 's' : ''}
+                  </button>
+                )}
+                {hasParticipants && !collapsed && group.participants.map((p) => renderMemberCard(p, true))}
               </div>
-              <div
-                className={styles.cardBody}
-                onClick={() => handleViewMember(member)}
-                style={{ cursor: 'pointer' }}
-              >
-                <div className={styles.info}>
-                  <span className={styles.label}>Email:</span>
-                  <span>{member.email}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Phone:</span>
-                  <span>{member.phone}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Program:</span>
-                  <span>{member.programType}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Ranking:</span>
-                  <span>{member.ranking}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Plan:</span>
-                  <span>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</span>
-                </div>
-                <div className={styles.info}>
-                  <span className={styles.label}>Age Group:</span>
-                  <span>{member.membershipAge}</span>
-                </div>
-              </div>
-              <div className={styles.cardFooter}>
-                <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>
-                  Edit
-                </button>
-                <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className={styles.tableContainer}>
@@ -668,7 +1233,7 @@ const Contacts = () => {
                 <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className={styles.bulkSelect}>
                   <option value="">Select status...</option>
                   <option value="lead">Lead</option>
-                  <option value="trialer">Trialer</option>
+                  <option value="trialer">Trial</option>
                   <option value="member">Member</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
@@ -739,48 +1304,39 @@ const Contacts = () => {
               </tr>
             </thead>
             <tbody>
-              {members.map((member) => (
-                <tr
-                  key={member.id}
-                  onClick={() => handleViewMember(member)}
-                  style={{ cursor: 'pointer' }}
-                  className={selectedIds.has(member.id) ? styles.selectedRow : ''}
-                >
-                  <td onClick={e => e.stopPropagation()} className={styles.checkboxCol}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(member.id)}
-                      onChange={() => toggleSelect(member.id)}
-                    />
-                  </td>
-                  <td className={styles.nameCell}>
-                    {member.firstName} {member.lastName}
-                  </td>
-                  <td>{member.email}</td>
-                  <td>{member.phone}</td>
-                  <td>
-                    <span className={`${styles.badge} ${styles[member.accountStatus]}`}>
-                      {member.accountStatus}
-                    </span>
-                  </td>
-                  <td>{member.programType}</td>
-                  <td>{member.ranking}</td>
-                  <td>{allPricingPlans.find(p => p.id === member.pricingPlanId)?.name || '—'}</td>
-                  <td>{member.membershipAge}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <div className={styles.tableActions}>
-                      <button onClick={() => handleOpenModal(member)} className={styles.editBtn}>
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(member.id)} className={styles.deleteBtn}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {visibleGroups.map((group) => {
+                const collapsed = group.holder ? collapsedHolders.has(group.holder.id) : false;
+                const hasParticipants = group.participants.length > 0;
+                return (
+                  <React.Fragment key={group.holder ? `h${group.holder.id}` : `o${group.participants[0]?.id ?? 'x'}`}>
+                    {group.holder && renderMemberRow(
+                      group.holder,
+                      false,
+                      hasParticipants
+                        ? { count: group.participants.length, collapsed, onToggle: () => toggleHolderCollapse(group.holder!.id) }
+                        : undefined,
+                    )}
+                    {!collapsed && group.participants.map((p) => renderMemberRow(p, !!group.holder))}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {hasMoreGroups && (
+        <div ref={sentinelRef} className={styles.loadMore}>
+          <button
+            type="button"
+            className={styles.loadMoreBtn}
+            onClick={() => setVisibleCount((c) => Math.min(c + PAGE_SIZE, groupedMembers.length))}
+          >
+            Load more
+          </button>
+          <span className={styles.loadMoreHint}>
+            Showing {visibleGroups.length} of {groupedMembers.length}
+          </span>
         </div>
       )}
 
@@ -794,6 +1350,50 @@ const Contacts = () => {
               </button>
             </div>
             <form onSubmit={handleSubmit} className={styles.form}>
+
+              {/* Member type toggle */}
+              {!editingMember && (
+                <div className={styles.memberTypeToggle}>
+                  <button
+                    type="button"
+                    className={`${styles.memberTypeToggleBtn} ${formData.memberType === 'account_holder' ? styles.memberTypeToggleBtnActive : ''}`}
+                    onClick={() => setFormData({ ...formData, memberType: 'account_holder', accountHolderId: '' })}
+                  >
+                    Account Holder
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.memberTypeToggleBtn} ${formData.memberType === 'participant' ? styles.memberTypeToggleBtnActive : ''}`}
+                    onClick={() => setFormData({ ...formData, memberType: 'participant' })}
+                  >
+                    Participant
+                  </button>
+                </div>
+              )}
+
+              {/* Account Holder picker — shown only for participants */}
+              {formData.memberType === 'participant' && (
+                <div className={styles.formGroup} style={{ marginBottom: 16 }}>
+                  <label className={styles.formLabel}>Account Holder *</label>
+                  <select
+                    value={formData.accountHolderId}
+                    onChange={(e) => setFormData({ ...formData, accountHolderId: e.target.value })}
+                    className={styles.input}
+                    required
+                  >
+                    <option value="">— Select account holder —</option>
+                    {accountHolders.map(ah => (
+                      <option key={ah.id} value={ah.id}>
+                        {ah.firstName} {ah.lastName}{ah.email ? ` (${ah.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    Every participant belongs to an account holder — that's the account billed for their seat.
+                  </span>
+                </div>
+              )}
+
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>First Name *</label>
@@ -832,13 +1432,16 @@ const Contacts = () => {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Email *</label>
+                  <label className={styles.formLabel}>
+                    Email {formData.memberType !== 'participant' ? '*' : ''}
+                    {formData.memberType === 'participant' && <span style={{ color: 'var(--text-secondary)', fontSize: '0.8em', marginLeft: 4 }}>(optional for participants)</span>}
+                  </label>
                   <input
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className={styles.input}
-                    required
+                    required={formData.memberType !== 'participant'}
                   />
                 </div>
                 <div className={styles.formGroup}>
@@ -854,7 +1457,7 @@ const Contacts = () => {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Account Status *</label>
+                  <label className={styles.formLabel}>Stage *</label>
                   <select
                     value={formData.accountStatus}
                     onChange={(e) => setFormData({ ...formData, accountStatus: e.target.value as AccountStatus })}
@@ -862,7 +1465,7 @@ const Contacts = () => {
                     required
                   >
                     <option value="lead">Lead</option>
-                    <option value="trialer">Trialer</option>
+                    <option value="trialer">Trial</option>
                     <option value="member">Member</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
@@ -902,38 +1505,196 @@ const Contacts = () => {
                 </div>
               </div>
 
+
+              {/* ── Stage products ────────────────────────────────────────────
+                  Each stage exposes one product. Later-stage fields stay visible
+                  but greyed, so the path forward is legible from a Lead profile. */}
+
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Program *</label>
+                  <label className={styles.formLabel}>Program Interest</label>
                   <select
-                    value={formData.programType}
-                    onChange={(e) => {
-                      const newProgram = e.target.value as ProgramType;
-                      setFormData({
-                        ...formData,
-                        programType: newProgram,
-                        ranking: RANKINGS[newProgram]?.[0] || 'Beginner',
-                      });
-                    }}
+                    value={formData.programInterestId}
+                    onChange={(e) => setFormData({ ...formData, programInterestId: e.target.value })}
                     className={styles.input}
-                    required
                   >
-                    <option value="No Program Selected">No Program Selected</option>
-                    <option value="Children's Martial Arts">Children's Martial Arts</option>
-                    <option value="Adult BJJ">Adult BJJ</option>
-                    <option value="Adult TKD & HKD">Adult TKD & HKD</option>
-                    <option value="DG Barbell">DG Barbell</option>
-                    <option value="Adult Muay Thai & Kickboxing">Adult Muay Thai & Kickboxing</option>
-                    <option value="The Ashtanga Club">The Ashtanga Club</option>
-                    <option value="Dragon Gym Learning Center">Dragon Gym Learning Center</option>
-                    <option value="Kids BJJ">Kids BJJ</option>
-                    <option value="Kids Muay Thai">Kids Muay Thai</option>
-                    <option value="Young Ladies Yoga">Young Ladies Yoga</option>
-                    <option value="DG Workspace">DG Workspace</option>
-                    <option value="Dragon Launch">Dragon Launch</option>
-                    <option value="Personal Training">Personal Training</option>
-                    <option value="DGMT Private Training">DGMT Private Training</option>
+                    <option value="">No program interest</option>
+                    {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    What they enquired about. Captured automatically from the lead form.
+                  </span>
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <GatedField
+                    allowed={stageAllows(formData.accountStatus, 'quickStart')}
+                    hint={STAGE_HINT.quickStart}
+                    label="Quick Start"
+                  >
+                    {quickStart ? (
+                      <>
+                        <div className={styles.input} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span>{quickStart.programName || 'Program removed'}</span>
+                          <span style={{ color: 'var(--color-text-secondary)' }}>{money(quickStart.priceAmount)}</span>
+                        </div>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                          {quickStart.status === 'converted'
+                            ? `Converted after ${quickStart.classesUsed} of ${quickStart.classesIncluded} classes.`
+                            : quickStart.classesUsed >= quickStart.classesIncluded
+                              ? `All ${quickStart.classesIncluded} classes used \u2014 ready to convert.`
+                              : `${quickStart.classesUsed} of ${quickStart.classesIncluded} classes used, ${quickStart.classesIncluded - quickStart.classesUsed} remaining.`}
+                        </span>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                        {stageAllows(formData.accountStatus, 'quickStart')
+                          ? 'No Quick Start yet. Use Convert on a Lead to start one, priced from the program.'
+                          : 'Every martial art starts with a Quick Start trial.'}
+                      </span>
+                    )}
+                  </GatedField>
+                </div>
+              </div>
+
+              {/* Seats are the money: the account holder buys one per participant
+                  they cover, so this panel is the account's real monthly cost. */}
+              {formData.memberType === 'account_holder' && (
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <GatedField
+                      allowed={stageAllows(formData.accountStatus, 'membership')}
+                      hint={STAGE_HINT.membership}
+                      label="Membership Seats"
+                    >
+                      {editingMember ? (
+                        <>
+                          {seats.map(seat => (
+                            <div
+                              key={seat.id}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}
+                            >
+                              <span className={styles.input} style={{ flex: '1 1 140px', minWidth: 0 }}>
+                                {seat.membershipName} — {money(seat.priceAmount)}/mo
+                              </span>
+                              {seat.isFamilyPlan ? (
+                                <span style={{ flex: '1 1 160px', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                                  Covers everyone on this account
+                                </span>
+                              ) : (
+                                <select
+                                  value={seat.participantId?.toString() || ''}
+                                  onChange={(e) => handleAssignSeat(seat.id, e.target.value)}
+                                  className={styles.input}
+                                  style={{ flex: '1 1 160px' }}
+                                  disabled={seatBusy}
+                                >
+                                  <option value="">Unassigned</option>
+                                  {editingMember && (
+                                    <option value={editingMember.id}>
+                                      {editingMember.firstName} {editingMember.lastName} (account holder)
+                                    </option>
+                                  )}
+                                  {(editingMember?.participants || []).map(p => (
+                                    <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>
+                                  ))}
+                                </select>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSeat(seat.id)}
+                                className={styles.deleteBtn}
+                                disabled={seatBusy}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                            <select
+                              className={styles.input}
+                              style={{ flex: 1 }}
+                              value=""
+                              disabled={seatBusy || memberships.length === 0}
+                              onChange={(e) => handleAddSeat(e.target.value, '')}
+                            >
+                              <option value="">Add a seat...</option>
+                              {memberships.map(m => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} — {money(m.priceAmount)}/mo
+                                  {m.isFamilyPlan ? ' (family)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div style={{ marginTop: 6, fontSize: '0.9rem' }}>
+                            <strong>Monthly total: {money(seats.reduce((sum, s) => sum + s.priceAmount, 0))}</strong>
+                            <span style={{ color: 'var(--color-text-secondary)' }}>
+                              {' '}across {seats.length} seat{seats.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                          {memberships.length === 0 && (
+                            <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                              No membership plans configured. Add them in Settings &rarr; Membership Plans.
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                          Save this contact first, then assign membership seats.
+                        </span>
+                      )}
+                    </GatedField>
+                  </div>
+                </div>
+              )}
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <GatedField
+                    allowed={stageAllows(formData.accountStatus, 'programs')}
+                    hint={STAGE_HINT.programs}
+                    label={formData.memberType === 'participant' ? 'Programs' : 'Programs (if they train)'}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.5rem 0' }}>
+                      {programs.map(p => (
+                        <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={formData.programIds.includes(p.id)}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...formData.programIds, p.id]
+                                : formData.programIds.filter(id => id !== p.id);
+                              const primaryName = (programs.find(pr => pr.id === next[0])?.name || 'No Program Selected') as ProgramType;
+                              setFormData({
+                                ...formData,
+                                programIds: next,
+                                programType: primaryName,
+                                ranking: RANKINGS[primaryName]?.[0] || formData.ranking,
+                              });
+                            }}
+                          />
+                          {p.name}
+                          {p.ageGroup && p.ageGroup !== 'All' && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>({p.ageGroup})</span>
+                          )}
+                        </label>
+                      ))}
+                      {programs.length === 0 && (
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                          No programs configured. Add them in Settings &rarr; Programs.
+                        </span>
+                      )}
+                    </div>
+                    {seatLimitNote && (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{seatLimitNote}</span>
+                    )}
+                  </GatedField>
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Ranking *</label>
@@ -1093,24 +1854,85 @@ const Contacts = () => {
       {/* CSV Import Modal */}
       {showImportModal && (
         <div className={styles.modal}>
-          <div className={styles.modalContent} style={{ maxWidth: '520px' }}>
+          <div className={styles.modalContent} style={{ maxWidth: '600px' }}>
             <div className={styles.modalHeader}>
               <h2>Import from MyStudio CSV</h2>
               <button onClick={() => setShowImportModal(false)} className={styles.closeBtn}>&times;</button>
             </div>
-            {!importResult ? (
+
+            {importResults.length === 0 ? (
               <div className={styles.form}>
                 <p className={styles.importHint}>
-                  Supports Lead, Trial, and Member exports from MyStudio. Duplicate emails are skipped automatically.
+                  Select one or more CSV exports (Leads, Trials, Members, or Student Details). Each file is processed in order — duplicates are upgraded automatically. Student Details links participants to their account holder and refreshes contact info without overwriting program, rank, or status.
                 </p>
+
+                {/* Drop zone / file picker */}
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>CSV File</label>
-                  <input type="file" accept=".csv" className={styles.input} onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
+                  <label className={styles.formLabel}>CSV Files</label>
+                  <label className={styles.importDropZone}>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const picked = Array.from(e.target.files || []);
+                        setImportFiles(prev => {
+                          const existing = new Set(prev.map(f => f.name));
+                          return [...prev, ...picked.filter(f => !existing.has(f.name))];
+                        });
+                        e.target.value = '';
+                      }}
+                    />
+                    <span className={styles.importDropIcon}>📂</span>
+                    <span className={styles.importDropText}>Click to select files</span>
+                    <span className={styles.importDropHint}>Hold Ctrl/Cmd to select multiple at once</span>
+                  </label>
                 </div>
+
+                {/* File queue */}
+                {importFiles.length > 0 && (
+                  <div className={styles.importQueue}>
+                    {importFiles.map((file, i) => (
+                      <div key={i} className={styles.importQueueItem}>
+                        <span className={styles.importQueueIcon}>📄</span>
+                        <span className={styles.importQueueName}>{file.name}</span>
+                        <span className={styles.importQueueSize}>{(file.size / 1024).toFixed(1)} KB</span>
+                        {importLoading && importProgress && importProgress.current === i + 1 ? (
+                          <span className={styles.importQueueStatus}>⏳ Importing…</span>
+                        ) : importLoading && importProgress && importProgress.current > i + 1 ? (
+                          <span className={styles.importQueueStatusDone}>✓</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.importQueueRemove}
+                            onClick={() => setImportFiles(prev => prev.filter((_, idx) => idx !== i))}
+                          >✕</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                {importLoading && importProgress && (
+                  <div className={styles.importProgressWrap}>
+                    <div className={styles.importProgressBar}>
+                      <div
+                        className={styles.importProgressFill}
+                        style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    <span className={styles.importProgressLabel}>
+                      Processing file {importProgress.current} of {importProgress.total}…
+                    </span>
+                  </div>
+                )}
+
                 <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Program Override</label>
+                  <label className={styles.formLabel}>Program Override <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)' }}>(optional — applies to all files)</span></label>
                   <select value={importProgram} onChange={(e) => setImportProgram(e.target.value)} className={styles.input}>
-                    <option value="">Auto-detect from file</option>
+                    <option value="">Auto-detect from each file</option>
                     <option value="Children's Martial Arts">Children's Martial Arts</option>
                     <option value="Adult BJJ">Adult BJJ</option>
                     <option value="Adult TKD & HKD">Adult TKD & HKD</option>
@@ -1127,64 +1949,126 @@ const Contacts = () => {
                     <option value="DGMT Private Training">DGMT Private Training</option>
                   </select>
                 </div>
+
                 <div className={styles.modalFooter}>
                   <button onClick={() => setShowImportModal(false)} className={styles.cancelBtn} type="button">Cancel</button>
-                  <button onClick={handleImport} className={styles.saveBtn} disabled={!importFile || importLoading} type="button">
-                    {importLoading ? 'Importing...' : 'Import'}
+                  <button onClick={() => handleImport(true)} className={styles.cancelBtn} disabled={!importFiles.length || importLoading} type="button">
+                    {importLoading ? 'Working…' : 'Preview changes'}
+                  </button>
+                  <button onClick={() => handleImport(false)} className={styles.saveBtn} disabled={!importFiles.length || importLoading} type="button">
+                    {importLoading
+                      ? `Importing ${importProgress?.current ?? 1} of ${importProgress?.total ?? importFiles.length}…`
+                      : `Import ${importFiles.length > 0 ? `${importFiles.length} File${importFiles.length > 1 ? 's' : ''}` : ''}`}
                   </button>
                 </div>
               </div>
-            ) : importResult.error ? (
-              <div className={styles.form}>
-                <div className={styles.importError}>{importResult.error}</div>
-                <div className={styles.modalFooter}>
-                  <button onClick={() => setImportResult(null)} className={styles.cancelBtn} type="button">Try Again</button>
-                  <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Close</button>
-                </div>
-              </div>
             ) : (
+              /* Results view */
               <div className={styles.form}>
-                <div className={styles.importResults}>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Type detected</span>
-                    <span className={styles.importResultValue}>{importResult.type}</span>
-                  </div>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Total rows</span>
-                    <span className={styles.importResultValue}>{importResult.total}</span>
-                  </div>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Imported</span>
-                    <span className={`${styles.importResultValue} ${styles.importSuccess}`}>{importResult.imported}</span>
-                  </div>
-                  <div className={styles.importResultRow}>
-                    <span className={styles.importResultLabel}>Skipped</span>
-                    <span className={styles.importResultValue}>{importResult.skipped}</span>
-                  </div>
-                  {importResult.errors > 0 && (
-                    <div className={styles.importResultRow}>
-                      <span className={styles.importResultLabel}>Errors</span>
-                      <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.errors}</span>
-                    </div>
-                  )}
-                  {importResult.duplicateCount > 0 && (
-                    <div className={styles.importResultRow}>
-                      <span className={styles.importResultLabel}>Duplicates</span>
-                      <span className={`${styles.importResultValue} ${styles.importFailed}`}>{importResult.duplicateCount}</span>
-                    </div>
-                  )}
-                </div>
-                {importResult.duplicateList?.length > 0 && (
-                  <div className={styles.duplicateList}>
-                    <p className={styles.duplicateListTitle}>Duplicate records (already in system):</p>
-                    {importResult.duplicateList.map((d: string, i: number) => (
-                      <div key={i} className={styles.duplicateRow}>{d}</div>
-                    ))}
-                  </div>
+                {importResults.some(r => r.preview) && (
+                  <p className={styles.importHint}>
+                    <strong>Preview only — nothing was saved.</strong> These are the changes that would be made if you import. Review the counts below, then click <strong>Apply import</strong> to commit.
+                  </p>
                 )}
+                {/* Aggregate totals */}
+                {importResults.length > 1 && (() => {
+                  const totals = importResults.reduce((acc, r) => ({
+                    total: acc.total + (r.total || 0),
+                    imported: acc.imported + (r.imported || 0),
+                    skipped: acc.skipped + (r.skipped || 0),
+                    upgraded: acc.upgraded + (r.upgraded || 0),
+                    errors: acc.errors + (r.errors || 0),
+                  }), { total: 0, imported: 0, skipped: 0, upgraded: 0, errors: 0 });
+                  return (
+                    <div className={styles.importTotals}>
+                      <div className={styles.importTotalsTitle}>Total across {importResults.length} files</div>
+                      <div className={styles.importTotalsRow}>
+                        <div className={styles.importTotalStat}>
+                          <span className={styles.importTotalNum}>{totals.total}</span>
+                          <span className={styles.importTotalLbl}>Rows</span>
+                        </div>
+                        <div className={styles.importTotalStat}>
+                          <span className={`${styles.importTotalNum} ${styles.importSuccess}`}>{totals.imported}</span>
+                          <span className={styles.importTotalLbl}>Imported</span>
+                        </div>
+                        {totals.upgraded > 0 && (
+                          <div className={styles.importTotalStat}>
+                            <span className={`${styles.importTotalNum} ${styles.importUpgraded}`}>{totals.upgraded}</span>
+                            <span className={styles.importTotalLbl}>Upgraded</span>
+                          </div>
+                        )}
+                        <div className={styles.importTotalStat}>
+                          <span className={styles.importTotalNum}>{totals.skipped}</span>
+                          <span className={styles.importTotalLbl}>Skipped</span>
+                        </div>
+                        {totals.errors > 0 && (
+                          <div className={styles.importTotalStat}>
+                            <span className={`${styles.importTotalNum} ${styles.importFailed}`}>{totals.errors}</span>
+                            <span className={styles.importTotalLbl}>Errors</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Per-file results */}
+                <div className={styles.importFileResults}>
+                  {importResults.map((r, i) => (
+                    <div key={i} className={`${styles.importFileResult} ${r.error ? styles.importFileResultError : ''}`}>
+                      <div className={styles.importFileResultName}>
+                        <span>{r.error ? '✕' : '✓'}</span>
+                        <span>{r.fileName}</span>
+                        {r.type && <span className={styles.importTypeBadge}>{r.type}</span>}
+                      </div>
+                      {r.error ? (
+                        <div className={styles.importError}>{r.error}</div>
+                      ) : (
+                        <>
+                          <div className={styles.importFileResultStats}>
+                            <span>{r.total} rows</span>
+                            <span className={styles.importSuccess}>{r.imported} imported</span>
+                            {r.upgraded > 0 && <span className={styles.importUpgraded}>{r.upgraded} upgraded</span>}
+                            {r.skipped > 0 && <span>{r.skipped} skipped</span>}
+                            {r.errors > 0 && <span className={styles.importFailed}>{r.errors} errors</span>}
+                          </div>
+                          {/* Account holder / participant structure */}
+                          {(r.accountHoldersCreated > 0 || r.participantsCreated > 0 || r.relinked > 0 || r.contactsUpdated > 0 || r.unmatched > 0) && (
+                            <div className={styles.importFileResultStats}>
+                              {r.accountHoldersCreated > 0 && <span>{r.accountHoldersCreated} account holders created</span>}
+                              {r.participantsCreated > 0 && <span>{r.participantsCreated} participants created</span>}
+                              {r.relinked > 0 && <span>{r.relinked} participants relinked</span>}
+                              {r.contactsUpdated > 0 && <span>{r.contactsUpdated} contacts updated</span>}
+                              {r.unmatched > 0 && <span>{r.unmatched} unmatched</span>}
+                            </div>
+                          )}
+                          {/* New-model products created (seats, quick starts, programs) */}
+                          {(r.seatsCreated > 0 || r.quickStartsCreated > 0 || r.membershipsCreated > 0 || r.programsLinked > 0) && (
+                            <div className={styles.importFileResultStats}>
+                              {r.seatsCreated > 0 && <span className={styles.importSuccess}>{r.seatsCreated} membership seats</span>}
+                              {r.quickStartsCreated > 0 && <span className={styles.importSuccess}>{r.quickStartsCreated} quick starts</span>}
+                              {r.programsLinked > 0 && <span>{r.programsLinked} program enrollments</span>}
+                              {r.membershipsCreated > 0 && <span>{r.membershipsCreated} membership types created</span>}
+                            </div>
+                          )}
+                          {r.skipReasons?.length > 0 && (
+                            <div className={styles.importSkipReasons}>
+                              {r.skipReasons.slice(0, 5).map((s: string, si: number) => <div key={si}>• {s}</div>)}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
                 <div className={styles.modalFooter}>
-                  <button onClick={() => { setImportResult(null); setImportFile(null); }} className={styles.cancelBtn} type="button">Import Another</button>
-                  <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>
+                  <button onClick={() => { setImportResults([]); if (!importResults.some(r => r.preview)) setImportFiles([]); }} className={styles.cancelBtn} type="button">
+                    {importResults.some(r => r.preview) ? 'Back' : 'Import More'}
+                  </button>
+                  {importResults.some(r => r.preview)
+                    ? <button onClick={() => handleImport(false)} className={styles.saveBtn} disabled={importLoading} type="button">Apply import</button>
+                    : <button onClick={() => setShowImportModal(false)} className={styles.saveBtn} type="button">Done</button>}
                 </div>
               </div>
             )}
@@ -1193,6 +2077,86 @@ const Contacts = () => {
       )}
 
       {/* Cancellation Confirmation Modal */}
+      {/* Stage conversion. Each step needs the product the target stage
+          requires, so the modal collects it up front and the server commits
+          the stage change and the purchase together. */}
+      {convertTarget && (
+        <div className={styles.modal}>
+          <div className={styles.modalContent} style={{ maxWidth: '500px' }}>
+            <div className={styles.modalHeader}>
+              <h2>Convert to {convertTarget.accountStatus === 'lead' ? 'Trial' : 'Member'}</h2>
+              <button onClick={() => setConvertTarget(null)} className={styles.closeBtn}>✕</button>
+            </div>
+            <div className={styles.form}>
+              <p style={{ color: 'var(--color-text-primary)', marginBottom: '1rem' }}>
+                Move <strong>{convertTarget.firstName} {convertTarget.lastName}</strong> from{' '}
+                {STAGE_LABELS[convertTarget.accountStatus]} to{' '}
+                {convertTarget.accountStatus === 'lead' ? 'Trial' : 'Member'}.
+              </p>
+
+              {convertTarget.accountStatus === 'lead' ? (
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Quick Start Program *</label>
+                  <select
+                    value={convertProgramId}
+                    onChange={(e) => setConvertProgramId(e.target.value)}
+                    className={styles.input}
+                  >
+                    <option value="">Select a program...</option>
+                    {programs.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — {money(p.quickStartPriceAmount)} for {p.quickStartClassCount || 3} classes
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                    Every martial art starts with a Quick Start. The price comes from the program.
+                  </span>
+                </div>
+              ) : convertTarget.memberType === 'participant' ? (
+                <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+                  This participant is covered by a seat on their account holder. Make sure one is
+                  assigned to them first — otherwise this conversion is rejected.
+                </p>
+              ) : (
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Membership Type *</label>
+                  <select
+                    value={convertMembershipId}
+                    onChange={(e) => setConvertMembershipId(e.target.value)}
+                    className={styles.input}
+                  >
+                    <option value="">Select a membership...</option>
+                    {memberships.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — {money(m.priceAmount)}/mo{m.isFamilyPlan ? ' (covers the whole account)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                    Buys the first seat on this account. Add more seats on the profile for each participant.
+                  </span>
+                </div>
+              )}
+
+              <div className={styles.modalFooter}>
+                <button type="button" onClick={() => setConvertTarget(null)} className={styles.cancelBtn}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConvert}
+                  className={styles.saveBtn}
+                  disabled={convertBusy}
+                >
+                  {convertBusy ? 'Converting...' : 'Convert'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCancelModal && (
         <div className={styles.modal}>
           <div className={styles.modalContent} style={{ maxWidth: '500px' }}>
@@ -1249,12 +2213,40 @@ const Contacts = () => {
         <div className={styles.modal}>
           <div className={styles.modalContent} style={{ maxWidth: '800px' }}>
             <div className={styles.modalHeader}>
-              <h2>{viewingMember.firstName} {viewingMember.lastName}</h2>
+              <div>
+                <h2>{viewingMember.firstName} {viewingMember.lastName}</h2>
+                {viewingMember.memberType === 'participant' && (
+                  <span className={styles.memberTypeChip} style={{ marginTop: 4 }}>Participant</span>
+                )}
+              </div>
               <button onClick={handleCloseViewModal} className={styles.closeBtn}>
                 ✕
               </button>
             </div>
 
+            {/* Account Holder info banner for participants */}
+            {viewingMember.memberType === 'participant' && viewingMember.accountHolder && (
+              <div className={styles.accountHolderBanner}>
+                <span className={styles.accountHolderBannerLabel}>Account Holder:</span>
+                <span className={styles.accountHolderBannerName}>
+                  {viewingMember.accountHolder.firstName} {viewingMember.accountHolder.lastName}
+                </span>
+                {viewingMember.accountHolder.email && (
+                  <span className={styles.accountHolderBannerEmail}>{viewingMember.accountHolder.email}</span>
+                )}
+                <button
+                  className={styles.accountHolderBannerLink}
+                  onClick={() => {
+                    const ah = members.find(m => m.id === viewingMember.accountHolderId);
+                    if (ah) { handleCloseViewModal(); setTimeout(() => handleViewMember(ah), 50); }
+                  }}
+                >
+                  View →
+                </button>
+              </div>
+            )}
+
+            <div className={styles.modalScrollBody}>
             {/* Tabs */}
             <div className={styles.viewTabs}>
               <button
@@ -1263,17 +2255,25 @@ const Contacts = () => {
               >
                 Details
               </button>
-              <button
-                className={`${styles.viewTab} ${viewTab === 'billing' ? styles.active : ''}`}
-                onClick={() => setViewTab('billing')}
-              >
-                Billing
-              </button>
+              {viewingMember.memberType !== 'participant' && (
+                <button
+                  className={`${styles.viewTab} ${viewTab === 'billing' ? styles.active : ''}`}
+                  onClick={() => setViewTab('billing')}
+                >
+                  Billing
+                </button>
+              )}
               <button
                 className={`${styles.viewTab} ${viewTab === 'attendance' ? styles.active : ''}`}
-                onClick={() => setViewTab('attendance')}
+                onClick={() => { setViewTab('attendance'); loadMemberAttendanceData(viewingMember.id); }}
               >
                 Attendance
+              </button>
+              <button
+                className={`${styles.viewTab} ${viewTab === 'history' ? styles.active : ''}`}
+                onClick={() => { setViewTab('history'); if (webActivity.length === 0) loadWebActivity(viewingMember.id); }}
+              >
+                History
               </button>
             </div>
 
@@ -1284,7 +2284,7 @@ const Contacts = () => {
                 <div className={styles.viewHeader}>
                   <div>
                     <span className={`${styles.badge} ${styles[viewingMember.accountStatus]}`}>
-                      {viewingMember.accountStatus}
+                      {STAGE_LABELS[viewingMember.accountStatus] || viewingMember.accountStatus}
                     </span>
                   </div>
                 </div>
@@ -1302,8 +2302,15 @@ const Contacts = () => {
 
                   <div className={styles.viewField}>
                     <label className={styles.viewLabel}>Subscription Type</label>
-                    <div className={styles.viewValue}>{allPricingPlans.find(p => p.id === viewingMember.pricingPlanId)?.name || '—'}</div>
+                    <div className={styles.viewValue}>{planName(viewingMember.pricingPlanId)}</div>
                   </div>
+
+                  {(viewingMember as any).membershipName && (
+                    <div className={styles.viewField}>
+                      <label className={styles.viewLabel}>Membership</label>
+                      <div className={styles.viewValue}>{(viewingMember as any).membershipName}</div>
+                    </div>
+                  )}
 
                   <div className={styles.viewField}>
                     <label className={styles.viewLabel}>Program</label>
@@ -1377,6 +2384,65 @@ const Contacts = () => {
                     <div className={styles.viewValue}>{formatDate(viewingMember.updatedAt)}</div>
                   </div>
                 </div>
+
+                {/* Participants section (account holders only) */}
+                {viewingMember.memberType !== 'participant' && (
+                  <div className={styles.participantsSection}>
+                    <h4 className={styles.participantsSectionTitle}>
+                      Participants
+                      {viewingMember.participants && viewingMember.participants.length > 0 && (
+                        <span className={styles.participantCount}>{viewingMember.participants.length}</span>
+                      )}
+                    </h4>
+                    {viewingMember.participants && viewingMember.participants.length > 0 ? (
+                      <div className={styles.participantsList}>
+                        {viewingMember.participants.map((p: ParticipantSummary) => (
+                          <div
+                            key={p.id}
+                            className={styles.participantRow}
+                            onClick={() => {
+                              const full = members.find(m => m.id === p.id);
+                              if (full) { handleCloseViewModal(); setTimeout(() => handleViewMember(full), 50); }
+                              else {
+                                api.get(`/members/${p.id}`).then(data => {
+                                  handleCloseViewModal();
+                                  setTimeout(() => handleViewMember(data), 50);
+                                }).catch(() => {});
+                              }
+                            }}
+                          >
+                            <div className={styles.participantRowName}>
+                              {p.firstName} {p.lastName}
+                              <span className={`${styles.badge} ${styles[p.accountStatus]}`} style={{ marginLeft: 8, fontSize: '0.7rem' }}>
+                                {p.accountStatus}
+                              </span>
+                            </div>
+                            <div className={styles.participantRowMeta}>
+                              <span>{p.programType || 'No Program'}</span>
+                              <span className={styles.participantRankBadge}>{p.ranking}</span>
+                              <span>{p.membershipAge}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={styles.noParticipants}>No participants linked yet.</p>
+                    )}
+                    <button
+                      className={styles.addParticipantBtn}
+                      onClick={() => {
+                        handleCloseViewModal();
+                        setTimeout(() => {
+                          setFormData(fd => ({ ...fd, memberType: 'participant', accountHolderId: viewingMember.id.toString() }));
+                          setEditingMember(null);
+                          setIsModalOpen(true);
+                        }, 50);
+                      }}
+                    >
+                      + Add Participant
+                    </button>
+                  </div>
+                )}
               </div>
               )}
 
@@ -1545,8 +2611,21 @@ const Contacts = () => {
 
                       {/* Recent Check-ins */}
                       <div className={styles.billingBlock}>
-                        <h4 className={styles.billingTitle}>Recent Check-ins</h4>
-                        {memberCheckIns.length > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                          <h4 className={styles.billingTitle} style={{ margin: 0 }}>Recent Check-ins</h4>
+                          <button
+                            onClick={() => loadMemberAttendanceData(viewingMember.id)}
+                            className={styles.cancelBtn}
+                            style={{ padding: '0.375rem 0.75rem', fontSize: '0.8125rem' }}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                        {attendanceError ? (
+                          <p style={{ color: '#ef4444', fontSize: '0.875rem' }}>
+                            Error loading check-ins: {attendanceError}
+                          </p>
+                        ) : memberCheckIns.length > 0 ? (
                           <div className={styles.checkInsList}>
                             {memberCheckIns.map((checkIn: any) => (
                               <div key={checkIn.id} className={styles.checkInItem}>
@@ -1584,7 +2663,111 @@ const Contacts = () => {
                   )}
                 </div>
               )}
+
+              {viewTab === 'history' && (
+                <div className={styles.viewSection}>
+                  {/* CRM change history */}
+                  <div className={styles.billingBlock}>
+                    <h4 className={styles.billingTitle}>Change History</h4>
+                    {historyLoading ? (
+                      <div className={styles.billingLoading}>Loading history...</div>
+                    ) : memberHistory.length === 0 ? (
+                      <p className={styles.billingEmpty}>No history recorded yet.</p>
+                    ) : (
+                      <div className={styles.historyList}>
+                        {memberHistory.map((entry) => (
+                          <div key={entry.id} className={styles.historyEntry}>
+                            <div className={styles.historyMeta}>
+                              <span className={styles.historyAction}>
+                                {entry.action === 'created' ? 'Contact created' :
+                                 entry.action === 'status_changed' ? 'Status changed' :
+                                 'Updated'}
+                              </span>
+                              <span className={styles.historyBy}>by {entry.userName || 'System'}</span>
+                              <span className={styles.historyTime}>
+                                {new Date(entry.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            {entry.changes && (
+                              <div className={styles.historyChanges}>
+                                {Object.entries(entry.changes as Record<string, { from: any; to: any }>).map(([field, { from, to }]) => (
+                                  <div key={field} className={styles.historyChange}>
+                                    <span className={styles.historyField}>{field}</span>
+                                    <span className={styles.historyFrom}>{from ?? '—'}</span>
+                                    <span className={styles.historyArrow}>→</span>
+                                    <span className={styles.historyTo}>{to ?? '—'}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Website activity */}
+                  <div className={styles.billingBlock}>
+                    <h4 className={styles.billingTitle}>Website Activity</h4>
+                    {webActivityLoading ? (
+                      <div className={styles.billingLoading}>Loading website activity...</div>
+                    ) : webActivity.length === 0 ? (
+                      <p className={styles.billingEmpty}>No website activity recorded for this contact.</p>
+                    ) : (
+                      <div className={styles.webActivityList}>
+                        {(() => {
+                          let lastDate = '';
+                          return webActivity.map((evt, i) => {
+                            const d = new Date(evt.createdAt);
+                            const dateLabel = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+                            const showDate = dateLabel !== lastDate;
+                            lastDate = dateLabel;
+
+                            const label = (() => {
+                              if (evt.eventType === 'pageview') return evt.pageTitle || evt.pagePath || 'Page view';
+                              if (evt.eventType === 'form_submit') return 'Form submitted';
+                              if (evt.eventType === 'click') return evt.elementText ? `Clicked "${evt.elementText.slice(0, 40)}"` : 'Clicked element';
+                              if (evt.eventType === 'scroll') return 'Scrolled page';
+                              return evt.eventType;
+                            })();
+
+                            const sub = (() => {
+                              if (evt.eventType === 'pageview' && evt.pagePath) return evt.pagePath;
+                              if (evt.pagePath && evt.eventType !== 'pageview') return evt.pagePath;
+                              return null;
+                            })();
+
+                            return (
+                              <div key={i}>
+                                {showDate && (
+                                  <div className={styles.webActivityDateSep}>{dateLabel}</div>
+                                )}
+                                <div className={styles.webActivityRow}>
+                                  <span className={`${styles.webActivityTypePill} ${styles[`webEvt_${evt.eventType}`]}`}>
+                                    {evt.eventType === 'pageview' ? 'PV' :
+                                     evt.eventType === 'form_submit' ? 'FM' :
+                                     evt.eventType === 'click' ? 'CL' :
+                                     evt.eventType === 'scroll' ? 'SC' : '—'}
+                                  </span>
+                                  <div className={styles.webActivityInfo}>
+                                    <span className={styles.webActivityLabel}>{label}</span>
+                                    {sub && <span className={styles.webActivitySub}>{sub}</span>}
+                                  </div>
+                                  <span className={styles.webActivityTime}>
+                                    {d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
+            </div>{/* end modalScrollBody */}
             <div className={styles.modalFooter}>
               <button onClick={handleCloseViewModal} className={styles.cancelBtn}>
                 Close

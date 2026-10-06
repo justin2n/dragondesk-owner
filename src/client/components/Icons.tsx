@@ -37,6 +37,8 @@ import {
   MdShare,
   MdViewModule,
   MdViewList,
+  MdBolt,
+  MdNotifications,
 } from 'react-icons/md';
 
 interface IconProps {
@@ -87,8 +89,10 @@ export const SocialIcon: React.FC<IconProps> = (props) => <MdShare {...props} />
 export const AnalyticsIcon: React.FC<IconProps> = (props) => <MdTrendingUp {...props} />;
 export const CardViewIcon: React.FC<IconProps> = (props) => <MdViewModule {...props} />;
 export const TableViewIcon: React.FC<IconProps> = (props) => <MdViewList {...props} />;
+export const SalesSignalsIcon: React.FC<IconProps> = (props) => <MdBolt {...props} />;
 
 // Dojo/Martial Arts Logo
 export const DojoIcon: React.FC<IconProps> = (props) => (
   <MdSportsMartialArts {...props} />
 );
+export const BellIcon: React.FC<IconProps> = (props) => <MdNotifications {...props} />;

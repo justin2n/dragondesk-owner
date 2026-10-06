@@ -2,6 +2,7 @@ import express from 'express';
 import { query, get, run } from '../models/database';
 import { pool } from '../models/database';
 import { lookupMemberByQRCode } from '../services/qr-generator';
+import { consumeQuickStartClass } from '../utils/quickStart';
 
 const router = express.Router();
 
@@ -45,10 +46,81 @@ router.get('/classes/today/:locationId', async (req, res) => {
   }
 });
 
+// Get today's classes for a member. Filtered by a specific program (?programId)
+// or, by default, across ALL the member's programs (member_programs junction).
+router.get('/classes/member/:memberId', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { programId } = req.query;
+
+    const memberResult = await pool.query(
+      `SELECT "programType" FROM members WHERE id = $1`,
+      [memberId]
+    );
+
+    if (memberResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    // Resolve the set of program names to filter classes by.
+    let names: string[] = [];
+    if (programId) {
+      const r = await pool.query(`SELECT name FROM programs WHERE id = $1`, [programId]);
+      names = r.rows.map((x: any) => x.name);
+    } else {
+      const r = await pool.query(
+        `SELECT p.name FROM member_programs mp
+         JOIN programs p ON p.id = mp."programId"
+         WHERE mp."memberId" = $1`,
+        [memberId]
+      );
+      names = r.rows.map((x: any) => x.name);
+      // Back-compat: fall back to the member's single programType.
+      if (names.length === 0) {
+        const raw = memberResult.rows[0].programType;
+        if (raw && raw !== 'No Program Selected') names = [raw];
+      }
+    }
+
+    const result = await pool.query(`
+      SELECT e.*, u."firstName" as "instructorFirstName", u."lastName" as "instructorLastName"
+      FROM events e
+      LEFT JOIN users u ON e."instructorId" = u.id
+      WHERE DATE(e."startDateTime") = CURRENT_DATE
+        AND e.status = 'scheduled'
+        AND e."eventType" = 'class'
+        AND (cardinality($1::text[]) = 0 OR e."programType" = ANY($1::text[]))
+      ORDER BY e."startDateTime" ASC
+    `, [names]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching member classes:', error);
+    res.status(500).json({ error: 'Failed to fetch classes' });
+  }
+});
+
+// List a member's programs (for the kiosk program picker)
+router.get('/member/:memberId/programs', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const result = await pool.query(
+      `SELECT p.id, p.name FROM member_programs mp
+       JOIN programs p ON p.id = mp."programId"
+       WHERE mp."memberId" = $1 ORDER BY p.name ASC`,
+      [memberId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching member programs:', error);
+    res.status(500).json({ error: 'Failed to fetch programs' });
+  }
+});
+
 // Check in via QR code scan
 router.post('/check-in/qr', async (req, res) => {
   try {
-    const { qrCode, locationId, eventId } = req.body;
+    const { qrCode, locationId, eventId, programId } = req.body;
 
     if (!qrCode || !locationId) {
       return res.status(400).json({ error: 'QR code and location ID are required' });
@@ -85,10 +157,10 @@ router.post('/check-in/qr', async (req, res) => {
 
     // Create check-in record
     const insertResult = await pool.query(`
-      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "checkInTime", "createdAt")
-      VALUES ($1, $2, 'qr_scan', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "programId", "checkInTime", "createdAt")
+      VALUES ($1, $2, 'qr_scan', $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
-    `, [member.id, locationId, eventId || null]);
+    `, [member.id, locationId, eventId || null, programId || null]);
 
     // Update member's attendance stats
     await pool.query(`
@@ -99,14 +171,22 @@ router.post('/check-in/qr', async (req, res) => {
       WHERE id = $1
     `, [member.id]);
 
-    // If event specified, update event_attendees
+    // A Quick Start is 3 classes (or whatever the program sets), so attending a
+    // class draws one down. Non-fatal: never block a check-in over trial state.
+    await consumeQuickStartClass(member.id);
+
+    // If event specified, update event_attendees (non-fatal)
     if (eventId) {
-      await pool.query(`
-        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
-        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, 'qr_scan')
-        ON CONFLICT ("eventId", "memberId") DO UPDATE
-          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
-      `, [eventId, member.id]);
+      try {
+        await pool.query(`
+          INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+          VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, 'qr_scan')
+          ON CONFLICT ("eventId", "memberId") DO UPDATE
+            SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
+        `, [eventId, member.id]);
+      } catch (err) {
+        console.error('event_attendees upsert failed (non-fatal):', err);
+      }
     }
 
     await logKioskActivity(locationId, 'qr_check_in', member.id);
@@ -138,17 +218,25 @@ router.get('/member/lookup', async (req, res) => {
       return res.status(400).json({ error: 'Search term and location ID are required' });
     }
 
-    const searchTerm = `%${search}%`;
+    // This endpoint is public (kiosks have no login), so it must not become a
+    // roster-harvesting API. Require a real search term and scope results to the
+    // kiosk's own location, so it can't be swept to dump all members.
+    const term = String(search).trim();
+    if (term.length < 2) {
+      return res.status(400).json({ error: 'Search term must be at least 2 characters' });
+    }
+    const searchTerm = `%${term}%`;
 
     const result = await pool.query(`
-      SELECT id, "firstName", "lastName", email, phone, "programType", ranking
+      SELECT id, "firstName", "lastName", "programType", ranking
       FROM members
-      WHERE ("firstName" || ' ' || "lastName" ILIKE $1
+      WHERE "locationId" = $2::int
+        AND ("firstName" || ' ' || "lastName" ILIKE $1
              OR email ILIKE $1
              OR phone ILIKE $1)
       ORDER BY "firstName", "lastName"
       LIMIT 10
-    `, [searchTerm]);
+    `, [searchTerm, locationId]);
 
     await logKioskActivity(parseInt(locationId as string), 'member_search', undefined, { search });
 
@@ -162,7 +250,7 @@ router.get('/member/lookup', async (req, res) => {
 // Check in via name/phone search
 router.post('/check-in/search', async (req, res) => {
   try {
-    const { memberId, locationId, eventId, method = 'name_search' } = req.body;
+    const { memberId, locationId, eventId, programId, method = 'name_search' } = req.body;
 
     if (!memberId || !locationId) {
       return res.status(400).json({ error: 'Member ID and location ID are required' });
@@ -203,10 +291,10 @@ router.post('/check-in/search', async (req, res) => {
 
     // Create check-in record
     const insertResult = await pool.query(`
-      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "checkInTime", "createdAt")
-      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO check_ins ("memberId", "locationId", "checkInMethod", "eventId", "programId", "checkInTime", "createdAt")
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
-    `, [memberId, locationId, method, eventId || null]);
+    `, [memberId, locationId, method, eventId || null, programId || null]);
 
     // Update member's attendance stats
     await pool.query(`
@@ -217,14 +305,22 @@ router.post('/check-in/search', async (req, res) => {
       WHERE id = $1
     `, [memberId]);
 
-    // If event specified, update event_attendees
+    // A Quick Start is 3 classes (or whatever the program sets), so attending a
+    // class draws one down. Non-fatal: never block a check-in over trial state.
+    await consumeQuickStartClass(memberId);
+
+    // If event specified, update event_attendees (non-fatal)
     if (eventId) {
-      await pool.query(`
-        INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
-        VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, $3)
-        ON CONFLICT ("eventId", "memberId") DO UPDATE
-          SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
-      `, [eventId, memberId, method]);
+      try {
+        await pool.query(`
+          INSERT INTO event_attendees ("eventId", "memberId", status, "checkedInAt", "checkInMethod")
+          VALUES ($1, $2, 'attended', CURRENT_TIMESTAMP, $3)
+          ON CONFLICT ("eventId", "memberId") DO UPDATE
+            SET status = 'attended', "checkedInAt" = CURRENT_TIMESTAMP
+        `, [eventId, memberId, method]);
+      } catch (err) {
+        console.error('event_attendees upsert failed (non-fatal):', err);
+      }
     }
 
     await logKioskActivity(locationId, 'search_check_in', memberId, { method });

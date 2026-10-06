@@ -14,6 +14,8 @@ import {
   MdDevices,
   MdOpenInNew,
   MdTimerOff,
+  MdAttachMoney,
+  MdTrendingUp,
 } from 'react-icons/md';
 import {
   LineChart,
@@ -35,7 +37,7 @@ import {
 import styles from './DragonDeskAnalytics.module.css';
 
 type ChartType = 'line' | 'bar' | 'area' | 'pie';
-type ActiveSection = 'trials' | 'leads' | 'members' | 'value' | 'web';
+type ActiveSection = 'trials' | 'leads' | 'members' | 'value' | 'web' | 'marketing';
 
 interface ValueData {
   acv: number;
@@ -68,6 +70,7 @@ interface AnalyticsData {
   trialsData: any[];
   leadsData: any[];
   membersData: any[];
+  zapierActivityData?: { month: string; total: number; new_contacts: number; returning_contacts: number }[];
   summary: {
     programs: ProgramSummary[];
     totals: {
@@ -76,9 +79,12 @@ interface AnalyticsData {
       currentLeads: number;
       totalCancellations: number;
       expiredTrials: number;
+      mrr: number;
+      arr: number;
     };
   };
   programDistribution: { name: string; value: number }[];
+  leadSources: { source: string; count: number }[];
 }
 
 const PROGRAM_COLORS: Record<string, string> = {
@@ -96,10 +102,165 @@ const PROGRAM_COLORS: Record<string, string> = {
   'Dragon Launch': '#14b8a6',
   'Personal Training': '#64748b',
   'DGMT Private Training': '#6366f1',
+  'No Program Selected': '#a855f7',
   total: '#10b981',
 };
 
 const CHART_COLORS = ['#dc2626', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899'];
+
+// Clicking a legend item hides/shows that series (or pie slice). Returns props to
+// spread onto a recharts <Legend> plus an isHidden(key) check.
+function useLegendToggle() {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const isHidden = (key?: string) => !!key && hidden.has(key);
+  const legendProps = (keyOf?: (o: any) => string | undefined) => ({
+    onClick: (o: any) => {
+      const key = (keyOf ? keyOf(o) : (o?.dataKey ?? o?.value)) as string | undefined;
+      if (!key) return;
+      setHidden(prev => {
+        const next = new Set(prev);
+        next.has(key) ? next.delete(key) : next.add(key);
+        return next;
+      });
+    },
+    formatter: (value: any, entry: any) => {
+      const key = (keyOf ? keyOf(entry) : (entry?.dataKey ?? entry?.value)) as string | undefined;
+      const off = isHidden(key);
+      return (
+        <span style={{ cursor: 'pointer', opacity: off ? 0.4 : 1, textDecoration: off ? 'line-through' : 'none' }}>
+          {value}
+        </span>
+      );
+    },
+    wrapperStyle: { cursor: 'pointer' } as React.CSSProperties,
+  });
+  return { isHidden, legendProps };
+}
+
+// Line/Bar/Area/Pie chart with legend-click filtering. Replaces the old inline
+// renderChart so every section's charts get selectable legends.
+const AnalyticsChart: React.FC<{
+  chartData: any[];
+  dataKeys: string[];
+  chartType: ChartType;
+  xAxisKey?: string;
+  isPercentage?: boolean;
+}> = ({ chartData, dataKeys, chartType, xAxisKey = 'month', isPercentage = false }) => {
+  const { isHidden, legendProps } = useLegendToggle();
+
+  if (chartType === 'pie') {
+    const aggregated = dataKeys.map((key, index) => ({
+      name: key.replace(/_/g, ' ').replace('volume', '').replace('active', ''),
+      value: chartData.reduce((sum, d) => sum + (d[key] || 0), 0),
+      color: CHART_COLORS[index % CHART_COLORS.length],
+    })).filter(item => item.value > 0);
+    const shown = aggregated.filter(a => !isHidden(a.name));
+    return (
+      <ResponsiveContainer width="100%" height={400}>
+        <PieChart>
+          <Pie
+            data={shown} cx="50%" cy="50%"
+            labelLine={(props: any) => (props.percent || 0) >= 0.05}
+            label={({ name, percent }) => (percent || 0) >= 0.05 ? `${name}: ${((percent || 0) * 100).toFixed(0)}%` : ''}
+            outerRadius={150} fill="#8884d8" dataKey="value"
+          >
+            {shown.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color} />))}
+          </Pie>
+          <Tooltip formatter={(value: any, name: any) => [value, name]} />
+          <Legend
+            payload={aggregated.map(a => ({ value: a.name, type: 'square', color: a.color, id: a.name }))}
+            {...legendProps((o: any) => o?.value ?? o?.id)}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  const ChartComponent = chartType === 'line' ? LineChart : chartType === 'bar' ? BarChart : AreaChart;
+  const DataComponent: any = chartType === 'line' ? Line : chartType === 'bar' ? Bar : Area;
+
+  return (
+    <ResponsiveContainer width="100%" height={400}>
+      <ChartComponent data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey={xAxisKey} stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }} />
+        <YAxis
+          stroke="var(--color-text-secondary)"
+          tick={{ fill: 'var(--color-text-secondary)' }}
+          tickFormatter={isPercentage ? (v) => `${v}%` : undefined}
+          domain={isPercentage ? [0, 100] : undefined}
+        />
+        <Tooltip
+          contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }}
+          formatter={isPercentage ? (value: any, name: any) => [`${Math.min(Number(value), 100).toFixed(1)}%`, name] : undefined}
+        />
+        <Legend {...legendProps()} />
+        {dataKeys.map((key, index) => (
+          <DataComponent
+            key={key}
+            type="monotone"
+            dataKey={key}
+            name={key.replace(/_conversionRate$/, '').replace(/_volume$/, '').replace(/_active$/, '').replace(/_/g, ' ')}
+            stroke={CHART_COLORS[index % CHART_COLORS.length]}
+            fill={CHART_COLORS[index % CHART_COLORS.length]}
+            fillOpacity={chartType === 'area' ? 0.3 : 1}
+            strokeWidth={2}
+            hide={isHidden(key)}
+          />
+        ))}
+      </ChartComponent>
+    </ResponsiveContainer>
+  );
+};
+
+// Pie with legend-click filtering, for the standalone (already-aggregated) pies.
+const TogglePie: React.FC<{
+  data: { name: string; value: number; color?: string }[];
+  height?: number;
+  showValueInLabel?: boolean;
+}> = ({ data, height = 300, showValueInLabel = false }) => {
+  const { isHidden, legendProps } = useLegendToggle();
+  const shown = data.filter(d => !isHidden(d.name));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <PieChart>
+        <Pie
+          data={shown} cx="50%" cy="50%"
+          labelLine={(props: any) => (props.percent || 0) >= 0.05}
+          label={({ name, value, percent }) => (percent || 0) >= 0.05
+            ? (showValueInLabel ? `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)` : `${name}: ${((percent || 0) * 100).toFixed(0)}%`)
+            : ''}
+          outerRadius={100} fill="#8884d8" dataKey="value"
+        >
+          {shown.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color || CHART_COLORS[index % CHART_COLORS.length]} />))}
+        </Pie>
+        <Tooltip />
+        <Legend
+          payload={data.map((d, i) => ({ value: d.name, type: 'square', color: d.color || CHART_COLORS[i % CHART_COLORS.length], id: d.name }))}
+          {...legendProps((o: any) => o?.value ?? o?.id)}
+        />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+};
+
+// Web "Daily Sessions" trend with legend-click filtering (sessions / new users).
+const DailySessionsChart: React.FC<{ data: any[] }> = ({ data }) => {
+  const { isHidden, legendProps } = useLegendToggle();
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey="date" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} tickFormatter={(d: any) => String(d).slice(5)} />
+        <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
+        <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+        <Legend {...legendProps()} />
+        <Area type="monotone" dataKey="sessions" name="Sessions" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} hide={isHidden('sessions')} />
+        <Area type="monotone" dataKey="newUsers" name="New Users" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} hide={isHidden('newUsers')} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+};
 
 const DragonDeskAnalytics = () => {
   const { selectedLocation, isAllLocations } = useLocation();
@@ -108,12 +269,15 @@ const DragonDeskAnalytics = () => {
   const [activeSection, setActiveSection] = useState<ActiveSection>('trials');
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
   const [selectedMembershipAge, setSelectedMembershipAge] = useState<string>('all');
-  const [monthsBack, setMonthsBack] = useState<number>(12);
+  // '30d' = last 30 days (daily granularity); otherwise a month count.
+  const [timePeriod, setTimePeriod] = useState<string>('12');
   const [valueData, setValueData] = useState<ValueData | null>(null);
   const [valueLoading, setValueLoading] = useState(false);
   const [webData, setWebData] = useState<any | null>(null);
   const [webLoading, setWebLoading] = useState(false);
   const [webDays, setWebDays] = useState(30);
+  const [marketingData, setMarketingData] = useState<any | null>(null);
+  const [marketingLoading, setMarketingLoading] = useState(false);
 
   // Chart type preferences for each section
   const [chartTypes, setChartTypes] = useState<Record<ActiveSection, ChartType>>({
@@ -122,6 +286,7 @@ const DragonDeskAnalytics = () => {
     members: 'line',
     value: 'bar',
     web: 'bar',
+    marketing: 'bar',
   });
 
   const locationId = isAllLocations ? 'all' : String(selectedLocation?.id || '');
@@ -130,7 +295,8 @@ const DragonDeskAnalytics = () => {
     const fetchAnalytics = async () => {
       try {
         setIsLoading(true);
-        const response = await api.get(`/analytics/programs?months=${monthsBack}&locationId=${locationId}`);
+        const periodParam = timePeriod === '30d' ? 'days=30' : `months=${timePeriod}`;
+        const response = await api.get(`/analytics/programs?${periodParam}&locationId=${locationId}`);
         setData(response);
       } catch (error) {
         console.error('Failed to load analytics:', error);
@@ -139,7 +305,7 @@ const DragonDeskAnalytics = () => {
       }
     };
     fetchAnalytics();
-  }, [selectedLocation, isAllLocations, monthsBack]);
+  }, [selectedLocation, isAllLocations, timePeriod]);
 
   useEffect(() => {
     if (activeSection !== 'value') return;
@@ -163,14 +329,33 @@ const DragonDeskAnalytics = () => {
   }, [activeSection, selectedLocation, isAllLocations, selectedProgram, selectedMembershipAge]);
 
   useEffect(() => {
+    if (activeSection !== 'marketing') return;
+    const fetchMarketing = async () => {
+      try {
+        setMarketingLoading(true);
+        const monthsParam = timePeriod === '30d' ? '1' : timePeriod;
+        const response = await api.get(`/analytics/attribution?months=${monthsParam}&locationId=${locationId}`);
+        setMarketingData(response);
+      } catch (error) {
+        console.error('Failed to load marketing analytics:', error);
+        setMarketingData(null);
+      } finally {
+        setMarketingLoading(false);
+      }
+    };
+    fetchMarketing();
+  }, [activeSection, selectedLocation, isAllLocations, timePeriod]);
+
+  useEffect(() => {
     if (activeSection !== 'web') return;
     const fetchWeb = async () => {
       try {
         setWebLoading(true);
         const response = await api.get(`/analytics/web/overview?days=${webDays}`);
         setWebData(response);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to load web analytics:', error);
+        setWebData({ configured: true, error: error?.message || 'Failed to reach analytics server.' });
       } finally {
         setWebLoading(false);
       }
@@ -195,78 +380,17 @@ const DragonDeskAnalytics = () => {
     chartData: any[],
     dataKeys: string[],
     chartType: ChartType,
-    xAxisKey: string = 'month'
-  ) => {
-    if (chartType === 'pie') {
-      // For pie chart, aggregate the data
-      const aggregated = dataKeys.map((key, index) => ({
-        name: key.replace(/_/g, ' ').replace('volume', '').replace('active', ''),
-        value: chartData.reduce((sum, d) => sum + (d[key] || 0), 0),
-        color: CHART_COLORS[index % CHART_COLORS.length],
-      }));
-
-      return (
-        <ResponsiveContainer width="100%" height={400}>
-          <PieChart>
-            <Pie
-              data={aggregated}
-              cx="50%"
-              cy="50%"
-              labelLine={true}
-              label={({ name, percent }) => `${name}: ${((percent || 0) * 100).toFixed(0)}%`}
-              outerRadius={150}
-              fill="#8884d8"
-              dataKey="value"
-            >
-              {aggregated.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip />
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    const ChartComponent = chartType === 'line' ? LineChart : chartType === 'bar' ? BarChart : AreaChart;
-    const DataComponent = chartType === 'line' ? Line : chartType === 'bar' ? Bar : Area;
-
-    return (
-      <ResponsiveContainer width="100%" height={400}>
-        <ChartComponent data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-          <XAxis
-            dataKey={xAxisKey}
-            stroke="var(--color-text-secondary)"
-            tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }}
-          />
-          <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
-          <Tooltip
-            contentStyle={{
-              background: 'var(--color-dark-grey)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '6px',
-              color: 'var(--color-text-primary)',
-            }}
-          />
-          <Legend />
-          {dataKeys.map((key, index) => (
-            <DataComponent
-              key={key}
-              type="monotone"
-              dataKey={key}
-              name={key.replace(/_/g, ' ').replace('volume', 'Volume').replace('active', 'Active')}
-              stroke={CHART_COLORS[index % CHART_COLORS.length]}
-              fill={CHART_COLORS[index % CHART_COLORS.length]}
-              fillOpacity={chartType === 'area' ? 0.3 : 1}
-              strokeWidth={2}
-            />
-          ))}
-        </ChartComponent>
-      </ResponsiveContainer>
-    );
-  };
+    xAxisKey: string = 'month',
+    isPercentage: boolean = false
+  ) => (
+    <AnalyticsChart
+      chartData={chartData}
+      dataKeys={dataKeys}
+      chartType={chartType}
+      xAxisKey={xAxisKey}
+      isPercentage={isPercentage}
+    />
+  );
 
   const renderTrialsSection = () => {
     if (!data) return null;
@@ -290,7 +414,7 @@ const DragonDeskAnalytics = () => {
             <h3>Conversion Rate by Month</h3>
             <p>Percentage of trials converted to members</p>
           </div>
-          {renderChart(data.trialsData, conversionKeys, chartTypes.trials === 'pie' ? 'line' : chartTypes.trials)}
+          {renderChart(data.trialsData, conversionKeys, chartTypes.trials === 'pie' ? 'line' : chartTypes.trials, 'month', true)}
         </div>
 
         <div className={styles.statsGrid}>
@@ -320,8 +444,8 @@ const DragonDeskAnalytics = () => {
       <div className={styles.sectionContent}>
         <div className={styles.chartContainer}>
           <div className={styles.chartHeader}>
-            <h3>Lead Volume by Month</h3>
-            <p>New leads acquired per program</p>
+            <h3>Lead Acquisition by Month</h3>
+            <p>New contacts created per program (includes converted leads)</p>
           </div>
           {renderChart(data.leadsData, leadKeys, chartTypes.leads)}
         </div>
@@ -342,9 +466,60 @@ const DragonDeskAnalytics = () => {
             <div className={styles.statIndicator} style={{ backgroundColor: PROGRAM_COLORS.total }} />
             <h4>Total</h4>
             <div className={styles.statValue}>{data.summary.totals.currentLeads}</div>
-            <div className={styles.statLabel}>All Programs</div>
+            <div className={styles.statLabel}>Current Leads</div>
           </div>
         </div>
+
+        {data.zapierActivityData && data.zapierActivityData.some(d => d.total > 0) && (
+          <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
+            <div className={styles.chartHeader}>
+              <h3>Zapier Webhook Activity</h3>
+              <p>
+                Leads submitted via Zapier per month — counts every webhook hit,
+                including re-submissions of contacts already in DragonDesk
+              </p>
+            </div>
+            {renderChart(
+              data.zapierActivityData,
+              ['new_contacts', 'returning_contacts'],
+              'bar'
+            )}
+            <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
+              <strong>New contacts</strong> = email did not exist in DragonDesk before this Zapier hit.&nbsp;
+              <strong>Re-submissions</strong> = email already existed; lead acquisition date is unchanged in the chart above.
+            </p>
+          </div>
+        )}
+
+        {data.leadSources && data.leadSources.length > 0 && (
+          <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
+            <div className={styles.chartHeader}>
+              <h3>Lead Sources</h3>
+              <p>All contacts by acquisition channel (total lifetime)</p>
+            </div>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th style={{ textAlign: 'right' }}>Contacts</th>
+                  <th style={{ textAlign: 'right' }}>Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.leadSources.map(({ source, count }) => {
+                  const total = data.leadSources.reduce((s, r) => s + r.count, 0);
+                  return (
+                    <tr key={source}>
+                      <td style={{ textTransform: 'capitalize' }}>{source.replace(/_/g, ' ')}</td>
+                      <td style={{ textAlign: 'right' }}>{count}</td>
+                      <td style={{ textAlign: 'right' }}>{total > 0 ? ((count / total) * 100).toFixed(1) : 0}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   };
@@ -404,29 +579,17 @@ const DragonDeskAnalytics = () => {
               <h3>Program Distribution</h3>
               <p>Active members by program</p>
             </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={data.programDistribution}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={true}
-                  label={({ name, value, percent }) => `${name}: ${value} (${((percent || 0) * 100).toFixed(0)}%)`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {data.programDistribution.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={PROGRAM_COLORS[entry.name] || CHART_COLORS[index % CHART_COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+            <TogglePie
+              height={300}
+              showValueInLabel
+              data={data.programDistribution
+                .filter((e: any) => e.value > 0)
+                .map((e: any, i: number) => ({
+                  name: e.name,
+                  value: e.value,
+                  color: PROGRAM_COLORS[e.name] || CHART_COLORS[i % CHART_COLORS.length],
+                }))}
+            />
           </div>
         )}
       </div>
@@ -437,6 +600,109 @@ const DragonDeskAnalytics = () => {
     const m = Math.floor(secs / 60);
     const s = Math.round(secs % 60);
     return `${m}m ${s}s`;
+  };
+
+  const renderMarketingSection = () => {
+    if (marketingLoading) return <div className={styles.loading}>Loading marketing analytics...</div>;
+    if (!marketingData) {
+      return (
+        <div className={styles.empty}>
+          <p>No attribution data yet. It populates as leads come in with UTM parameters — from ads, email links, and tracked forms.</p>
+        </div>
+      );
+    }
+
+    const { kpis, channels = [], campaigns = [] } = marketingData;
+    const rightAlign: React.CSSProperties = { textAlign: 'right' };
+
+    return (
+      <div className={styles.sectionContent}>
+        <div className={styles.webKpiGrid}>
+          {[
+            { label: 'Attributed Leads', value: (kpis.attributedLeads || 0).toLocaleString() },
+            { label: 'Members Won', value: (kpis.members || 0).toLocaleString() },
+            { label: 'Lead → Member', value: `${kpis.leadToMemberRate || 0}%` },
+            { label: 'Top Channel', value: kpis.topChannel || '—' },
+            { label: 'Top Campaign', value: kpis.topCampaign || '—' },
+          ].map((k) => (
+            <div key={k.label} className={styles.webKpiCard}>
+              <div className={styles.webKpiValue}>{k.value}</div>
+              <div className={styles.webKpiLabel}>{k.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {channels.length === 0 ? (
+          <div className={styles.empty}><p>No attributed leads in this period yet.</p></div>
+        ) : (
+          <>
+            <div className={styles.chartContainer}>
+              <div className={styles.chartHeader}>
+                <h3>Channel Breakdown</h3>
+                <p>Leads and conversions by acquisition channel (first-touch)</p>
+              </div>
+              <table className={styles.dataTable}>
+                <thead>
+                  <tr>
+                    <th>Channel</th>
+                    <th style={rightAlign}>Leads</th>
+                    <th style={rightAlign}>Trialers</th>
+                    <th style={rightAlign}>Members</th>
+                    <th style={rightAlign}>Conv. Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {channels.map((c: any) => (
+                    <tr key={c.channel}>
+                      <td>{c.channel}</td>
+                      <td style={rightAlign}>{c.leads}</td>
+                      <td style={rightAlign}>{c.trialers}</td>
+                      <td style={rightAlign}>{c.members}</td>
+                      <td style={rightAlign}>{c.convRate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className={styles.chartContainer} style={{ marginTop: '1.5rem' }}>
+              <div className={styles.chartHeader}>
+                <h3>Campaign Performance</h3>
+                <p>Leads and conversions by UTM campaign</p>
+              </div>
+              <table className={styles.dataTable}>
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Source / Medium</th>
+                    <th style={rightAlign}>Leads</th>
+                    <th style={rightAlign}>Trialers</th>
+                    <th style={rightAlign}>Members</th>
+                    <th style={rightAlign}>Conv. Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaigns.map((c: any, i: number) => (
+                    <tr key={i}>
+                      <td>{c.campaign}</td>
+                      <td style={{ color: 'var(--color-text-secondary)' }}>{[c.source, c.medium].filter(Boolean).join(' / ') || '—'}</td>
+                      <td style={rightAlign}>{c.leads}</td>
+                      <td style={rightAlign}>{c.trialers}</td>
+                      <td style={rightAlign}>{c.members}</td>
+                      <td style={rightAlign}>{c.convRate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
+              First-touch attribution — a lead is credited to the source that first brought them in. Uses the Time Period selector above.
+            </p>
+          </>
+        )}
+      </div>
+    );
   };
 
   const renderWebSection = () => {
@@ -457,6 +723,24 @@ const DragonDeskAnalytics = () => {
             <p className={styles.webEnvNote}>
               Create a service account in Google Cloud Console, grant it <strong>Viewer</strong> access
               to your GA4 property, and paste the JSON key as the env var value.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (webData.error) {
+      return (
+        <div className={styles.sectionContent}>
+          <div className={styles.webNotConfigured}>
+            <MdLanguage size={48} style={{ opacity: 0.3 }} />
+            <h3>Google Analytics Error</h3>
+            <p>{webData.error}</p>
+            <p className={styles.webEnvNote}>
+              Common causes: <strong>GA_PROPERTY_ID</strong> must use the format <code>properties/123456789</code>.
+              The service account JSON must be the full JSON key file content (not base64-encoded).
+              The service account must have <strong>Viewer</strong> role on your GA4 property.
+              Check Railway deploy logs for <code>[GA]</code> entries for the exact error.
             </p>
           </div>
         </div>
@@ -491,18 +775,7 @@ const DragonDeskAnalytics = () => {
             <h3>Daily Sessions</h3>
             <p>Sessions and new users over the selected period</p>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={dailyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
-                tickFormatter={d => d.slice(5)} />
-              <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)' }} />
-              <Tooltip contentStyle={{ background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
-              <Legend />
-              <Area type="monotone" dataKey="sessions" name="Sessions" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} />
-              <Area type="monotone" dataKey="newUsers" name="New Users" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+          <DailySessionsChart data={dailyTrend} />
         </div>
 
         <div className={styles.webTwoCol}>
@@ -531,8 +804,9 @@ const DragonDeskAnalytics = () => {
             </div>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie data={byDevice} cx="50%" cy="50%" outerRadius={90} dataKey="sessions"
-                  label={({ device, percent }) => `${device}: ${((percent || 0) * 100).toFixed(0)}%`}>
+                <Pie data={byDevice.filter((d: any) => d.sessions > 0)} cx="50%" cy="50%" outerRadius={90} dataKey="sessions"
+                  labelLine={(props: any) => (props.percent || 0) >= 0.05}
+                  label={({ device, percent }) => (percent || 0) >= 0.05 ? `${device}: ${((percent || 0) * 100).toFixed(0)}%` : ''}>
                   {byDevice.map((entry: any, i: number) => (
                     <Cell key={i} fill={deviceColors[entry.device] || CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
@@ -637,6 +911,30 @@ const DragonDeskAnalytics = () => {
           <div className={styles.summaryContent}>
             <div className={styles.summaryValue}>{data.summary.totals.totalCancellations}</div>
             <div className={styles.summaryLabel}>Total Cancellations</div>
+          </div>
+        </div>
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryIcon}>
+            <MdAttachMoney size={28} />
+          </div>
+          <div className={styles.summaryContent}>
+            <div className={styles.summaryValue}>
+              ${(data.summary.totals.mrr || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            </div>
+            <div className={styles.summaryLabel}>MRR</div>
+            <div className={styles.summarySubLabel}>Active account holders' memberships</div>
+          </div>
+        </div>
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryIcon}>
+            <MdTrendingUp size={28} />
+          </div>
+          <div className={styles.summaryContent}>
+            <div className={styles.summaryValue}>
+              ${(data.summary.totals.arr || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            </div>
+            <div className={styles.summaryLabel}>ARR</div>
+            <div className={styles.summarySubLabel}>MRR &times; 12</div>
           </div>
         </div>
       </div>
@@ -770,14 +1068,15 @@ const DragonDeskAnalytics = () => {
               <div className={styles.filterGroup}>
                 <label>Time Period:</label>
                 <select
-                  value={monthsBack}
-                  onChange={(e) => setMonthsBack(parseInt(e.target.value))}
+                  value={timePeriod}
+                  onChange={(e) => setTimePeriod(e.target.value)}
                   className={styles.select}
                 >
-                  <option value={3}>Last 3 Months</option>
-                  <option value={6}>Last 6 Months</option>
-                  <option value={12}>Last 12 Months</option>
-                  <option value={24}>Last 24 Months</option>
+                  <option value="30d">Last 30 Days</option>
+                  <option value="3">Last 3 Months</option>
+                  <option value="6">Last 6 Months</option>
+                  <option value="12">Last 12 Months</option>
+                  <option value="24">Last 24 Months</option>
                 </select>
               </div>
 
@@ -859,6 +1158,12 @@ const DragonDeskAnalytics = () => {
                 <MdLanguage size={16} style={{ marginRight: 4, verticalAlign: 'middle' }} />
                 Web
               </button>
+              <button
+                className={`${styles.tab} ${activeSection === 'marketing' ? styles.activeTab : ''}`}
+                onClick={() => setActiveSection('marketing')}
+              >
+                Marketing
+              </button>
             </div>
 
             {activeSection === 'web' && (
@@ -881,6 +1186,7 @@ const DragonDeskAnalytics = () => {
               {activeSection === 'members' && renderMembersSection()}
               {activeSection === 'value' && renderValueSection()}
               {activeSection === 'web' && renderWebSection()}
+              {activeSection === 'marketing' && renderMarketingSection()}
             </div>
           </>
         )}

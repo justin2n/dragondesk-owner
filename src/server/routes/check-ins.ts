@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { pool } from '../models/database';
+import { consumeQuickStartClass, releaseQuickStartClass } from '../utils/quickStart';
 
 const router = express.Router();
 
@@ -158,20 +159,26 @@ router.get('/member/:memberId', async (req: AuthRequest, res) => {
     const { memberId } = req.params;
     const { limit = 50 } = req.query;
 
-    const [checkInsResult, summaryResult, monthlyResult] = await Promise.all([
-      pool.query(`
-        SELECT ci.*,
-          l.name as "locationName",
-          e.name as "eventName"
-        FROM check_ins ci
-        LEFT JOIN locations l ON ci."locationId" = l.id
-        LEFT JOIN events e ON ci."eventId" = e.id
-        WHERE ci."memberId" = $1
-        ORDER BY ci."checkInTime" DESC
-        LIMIT $2
-      `, [memberId, parseInt(limit as string)]),
+    const memberIdInt = parseInt(memberId, 10);
+    const limitInt = parseInt(limit as string, 10) || 50;
 
-      pool.query(`
+    const checkInsResult = await pool.query(`
+      SELECT ci.*,
+        l.name as "locationName",
+        e.name as "eventName"
+      FROM check_ins ci
+      LEFT JOIN locations l ON ci."locationId" = l.id
+      LEFT JOIN events e ON ci."eventId" = e.id
+      WHERE ci."memberId" = $1
+      ORDER BY ci."checkInTime" DESC
+      LIMIT $2
+    `, [memberIdInt, limitInt]);
+
+    let summaryRow: any = null;
+    let monthlyRows: any[] = [];
+
+    try {
+      const summaryResult = await pool.query(`
         SELECT
           COUNT(*) as "totalCheckIns",
           COUNT(DISTINCT DATE("checkInTime")) as "uniqueDays",
@@ -179,9 +186,14 @@ router.get('/member/:memberId', async (req: AuthRequest, res) => {
           MAX("checkInTime") as "lastCheckIn"
         FROM check_ins
         WHERE "memberId" = $1
-      `, [memberId]),
+      `, [memberIdInt]);
+      summaryRow = summaryResult.rows[0];
+    } catch (e) {
+      console.error('check-ins summary query failed:', e);
+    }
 
-      pool.query(`
+    try {
+      const monthlyResult = await pool.query(`
         SELECT
           TO_CHAR("checkInTime", 'YYYY-MM') as month,
           COUNT(*) as count
@@ -190,13 +202,16 @@ router.get('/member/:memberId', async (req: AuthRequest, res) => {
           AND "checkInTime" >= NOW() - INTERVAL '6 months'
         GROUP BY TO_CHAR("checkInTime", 'YYYY-MM')
         ORDER BY month DESC
-      `, [memberId]),
-    ]);
+      `, [memberIdInt]);
+      monthlyRows = monthlyResult.rows;
+    } catch (e) {
+      console.error('check-ins monthly query failed:', e);
+    }
 
     res.json({
       checkIns: checkInsResult.rows,
-      summary: summaryResult.rows[0],
-      monthlyBreakdown: monthlyResult.rows
+      summary: summaryRow,
+      monthlyBreakdown: monthlyRows
     });
   } catch (error) {
     console.error('Error fetching member check-ins:', error);
@@ -231,6 +246,10 @@ router.post('/', async (req: AuthRequest, res) => {
           "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = $1
     `, [memberId]);
+
+    // A Quick Start is 3 classes (or whatever the program sets), so attending a
+    // class draws one down. Non-fatal: never block a check-in over trial state.
+    await consumeQuickStartClass(memberId);
 
     if (eventId) {
       await pool.query(`
@@ -270,6 +289,10 @@ router.delete('/:id', async (req: AuthRequest, res) => {
           "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = $1
     `, [checkIn.rows[0].memberId]);
+
+    // Undoing a check-in gives the Quick Start class back — an accidental scan
+    // must not silently burn a trial class.
+    await releaseQuickStartClass(checkIn.rows[0].memberId);
 
     res.json({ success: true, message: 'Check-in deleted' });
   } catch (error) {

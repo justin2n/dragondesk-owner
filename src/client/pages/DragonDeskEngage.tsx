@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { api } from '../utils/api';
 import { Campaign, Audience, EmailTemplate } from '../types';
 import EmailEditor from '../components/EmailEditor';
 import { useLocation } from '../contexts/LocationContext';
 import { useToast } from '../components/Toast';
+import {
+  ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend,
+} from 'recharts';
 import styles from './DragonDeskEngage.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit';
@@ -28,8 +32,9 @@ interface SMSCampaign {
 const DragonDeskEngage = () => {
   const { toast, confirm } = useToast();
   const { selectedLocation, isAllLocations } = useLocation();
-  const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'sms'>('campaigns');
+  const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'sms' | 'analytics'>('campaigns');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [trendGranularity, setTrendGranularity] = useState<'week' | 'month'>('week');
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
@@ -40,6 +45,14 @@ const DragonDeskEngage = () => {
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
   const [editingSMSCampaign, setEditingSMSCampaign] = useState<SMSCampaign | null>(null);
+
+  // "Preview Recipients" modal — shows exactly who a campaign would email.
+  const [previewCampaign, setPreviewCampaign] = useState<Campaign | null>(null);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewSearch, setPreviewSearch] = useState('');
+  const [previewSms, setPreviewSms] = useState<SMSCampaign | null>(null);
+  const [previewSmsData, setPreviewSmsData] = useState<any>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -166,6 +179,64 @@ const DragonDeskEngage = () => {
     }
   };
 
+  const handleSendCampaign = async (campaign: Campaign) => {
+    const audience = audiences.find((a) => a.id === campaign.audienceId);
+
+    // Resolve the EXACT recipient count the send will use, so the confirmation
+    // shows a real number (this is the safeguard against a wrong-audience blast).
+    let preview: any;
+    try {
+      preview = await api.get(`/email/send-campaign/${campaign.id}/preview`);
+    } catch (error: any) {
+      toast(error.message || 'Could not load the recipient count for this campaign', 'error');
+      return;
+    }
+
+    const n = preview.recipientCount ?? 0;
+    if (n === 0) {
+      toast('No recipients with an email address match this audience.', 'error');
+      return;
+    }
+
+    const allMembers = preview.filterCount === 0;
+    const warn = allMembers
+      ? ' ⚠ This audience has NO filters, so it targets EVERY member.'
+      : '';
+    const skipped = preview.totalMatched > n ? ` (${preview.totalMatched - n} matched but have no email and will be skipped.)` : '';
+
+    if (!await confirm({
+      title: allMembers ? 'Send to ALL members?' : 'Send Campaign',
+      message: `This will email ${n} ${n === 1 ? 'person' : 'people'} in the "${audience?.name || 'selected'}" audience.${warn}${skipped} This sends real email and can't be undone.`,
+      confirmLabel: `Send to ${n}`,
+      danger: allMembers,
+    })) return;
+
+    try {
+      // Pass confirmSendAll only when the user knowingly confirmed a no-filter send.
+      const result = await api.post(`/email/send-campaign/${campaign.id}`, { confirmSendAll: allMembers });
+      toast(`Campaign sent — ${result.sent} delivered${result.failed ? `, ${result.failed} failed` : ''}.`, 'success');
+      loadData();
+    } catch (error: any) {
+      toast(error.message || 'Failed to send campaign', 'error');
+    }
+  };
+
+  const openRecipientPreview = async (campaign: Campaign) => {
+    setPreviewCampaign(campaign);
+    setPreviewData(null);
+    setPreviewSearch('');
+    setPreviewLoading(true);
+    try {
+      const data = await api.get(`/email/send-campaign/${campaign.id}/recipients`);
+      setPreviewData(data);
+    } catch (error: any) {
+      toast(error.message || 'Failed to load recipients', 'error');
+      setPreviewCampaign(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleCreateTemplate = () => {
     setEditingTemplate(null);
     setTemplateFormData({
@@ -262,11 +333,7 @@ const DragonDeskEngage = () => {
         } : null,
       });
 
-      if (result.previewUrl) {
-        toast(`Test email sent to ${testEmail}! Preview: ${result.previewUrl}`, 'success');
-      } else {
-        toast(`Test email sent successfully to ${testEmail}!`, 'success');
-      }
+      toast(`Test email sent to ${testEmail}!`, 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to send test email', 'error');
     }
@@ -335,15 +402,44 @@ const DragonDeskEngage = () => {
     }
   };
 
-  const handleSendSMSCampaign = async (id: number) => {
-    if (!await confirm({ title: 'Send SMS Campaign', message: 'Are you sure you want to send this SMS campaign? This action cannot be undone.', confirmLabel: 'Send Now', danger: true })) return;
+  const handleSendSMSCampaign = async (campaign: SMSCampaign) => {
+    // Show the exact number of texts (pending recipients) before sending.
+    let count = campaign.recipientCount ?? 0;
+    try {
+      const preview = await api.get(`/sms-campaigns/${campaign.id}/recipients`);
+      const pending = (preview.recipients || []).filter((r: any) => r.status === 'pending');
+      count = pending.length || preview.recipientCount || count;
+    } catch { /* fall back to the stored recipientCount */ }
+
+    if (count === 0) {
+      toast('No pending recipients to text for this campaign.', 'error');
+      return;
+    }
+    if (!await confirm({
+      title: 'Send SMS Campaign',
+      message: `This will text ${count} ${count === 1 ? 'person' : 'people'}. Standard messaging rates and carrier/TCPA rules apply, and this can't be undone.`,
+      confirmLabel: `Send to ${count}`,
+      danger: true,
+    })) return;
 
     try {
-      await api.post(`/sms-campaigns/${id}/send`);
-      toast('SMS campaign is being sent!', 'success');
+      const result = await api.post(`/sms-campaigns/${campaign.id}/send`, {});
+      toast(`SMS campaign sending to ${result.recipientCount ?? count}…`, 'success');
       loadData();
     } catch (error: any) {
       toast(error.message || 'Failed to send SMS campaign', 'error');
+    }
+  };
+
+  const openSmsRecipientPreview = async (campaign: SMSCampaign) => {
+    setPreviewSms(campaign);
+    setPreviewSmsData(null);
+    setPreviewSearch('');
+    try {
+      setPreviewSmsData(await api.get(`/sms-campaigns/${campaign.id}/recipients`));
+    } catch (error: any) {
+      toast(error.message || 'Failed to load recipients', 'error');
+      setPreviewSms(null);
     }
   };
 
@@ -364,7 +460,11 @@ const DragonDeskEngage = () => {
     }
 
     try {
-      toast(`Test SMS would be sent to ${testPhone} (simulated in development)`, 'info');
+      await api.post('/sms-campaigns/send-test', {
+        to: testPhone,
+        message: smsFormData.message,
+      });
+      toast(`Test SMS sent to ${testPhone}!`, 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to send test SMS', 'error');
     }
@@ -420,23 +520,25 @@ const DragonDeskEngage = () => {
                         <div
                           className={styles.previewBody}
                           dangerouslySetInnerHTML={{
-                            __html: campaign.content.body?.substring(0, 200) +
-                                   (campaign.content.body?.length > 200 ? '...' : '')
+                            __html: DOMPurify.sanitize(
+                              (campaign.content.body?.substring(0, 200) ?? '') +
+                              (campaign.content.body?.length > 200 ? '...' : '')
+                            )
                           }}
                         />
                       </div>
                     </>
                   )}
 
-                  {(campaign.sent || campaign.opens || campaign.clicks) && (
+                  {(campaign.status === 'completed' || campaign.sent || campaign.opens || campaign.clicks) && (
                     <div className={styles.analyticsSection}>
                       <div className={styles.analyticsHeader}>
                         <span className={styles.label}>Campaign Analytics</span>
                       </div>
                       <div className={styles.analyticsGrid}>
-                        {campaign.sent && (
+                        {(campaign.status === 'completed' || campaign.sent) && (
                           <div className={styles.analyticsItem}>
-                            <div className={styles.analyticsValue}>{campaign.sent}</div>
+                            <div className={styles.analyticsValue}>{campaign.sent || 0}</div>
                             <div className={styles.analyticsLabel}>Sent</div>
                           </div>
                         )}
@@ -482,11 +584,25 @@ const DragonDeskEngage = () => {
                             <div className={styles.analyticsLabel}>Members</div>
                           </div>
                         )}
+                        {campaign.conversions !== undefined && campaign.conversions > 0 && (
+                          <div className={styles.analyticsItem}>
+                            <div className={styles.analyticsValue}>{campaign.conversions}</div>
+                            <div className={styles.analyticsLabel}>Conversions</div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
                 <div className={styles.cardFooter}>
+                  <button onClick={() => openRecipientPreview(campaign)} className={styles.editBtn}>
+                    Preview Recipients
+                  </button>
+                  {!campaign.sent && (
+                    <button onClick={() => handleSendCampaign(campaign)} className={styles.sendBtn}>
+                      Send Campaign
+                    </button>
+                  )}
                   <button onClick={() => handleEditCampaign(campaign)} className={styles.editBtn}>
                     Edit
                   </button>
@@ -497,6 +613,92 @@ const DragonDeskEngage = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Preview Recipients modal — the exact set the send will email */}
+      {previewCampaign && (
+        <div
+          onClick={() => setPreviewCampaign(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--color-dark-grey, #1a1a2e)', border: '1px solid var(--color-border, #333)', borderRadius: 10, width: 'min(640px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', color: 'var(--color-text-primary, #eee)' }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Recipients — {previewCampaign.name}</h3>
+              <button onClick={() => setPreviewCampaign(null)} style={{ background: 'none', border: 'none', color: 'inherit', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+
+            {previewLoading ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-secondary, #999)' }}>Loading recipients…</div>
+            ) : previewData && (() => {
+              const audience = audiences.find((a) => a.id === previewCampaign.audienceId);
+              const all = previewData.recipients || [];
+              const q = previewSearch.trim().toLowerCase();
+              const filtered = q
+                ? all.filter((r: any) => `${r.firstName} ${r.lastName} ${r.email}`.toLowerCase().includes(q))
+                : all;
+              const skipped = (previewData.totalMatched || 0) - (previewData.recipientCount || 0);
+              return (
+                <>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--color-border, #333)' }}>
+                    <div style={{ fontSize: '0.95rem' }}>
+                      <strong>{previewData.recipientCount}</strong> will be emailed{audience ? <> in <strong>"{audience.name}"</strong></> : ''}.
+                    </div>
+                    {previewData.filterCount === 0 && (
+                      <div style={{ color: '#f59e0b', fontSize: '0.85rem', marginTop: 4 }}>⚠ This audience has NO filters — it targets EVERY member.</div>
+                    )}
+                    {skipped > 0 && (
+                      <div style={{ color: 'var(--color-text-secondary, #999)', fontSize: '0.85rem', marginTop: 4 }}>{skipped} matched but have no email and will be skipped.</div>
+                    )}
+                    <input
+                      value={previewSearch}
+                      onChange={(e) => setPreviewSearch(e.target.value)}
+                      placeholder="Search name or email…"
+                      style={{ marginTop: 10, width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--color-border, #333)', background: 'var(--color-bg, #12121f)', color: 'inherit', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {filtered.length === 0 ? (
+                      <div style={{ padding: 20, color: 'var(--color-text-secondary, #999)' }}>No matching recipients.</div>
+                    ) : (
+                      filtered.map((r: any) => (
+                        <div key={r.id} style={{ padding: '8px 20px', borderBottom: '1px solid var(--color-border, #222)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: '0.9rem' }}>{r.firstName} {r.lastName}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary, #999)' }}>{r.email}</div>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary, #999)', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            {r.accountStatus}{r.programType && r.programType !== 'No Program Selected' ? ` • ${r.programType}` : ''}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div style={{ padding: '12px 20px', borderTop: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary, #999)' }}>
+                      {q ? `${filtered.length} of ${all.length} shown` : `${all.length} total`}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => setPreviewCampaign(null)} className={styles.editBtn}>Close</button>
+                      {!previewCampaign.sent && (
+                        <button
+                          className={styles.sendBtn}
+                          onClick={() => { const c = previewCampaign; setPreviewCampaign(null); handleSendCampaign(c); }}
+                        >
+                          Send to {previewData.recipientCount}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
     </>
@@ -676,8 +878,10 @@ const DragonDeskEngage = () => {
                   <div
                     className={styles.previewBody}
                     dangerouslySetInnerHTML={{
-                      __html: template.body?.substring(0, 200) +
-                             (template.body?.length > 200 ? '...' : '')
+                      __html: DOMPurify.sanitize(
+                        (template.body?.substring(0, 200) ?? '') +
+                        (template.body?.length > 200 ? '...' : '')
+                      )
                     }}
                   />
                 </div>
@@ -829,12 +1033,15 @@ const DragonDeskEngage = () => {
                   </div>
                 </div>
                 <div className={styles.cardFooter}>
+                  <button onClick={() => openSmsRecipientPreview(campaign)} className={styles.editBtn}>
+                    Preview Recipients
+                  </button>
                   {campaign.status === 'draft' && (
                     <>
                       <button onClick={() => handleEditSMSCampaign(campaign)} className={styles.editBtn}>
                         Edit
                       </button>
-                      <button onClick={() => handleSendSMSCampaign(campaign.id)} className={styles.sendBtn}>
+                      <button onClick={() => handleSendSMSCampaign(campaign)} className={styles.sendBtn}>
                         Send Now
                       </button>
                     </>
@@ -850,6 +1057,57 @@ const DragonDeskEngage = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* SMS Preview Recipients modal */}
+      {previewSms && (
+        <div
+          onClick={() => setPreviewSms(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--color-dark-grey, #1a1a2e)', border: '1px solid var(--color-border, #333)', borderRadius: 10, width: 'min(600px, 100%)', maxHeight: '85vh', display: 'flex', flexDirection: 'column', color: 'var(--color-text-primary, #eee)' }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Recipients — {previewSms.name}</h3>
+              <button onClick={() => setPreviewSms(null)} style={{ background: 'none', border: 'none', color: 'inherit', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+            {!previewSmsData ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-secondary, #999)' }}>Loading recipients…</div>
+            ) : (() => {
+              const all = previewSmsData.recipients || [];
+              const q = previewSearch.trim().toLowerCase();
+              const filtered = q ? all.filter((r: any) => `${r.firstName || ''} ${r.lastName || ''} ${r.phoneNumber}`.toLowerCase().includes(q)) : all;
+              const pending = all.filter((r: any) => r.status === 'pending').length;
+              return (
+                <>
+                  <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--color-border, #333)' }}>
+                    <div style={{ fontSize: '0.95rem' }}><strong>{pending}</strong> will be texted ({all.length} total in this campaign).</div>
+                    <input value={previewSearch} onChange={(e) => setPreviewSearch(e.target.value)} placeholder="Search name or phone…"
+                      style={{ marginTop: 10, width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--color-border, #333)', background: 'var(--color-bg, #12121f)', color: 'inherit', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {filtered.length === 0 ? (
+                      <div style={{ padding: 20, color: 'var(--color-text-secondary, #999)' }}>No matching recipients.</div>
+                    ) : filtered.map((r: any) => (
+                      <div key={r.id} style={{ padding: '8px 20px', borderBottom: '1px solid var(--color-border, #222)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: '0.9rem' }}>{[r.firstName, r.lastName].filter(Boolean).join(' ') || '—'}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary, #999)' }}>{r.phoneNumber}</div>
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary, #999)' }}>{r.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ padding: '12px 20px', borderTop: '1px solid var(--color-border, #333)', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={() => setPreviewSms(null)} className={styles.editBtn}>Close</button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
     </>
@@ -987,6 +1245,208 @@ const DragonDeskEngage = () => {
     );
   };
 
+  const renderAnalytics = () => {
+    const sentCampaigns = campaigns.filter((c) => (c.sent || 0) > 0 || c.status === 'completed');
+    const totalSent = sentCampaigns.reduce((s, c) => s + (c.sent || 0), 0);
+    const totalOpens = sentCampaigns.reduce((s, c) => s + (c.opens || 0), 0);
+    const totalClicks = sentCampaigns.reduce((s, c) => s + (c.clicks || 0), 0);
+    const totalConversions = sentCampaigns.reduce((s, c) => s + (c.conversions || 0), 0);
+    const avgOpenRate = totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0;
+    const avgClickRate = totalSent > 0 ? Math.round((totalClicks / totalSent) * 100) : 0;
+
+    const kpis = [
+      { label: 'Campaigns Sent', value: String(sentCampaigns.length) },
+      { label: 'Emails Sent', value: totalSent.toLocaleString() },
+      { label: 'Total Opens', value: totalOpens.toLocaleString() },
+      { label: 'Avg Open Rate', value: `${avgOpenRate}%` },
+      { label: 'Total Clicks', value: totalClicks.toLocaleString() },
+      { label: 'Avg CTR', value: `${avgClickRate}%` },
+      { label: 'Conversions', value: totalConversions.toLocaleString() },
+    ];
+
+    // Trends over time: bucket sent campaigns by week or month (user toggle).
+    // sentAt is the true send date; fall back to updatedAt/createdAt for older
+    // rows without one. Bucket keys are lexicographically sortable in both modes.
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const bucketOf = (d: Date): { key: string; label: string } => {
+      if (trendGranularity === 'month') {
+        return {
+          key: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`,
+          label: d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' }),
+        };
+      }
+      // Week: snap to that week's Monday so all days in a week share a bucket.
+      const ws = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      ws.setDate(ws.getDate() - ((ws.getDay() + 6) % 7));
+      return {
+        key: `${ws.getFullYear()}-${pad(ws.getMonth() + 1)}-${pad(ws.getDate())}`,
+        label: ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      };
+    };
+
+    const buckets = new Map<string, { label: string; sent: number; opens: number; clicks: number; conversions: number }>();
+    for (const c of sentCampaigns) {
+      const when = c.sentAt || c.updatedAt || c.createdAt;
+      if (!when) continue;
+      const d = new Date(when);
+      if (isNaN(d.getTime())) continue;
+      const { key, label } = bucketOf(d);
+      const row = buckets.get(key) || { label, sent: 0, opens: 0, clicks: 0, conversions: 0 };
+      row.sent += c.sent || 0;
+      row.opens += c.opens || 0;
+      row.clicks += c.clicks || 0;
+      row.conversions += c.conversions || 0;
+      buckets.set(key, row);
+    }
+    const trend = Array.from(buckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => ({
+        month: v.label,
+        sent: v.sent,
+        opens: v.opens,
+        clicks: v.clicks,
+        conversions: v.conversions,
+        openRate: v.sent > 0 ? Math.round((v.opens / v.sent) * 100) : 0,
+      }));
+    const periodWord = trendGranularity === 'week' ? 'weeks' : 'months';
+
+    const cardBg = 'var(--color-dark-grey, #1a1a2e)';
+    const border = '1px solid var(--color-border, #333)';
+    const dim = 'var(--color-text-secondary, #999)';
+    const th: React.CSSProperties = { padding: '8px 12px', fontWeight: 600, color: dim, fontSize: '0.8rem' };
+    const thR: React.CSSProperties = { ...th, textAlign: 'right' };
+    const td: React.CSSProperties = { padding: '10px 12px' };
+    const tdR: React.CSSProperties = { ...td, textAlign: 'right' };
+    const tooltipStyle: React.CSSProperties = { background: 'var(--color-dark-grey)', border: '1px solid var(--color-border)', borderRadius: '6px', color: 'var(--color-text-primary)' };
+
+    return (
+      <div>
+        <h2 style={{ fontSize: '1.15rem', margin: '0 0 4px' }}>Email Performance</h2>
+        <p style={{ color: dim, fontSize: '0.9rem', margin: '0 0 20px' }}>Across all sent email campaigns.</p>
+
+        {sentCampaigns.length === 0 ? (
+          <div className={styles.emptyState}>
+            No sent campaigns yet — analytics appear here once you send a campaign.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 28 }}>
+              {kpis.map((k) => (
+                <div key={k.label} style={{ background: cardBg, border, borderRadius: 8, padding: '16px 18px' }}>
+                  <div style={{ fontSize: '1.7rem', fontWeight: 700, lineHeight: 1.1 }}>{k.value}</div>
+                  <div style={{ fontSize: '0.75rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>{k.label}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', margin: '0 0 4px' }}>
+              <h3 style={{ fontSize: '1rem', margin: 0 }}>Trends Over Time</h3>
+              <div style={{ display: 'inline-flex', border, borderRadius: 8, overflow: 'hidden' }}>
+                {(['week', 'month'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setTrendGranularity(g)}
+                    style={{
+                      padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: trendGranularity === g ? 'var(--color-red)' : 'transparent',
+                      color: trendGranularity === g ? '#fff' : dim,
+                    }}
+                  >
+                    {g === 'week' ? 'Week over Week' : 'Month over Month'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p style={{ color: dim, fontSize: '0.85rem', margin: '0 0 14px' }}>
+              Email marketing performance by {trendGranularity}.
+            </p>
+            {trend.length < 2 ? (
+              <div style={{ background: cardBg, border, borderRadius: 8, padding: '20px', color: dim, fontSize: '0.9rem', marginBottom: 28 }}>
+                Trends appear once you've sent campaigns across at least two different {periodWord}.
+                {trendGranularity === 'month' && ' Try the Week over Week view to see trends sooner.'}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 28 }}>
+                <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Volume — Sent, Opens, Clicks</div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="month" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                      <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} allowDecimals={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
+                      <Line type="monotone" dataKey="sent" name="Emails Sent" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="opens" name="Opens" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="clicks" name="Clicks" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Open Rate</div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="month" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                      <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} unit="%" domain={[0, 100]} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => [`${v}%`, 'Open Rate']} />
+                      <Line type="monotone" dataKey="openRate" name="Open Rate" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ background: cardBg, border, borderRadius: 8, padding: '16px 16px 8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: dim, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Conversions</div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="month" stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                      <YAxis stroke="var(--color-text-secondary)" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} allowDecimals={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Line type="monotone" dataKey="conversions" name="Conversions" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            <h3 style={{ fontSize: '1rem', margin: '0 0 10px' }}>Campaign Breakdown</h3>
+            <div style={{ overflowX: 'auto', border, borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: border, textAlign: 'left' }}>
+                    <th style={th}>Campaign</th>
+                    <th style={thR}>Sent</th>
+                    <th style={thR}>Opens</th>
+                    <th style={thR}>Open Rate</th>
+                    <th style={thR}>Clicks</th>
+                    <th style={thR}>CTR</th>
+                    <th style={thR}>Conversions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sentCampaigns.map((c) => (
+                    <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border, #222)' }}>
+                      <td style={td}>{c.name}</td>
+                      <td style={tdR}>{(c.sent || 0).toLocaleString()}</td>
+                      <td style={tdR}>{(c.opens || 0).toLocaleString()}</td>
+                      <td style={tdR}>{c.openRate || 0}%</td>
+                      <td style={tdR}>{(c.clicks || 0).toLocaleString()}</td>
+                      <td style={tdR}>{c.clickThroughRate || 0}%</td>
+                      <td style={tdR}>{c.conversions || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: dim, marginTop: 12 }}>
+              Opens depend on the recipient's mail client loading images, so they're a floor, not exact. Clicks and CTR count unique recipients who clicked any link, for campaigns sent after click tracking was enabled.
+            </p>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -1016,6 +1476,12 @@ const DragonDeskEngage = () => {
           >
             Templates
           </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`${styles.tab} ${activeTab === 'analytics' ? styles.activeTab : ''}`}
+          >
+            Analytics
+          </button>
         </div>
       )}
 
@@ -1029,6 +1495,7 @@ const DragonDeskEngage = () => {
         {activeTab === 'templates' && (
           viewMode === 'list' ? renderTemplatesList() : renderTemplateEditor()
         )}
+        {activeTab === 'analytics' && renderAnalytics()}
       </div>
     </div>
   );

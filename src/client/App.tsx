@@ -21,7 +21,9 @@ import WorkforceManagement from './pages/WorkforceManagement';
 import LeadForm from './pages/LeadForm';
 import Billing from './pages/Billing';
 import Kiosk from './pages/Kiosk';
+import POS from './pages/POS';
 import AttendanceTracking from './pages/AttendanceTracking';
+import SalesSignals from './pages/SalesSignals';
 import Layout from './components/Layout';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -90,6 +92,10 @@ const AppRoutes = () => {
       <Route path="/kiosk" element={<Kiosk />} />
       <Route path="/kiosk/:locationId" element={<Kiosk />} />
 
+      {/* Public POS terminal - no authentication required */}
+      <Route path="/pos" element={<POS />} />
+      <Route path="/pos/:locationId" element={<POS />} />
+
       <Route
         path="/"
         element={
@@ -108,12 +114,13 @@ const AppRoutes = () => {
         <Route path="social" element={<DragonDeskSocial />} />
         <Route path="analytics" element={<DragonDeskAnalytics />} />
         <Route path="attendance" element={<AttendanceTracking />} />
+        <Route path="sales-signals" element={<SalesSignals />} />
         <Route
           path="workforce"
           element={
-            <SuperAdminRoute>
+            <AdminRoute>
               <WorkforceManagement />
-            </SuperAdminRoute>
+            </AdminRoute>
           }
         />
         <Route

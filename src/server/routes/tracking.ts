@@ -2,8 +2,67 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { parseUtms } from '../utils/attribution';
+import { verifyClickSignature } from '../utils/emailClickTracking';
 
 const router = Router();
+
+// ─── Email open tracking ────────────────────────────────────────────────────
+// 1x1 transparent GIF returned for every campaign open pixel. Records the open
+// (unique via openedAt) and recomputes the campaign's opens + open rate. Always
+// returns the image — never errors — so mail clients render it.
+const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+
+router.get('/open/:token', async (req: Request, res: Response) => {
+  const { token } = req.params;
+  try {
+    // Record the open on the recipient row. Campaign opens/open-rate are computed
+    // live from these rows on read (see routes/campaigns.ts), so nothing else to do.
+    await pool.query(
+      `UPDATE campaign_recipients
+         SET "openCount" = "openCount" + 1,
+             "openedAt" = COALESCE("openedAt", CURRENT_TIMESTAMP)
+       WHERE token = $1`,
+      [token]
+    );
+  } catch {
+    // swallow — the pixel must always render
+  }
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.end(OPEN_PIXEL);
+});
+
+// ─── Email click tracking ───────────────────────────────────────────────────
+// Links in campaign emails are rewritten to this endpoint (see
+// utils/emailClickTracking.ts). Records the click on the recipient row, then
+// redirects to the original destination. A click implies an open, so openedAt is
+// also set — covers mail clients that block the pixel.
+router.get('/click/:token', async (req: Request, res: Response) => {
+  const { token } = req.params;
+  const url = typeof req.query.u === 'string' ? req.query.u : '';
+  const sig = typeof req.query.s === 'string' ? req.query.s : '';
+  if (!/^https?:\/\//i.test(url) || !verifyClickSignature(token, url, sig)) {
+    res.status(404).send('Link not found');
+    return;
+  }
+  try {
+    await pool.query(
+      `UPDATE campaign_recipients
+         SET "clickCount" = "clickCount" + 1,
+             "clickedAt" = COALESCE("clickedAt", CURRENT_TIMESTAMP),
+             "openedAt" = COALESCE("openedAt", CURRENT_TIMESTAMP)
+       WHERE token = $1`,
+      [token]
+    );
+  } catch {
+    // swallow — the redirect must always happen
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, url);
+});
 
 // ─── Tracking script ────────────────────────────────────────────────────────
 
@@ -23,13 +82,15 @@ router.get('/script.js', async (req: Request, res: Response) => {
     return;
   }
 
-  const endpoint = `${req.protocol}://${req.get('host')}/api/tracking`;
+  const proto = req.get('x-forwarded-proto') || req.protocol;
+  const endpoint = `${proto}://${req.get('host')}/api/tracking`;
 
   const script = buildTrackingScript(token, endpoint);
 
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.send(script);
 });
 
@@ -47,6 +108,19 @@ function buildTrackingScript(token: string, endpoint: string): string {
   var vid=getCookie('_dd_vid');if(!vid){vid=uuid();setCookie('_dd_vid',vid,365);}
   var sid;try{sid=sessionStorage.getItem('_dd_sid')||uuid();sessionStorage.setItem('_dd_sid',sid);}catch(e){sid=uuid();}
 
+  /* ── Expose IDs for lead form identity stitching ── */
+  w.__ddVid=vid;w.__ddToken=TOKEN;w.__ddEP=EP;
+
+  /* ── First-touch attribution cookie (read by embedded lead forms) ── */
+  try{
+    if(!getCookie('_dd_attr')){
+      var qp=new URLSearchParams(location.search),attr={};
+      ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'].forEach(function(k){var v=qp.get(k);if(v)attr[k]=v;});
+      if(d.referrer)attr.referrer=d.referrer;
+      if(Object.keys(attr).length){setCookie('_dd_attr',encodeURIComponent(JSON.stringify(attr)),90);}
+    }
+  }catch(e){}
+
   /* ── Event queue ── */
   var queue=[];
   function push(evt){queue.push(Object.assign({ts:Date.now(),url:location.href,path:location.pathname,title:d.title},evt));}
@@ -55,8 +129,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
     if(!queue.length)return;
     var payload=JSON.stringify({token:TOKEN,vid:vid,sid:sid,events:queue.splice(0)});
     try{
-      if(navigator.sendBeacon){navigator.sendBeacon(EP+'/collect',new Blob([payload],{type:'application/json'}));}
-      else{fetch(EP+'/collect',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true});}
+      fetch(EP+'/collect',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true,credentials:'omit'});
     }catch(e){}
   }
 
@@ -76,7 +149,7 @@ function buildTrackingScript(token: string, endpoint: string): string {
   }
 
   /* ── Auto tracking ── */
-  push({type:'pageview'});
+  push({type:'pageview',ref:d.referrer});
 
   d.addEventListener('click',function(e){
     var el=e.target;
@@ -87,7 +160,9 @@ function buildTrackingScript(token: string, endpoint: string): string {
 
   d.addEventListener('submit',function(e){
     var f=e.target;
-    push({type:'form_submit',formId:f.id||'',formName:f.name||'',selector:getSelector(f)});
+    var emailEl=f.querySelector('input[type="email"],input[name="email"],input[name="Email"],input[id="email"]');
+    var email=emailEl?emailEl.value.trim():'';
+    push({type:'form_submit',formId:f.id||'',formName:f.name||'',selector:getSelector(f),email:email});
   },true);
 
   /* Scroll depth — fire at 25/50/75/100% */
@@ -106,10 +181,41 @@ function buildTrackingScript(token: string, endpoint: string): string {
   fetch(EP+'/personalize',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({token:TOKEN,vid:vid,url:location.href,path:location.pathname})
+    body:JSON.stringify({token:TOKEN,vid:vid,url:location.href,path:location.pathname}),
+    credentials:'omit'
   }).then(function(r){return r.json();}).then(function(data){
     if(data&&data.changes&&data.changes.length){applyChanges(data.changes);}
+    if(data&&data.enrollments&&data.enrollments.length){setupEnrollments(data.enrollments);}
+    if(data&&data.experiences&&data.experiences.length){renderExperiences(data.experiences);}
   }).catch(function(){});
+
+  /* Enrollment: one view per assigned test (both arms), plus goal watchers that
+     record a conversion ('lead') when the visitor completes the chosen goal. */
+  function setupEnrollments(list){
+    list.forEach(function(en){trackExp(en.testId,en.variant,'view');});
+    var goals=list.filter(function(en){return en.goal&&en.goal.type;});
+    if(!goals.length)return;
+    function convert(en){
+      var k='_dd_conv_'+en.testId;
+      try{if(localStorage.getItem(k)==='1')return;localStorage.setItem(k,'1');}catch(e){}
+      trackExp(en.testId,en.variant,'lead');
+    }
+    d.addEventListener('click',function(e){
+      var el=e.target;if(!el||!el.closest)return;
+      goals.forEach(function(en){
+        var g=en.goal,hit=false;
+        try{
+          if(g.type==='tel_click')hit=!!el.closest('a[href^="tel:"]');
+          else if(g.type==='email_click')hit=!!el.closest('a[href^="mailto:"]');
+          else if(g.type==='selector_click'&&g.selector)hit=!!el.closest(g.selector);
+        }catch(_){}
+        if(hit)convert(en);
+      });
+    },true);
+    d.addEventListener('submit',function(){
+      goals.forEach(function(en){if(en.goal.type==='form_submit')convert(en);});
+    },true);
+  }
 
   function applyChanges(changes){
     changes.forEach(function(c){
@@ -123,6 +229,102 @@ function buildTrackingScript(token: string, endpoint: string): string {
       }catch(e){}
     });
   }
+
+  /* ── Injected experiences: promo bars & offer modals ── */
+  var AB=EP.replace('/tracking','/ab-analytics');
+  function trackExp(testId,variant,type){
+    try{fetch(AB+'/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({testId:testId,variant:variant,eventType:type,sessionId:sid}),keepalive:true,credentials:'omit'});}catch(e){}
+  }
+  /* Frequency cap. 'once' persists across sessions, 'session' per tab, 'always' never caps. */
+  function seen(testId,freq){
+    if(freq==='always')return false;
+    var k='_dd_exp_'+testId;
+    try{return (freq==='session'?sessionStorage:localStorage).getItem(k)==='1';}catch(e){return false;}
+  }
+  function markSeen(testId,freq){
+    if(freq==='always')return;
+    var k='_dd_exp_'+testId;
+    try{(freq==='session'?sessionStorage:localStorage).setItem(k,'1');}catch(e){}
+  }
+  /* Run fn on the configured trigger (offer modals). Promo bars show immediately. */
+  function onTrigger(trig,fn){
+    trig=trig||{};var t=trig.type||'load';
+    if(t==='load'){setTimeout(fn,Math.max(0,(trig.delaySeconds||0)*1000));return;}
+    if(t==='exit'){
+      var fired=false;
+      var h=function(e){if(!fired&&e.clientY<=0){fired=true;d.removeEventListener('mouseout',h);fn();}};
+      d.addEventListener('mouseout',h);return;
+    }
+    if(t==='scroll'){
+      var pct=trig.scrollPct||50,fired2=false;
+      var s=function(){var p=Math.round((w.scrollY/((d.body.scrollHeight-w.innerHeight)||1))*100);if(!fired2&&p>=pct){fired2=true;w.removeEventListener('scroll',s);fn();}};
+      w.addEventListener('scroll',s,{passive:true});return;
+    }
+    setTimeout(fn,0);
+  }
+  function renderExperiences(list){
+    list.forEach(function(exp){
+      try{
+        if(!exp||!exp.config)return;
+        if(seen(exp.testId,exp.config.frequency))return;
+        if(exp.kind==='promoBar')renderPromoBar(exp);
+        else if(exp.kind==='offerModal')onTrigger(exp.config.trigger,function(){renderOfferModal(exp);});
+      }catch(e){}
+    });
+  }
+  function ctaClick(exp,href){
+    trackExp(exp.testId,exp.variant,'click');
+    if(href){try{w.open(href,'_self');}catch(e){location.href=href;}}
+  }
+  function renderPromoBar(exp){
+    var c=exp.config;
+    var bar=d.createElement('div');
+    bar.className='dd-exp-bar';
+    var pos=(c.position==='bottom')?'bottom:0;':'top:0;';
+    bar.style.cssText='position:fixed;left:0;right:0;'+pos+'z-index:2147483646;display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 44px 12px 16px;font:600 15px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,.15);background:'+(c.bgColor||'#c0392b')+';color:'+(c.textColor||'#ffffff')+';';
+    var msg=d.createElement('span');msg.textContent=c.message||'';bar.appendChild(msg);
+    if(c.ctaLabel){
+      var a=d.createElement('a');a.textContent=c.ctaLabel;a.href=c.ctaLink||'#';
+      a.style.cssText='display:inline-block;padding:7px 16px;border-radius:6px;background:'+(c.textColor||'#fff')+';color:'+(c.bgColor||'#c0392b')+';text-decoration:none;font-weight:700;white-space:nowrap;';
+      a.addEventListener('click',function(e){e.preventDefault();ctaClick(exp,c.ctaLink);});
+      bar.appendChild(a);
+    }
+    if(c.dismissible!==false){
+      var x=d.createElement('button');x.textContent='\\u00d7';x.setAttribute('aria-label','Dismiss');
+      x.style.cssText='position:absolute;right:12px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:inherit;font-size:22px;line-height:1;cursor:pointer;opacity:.8;';
+      x.addEventListener('click',function(){bar.remove();markSeen(exp.testId,c.frequency);});
+      bar.appendChild(x);
+    }
+    d.body.appendChild(bar);
+    /* view is recorded once per enrollment (setupEnrollments), not here. */
+    markSeen(exp.testId,c.frequency);
+  }
+  function renderOfferModal(exp){
+    var c=exp.config;
+    var ov=d.createElement('div');ov.className='dd-exp-overlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    var card=d.createElement('div');
+    card.style.cssText='position:relative;max-width:440px;width:100%;background:'+(c.bgColor||'#fff')+';color:'+(c.textColor||'#1a1a2e')+';border-radius:12px;padding:28px;box-sizing:border-box;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.35);text-align:center;';
+    if(c.imageUrl){var img=d.createElement('img');img.src=c.imageUrl;img.style.cssText='max-width:100%;border-radius:8px;margin-bottom:14px;';card.appendChild(img);}
+    if(c.heading){var h=d.createElement('h2');h.textContent=c.heading;h.style.cssText='margin:0 0 10px;font-size:22px;font-weight:700;';card.appendChild(h);}
+    if(c.body){var p=d.createElement('p');p.textContent=c.body;p.style.cssText='margin:0 0 18px;opacity:.9;';card.appendChild(p);}
+    if(c.ctaLabel){
+      var a=d.createElement('a');a.textContent=c.ctaLabel;a.href=c.ctaLink||'#';
+      a.style.cssText='display:inline-block;padding:12px 24px;border-radius:8px;background:'+(c.accentColor||'#c0392b')+';color:#fff;text-decoration:none;font-weight:700;';
+      a.addEventListener('click',function(e){e.preventDefault();ctaClick(exp,c.ctaLink);});
+      card.appendChild(a);
+    }
+    function close(){ov.remove();markSeen(exp.testId,c.frequency);}
+    if(c.dismissible!==false){
+      var x=d.createElement('button');x.textContent='\\u00d7';x.setAttribute('aria-label','Close');
+      x.style.cssText='position:absolute;right:12px;top:10px;background:transparent;border:none;color:inherit;font-size:24px;line-height:1;cursor:pointer;opacity:.6;';
+      x.addEventListener('click',close);card.appendChild(x);
+      ov.addEventListener('click',function(e){if(e.target===ov)close();});
+    }
+    ov.appendChild(card);d.body.appendChild(ov);
+    /* view is recorded once per enrollment (setupEnrollments), not here. */
+    markSeen(exp.testId,c.frequency);
+  }
 })(window,document);
 `;
 }
@@ -134,6 +336,7 @@ router.post('/collect', async (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
   const { token, vid, sid, events } = req.body;
 
@@ -149,23 +352,28 @@ router.post('/collect', async (req: Request, res: Response) => {
     return;
   }
 
+  // Extract requester IP
+  const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
+
   try {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Upsert visitor
+      // Upsert visitor (include ipAddress on first insert)
       await client.query(`
-        INSERT INTO tracking_visitors ("visitorId", token, "firstSeen", "lastSeen", "eventCount", "pageCount")
-        VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3, $4)
+        INSERT INTO tracking_visitors ("visitorId", token, "firstSeen", "lastSeen", "eventCount", "pageCount", "ipAddress")
+        VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3, $4, $5)
         ON CONFLICT ("visitorId", token) DO UPDATE SET
           "lastSeen" = CURRENT_TIMESTAMP,
           "eventCount" = tracking_visitors."eventCount" + $3,
-          "pageCount" = tracking_visitors."pageCount" + $4
+          "pageCount" = tracking_visitors."pageCount" + $4,
+          "ipAddress" = COALESCE(tracking_visitors."ipAddress", $5)
       `, [
         vid, token,
         events.length,
         events.filter((e: any) => e.type === 'pageview').length,
+        ipAddress,
       ]);
 
       // Insert events
@@ -182,9 +390,29 @@ router.post('/collect', async (req: Request, res: Response) => {
           evt.title || null,
           evt.selector || null,
           evt.text || null,
-          JSON.stringify({ tag: evt.tag, depth: evt.depth, formId: evt.formId }),
+          JSON.stringify({ tag: evt.tag, depth: evt.depth, formId: evt.formId, email: evt.email || undefined }),
           evt.ts || Date.now(),
         ]);
+      }
+
+      // First-touch attribution: capture UTMs/referrer from the pageview URL,
+      // only filling columns that are still null (never overwrite first touch).
+      const pv = events.find((e: any) => e.type === 'pageview' && e.url);
+      if (pv) {
+        const u = parseUtms(pv.url);
+        await client.query(`
+          UPDATE tracking_visitors SET
+            "utmSource" = COALESCE("utmSource", $3),
+            "utmMedium" = COALESCE("utmMedium", $4),
+            "utmCampaign" = COALESCE("utmCampaign", $5),
+            "utmTerm" = COALESCE("utmTerm", $6),
+            "utmContent" = COALESCE("utmContent", $7),
+            gclid = COALESCE(gclid, $8),
+            fbclid = COALESCE(fbclid, $9),
+            "landingPage" = COALESCE("landingPage", $10),
+            referrer = COALESCE(referrer, $11)
+          WHERE "visitorId" = $1 AND token = $2
+        `, [vid, token, u.utmSource, u.utmMedium, u.utmCampaign, u.utmTerm, u.utmContent, u.gclid, u.fbclid, u.landingPage, pv.ref || null]);
       }
 
       await client.query('COMMIT');
@@ -193,6 +421,34 @@ router.post('/collect', async (req: Request, res: Response) => {
       throw err;
     } finally {
       client.release();
+    }
+
+    // After transaction: process identity signals from form_submit events (outside main tx)
+    const formSubmits = events.filter((e: any) => e.type === 'form_submit' && e.email && e.email.length > 0);
+    for (const evt of formSubmits) {
+      const emailVal = evt.email.toLowerCase();
+      try {
+        await pool.query(`
+          INSERT INTO visitor_identities ("visitorId", token, type, value)
+          VALUES ($1, $2, 'email', $3)
+          ON CONFLICT ("visitorId", token, type) DO UPDATE SET value = EXCLUDED.value
+        `, [vid, token, emailVal]);
+
+        // Try to match to a member
+        const memberResult = await pool.query(
+          `SELECT id FROM members WHERE email = $1 LIMIT 1`,
+          [emailVal]
+        );
+        if (memberResult.rows.length > 0) {
+          const memberId = memberResult.rows[0].id;
+          await pool.query(
+            `UPDATE visitor_identities SET "memberId" = $1 WHERE "visitorId" = $2 AND token = $3 AND type = 'email'`,
+            [memberId, vid, token]
+          );
+        }
+      } catch (identityErr) {
+        console.error('Identity upsert error:', identityErr);
+      }
     }
   } catch (err) {
     console.error('Tracking collect error:', err);
@@ -206,6 +462,7 @@ router.options('/collect', (_req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.status(204).end();
 });
 
@@ -214,29 +471,38 @@ router.options('/collect', (_req, res) => {
 // POST /api/tracking/personalize
 router.post('/personalize', async (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
-  const { token, vid, path } = req.body;
+  const { token, vid, path, url } = req.body;
   if (!token || !vid) { res.json({ changes: [] }); return; }
 
   try {
     // Get running A/B tests for this token (match on pageUrl path)
     const tests = await pool.query(`
-      SELECT t.id, t."variantA", t."variantB", t."trafficSplit",
+      SELECT t.id, t."variantA", t."variantB", t."trafficSplit", t."experienceType", t.goal,
              a.filters as "audienceFilters"
       FROM ab_tests t
       LEFT JOIN audiences a ON a.id = t."audienceId"
       WHERE t.status = 'running'
     `);
 
-    if (tests.rows.length === 0) { res.json({ changes: [] }); return; }
+    if (tests.rows.length === 0) { res.json({ changes: [], experiences: [], enrollments: [] }); return; }
 
     const changes: any[] = [];
+    // Promo bars / offer modals: injected UI (not element edits), so they ride a
+    // separate list the snippet renders.
+    const experiences: any[] = [];
+    // Every assigned running test the visitor is in — BOTH arms — so the snippet
+    // can fire a view and watch the goal for each. Control (A) must be enrolled
+    // too, or a "show it vs not" test has nothing to compare the treatment to.
+    const enrollments: any[] = [];
 
     for (const test of tests.rows) {
       // Check if visitor matches any behavior audience rules
       const variantA = typeof test.variantA === 'string' ? JSON.parse(test.variantA) : test.variantA;
       const variantB = typeof test.variantB === 'string' ? JSON.parse(test.variantB) : test.variantB;
       const filters = test.audienceFilters ? (typeof test.audienceFilters === 'string' ? JSON.parse(test.audienceFilters) : test.audienceFilters) : {};
+      const goal = test.goal ? (typeof test.goal === 'string' ? JSON.parse(test.goal) : test.goal) : null;
 
       let inAudience = true;
 
@@ -247,25 +513,74 @@ router.post('/personalize', async (req: Request, res: Response) => {
 
       if (!inAudience) continue;
 
-      // Deterministic variant assignment based on visitor ID hash
+      // Deterministic bucket from the visitor id.
       const hash = vid.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-      const variant = (hash % 100) < test.trafficSplit ? variantA : variantB;
+      const bucket = hash % 100;
+      const expType = test.experienceType || 'page_edit';
 
-      if (variant && variant.changes) {
-        changes.push(...variant.changes.map((c: any) => ({
-          selector: c.selector,
-          type: c.type,
-          property: c.property,
-          value: c.newValue,
-        })));
+      if (expType === 'page_edit') {
+        // Unchanged: trafficSplit is the share that sees variant A.
+        const isA = bucket < test.trafficSplit;
+        const variant = isA ? variantA : variantB;
+        if (variant && variant.changes) {
+          changes.push(...variant.changes.map((c: any) => ({
+            selector: c.selector,
+            type: c.type,
+            property: c.property,
+            value: c.newValue,
+          })));
+        }
+        enrollments.push({ testId: test.id, variant: isA ? 'A' : 'B', goal });
+        continue;
+      }
+
+      // Promo bar / offer modal. URL targeting gates the experience on this page
+      // for BOTH arms — off-target pages enroll no one.
+      if (!matchesUrlTarget(variantB?.targeting, path, url)) continue;
+      // trafficSplit is the treatment share: bucket < split → treatment (B, sees
+      // it); otherwise control (A, sees nothing). 100% = everyone treated.
+      const isTreatment = bucket < test.trafficSplit;
+      enrollments.push({ testId: test.id, variant: isTreatment ? 'B' : 'A', goal });
+      if (isTreatment) {
+        const config = expType === 'promo_bar' ? variantB?.promoBar : variantB?.offerModal;
+        if (config) {
+          experiences.push({
+            testId: test.id,
+            variant: 'B',
+            kind: expType === 'promo_bar' ? 'promoBar' : 'offerModal',
+            config,
+          });
+        }
       }
     }
 
-    res.json({ changes });
+    res.json({ changes, experiences, enrollments });
   } catch (err) {
     res.json({ changes: [] });
   }
 });
+
+// Does the visitor's current page satisfy an experience's URL targeting?
+// scope 'site' (or missing) matches everywhere; 'page' matches the configured
+// path/URL by exact / starts-with / contains. Missing value = whole site.
+function matchesUrlTarget(
+  targeting: { scope?: string; matchType?: string; value?: string } | undefined,
+  path?: string,
+  url?: string,
+): boolean {
+  if (!targeting || targeting.scope !== 'page') return true;
+  const value = (targeting.value || '').trim();
+  if (!value) return true;
+  // Match against the path by default; if the target looks like a full URL, use it.
+  const hay = /^https?:\/\//i.test(value) ? (url || '') : (path || '');
+  const v = value.toLowerCase();
+  const h = hay.toLowerCase();
+  switch (targeting.matchType) {
+    case 'exact': return h === v;
+    case 'startsWith': return h.startsWith(v);
+    default: return h.includes(v); // 'contains'
+  }
+}
 
 async function checkBehaviorAudience(
   visitorId: string,
@@ -406,6 +721,142 @@ router.get('/top-pages', authenticateToken, async (req: AuthRequest, res: Respon
   `, [token]);
 
   res.json(result.rows);
+});
+
+// GET /api/tracking/visitor/:visitorId — full visitor profile with geo + identity
+router.get('/visitor/:visitorId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { visitorId } = req.params;
+    const configResult = await pool.query('SELECT token FROM tracking_site_config LIMIT 1');
+    if (configResult.rows.length === 0) { res.status(404).json({ error: 'No config' }); return; }
+    const token = configResult.rows[0].token;
+
+    const [visitorResult, eventsResult, identitiesResult] = await Promise.all([
+      pool.query(`SELECT * FROM tracking_visitors WHERE "visitorId" = $1 AND token = $2 LIMIT 1`, [visitorId, token]),
+      pool.query(`SELECT * FROM tracking_events WHERE "visitorId" = $1 AND token = $2 ORDER BY "createdAt" DESC LIMIT 50`, [visitorId, token]),
+      pool.query(`SELECT * FROM visitor_identities WHERE "visitorId" = $1 AND token = $2`, [visitorId, token]),
+    ]);
+
+    const visitor = visitorResult.rows[0] || null;
+    const events = eventsResult.rows;
+    const identities = identitiesResult.rows;
+
+    // Geo-resolve if needed
+    if (visitor && visitor.ipAddress && !visitor.geoResolved) {
+      const ip = visitor.ipAddress;
+      const isLocal = ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.');
+      if (!isLocal) {
+        try {
+          const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=country,city,status`);
+          const geoData = await geoRes.json() as any;
+          if (geoData.status === 'success') {
+            await pool.query(
+              `UPDATE tracking_visitors SET country = $1, city = $2, "geoResolved" = true WHERE "visitorId" = $3 AND token = $4`,
+              [geoData.country || null, geoData.city || null, visitorId, token]
+            );
+            visitor.country = geoData.country || null;
+            visitor.city = geoData.city || null;
+            visitor.geoResolved = true;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Find matched member from email identity
+    let matchedMember = null;
+    const emailIdentity = identities.find((i: any) => i.type === 'email');
+    if (emailIdentity) {
+      const memberRes = await pool.query(
+        `SELECT id, email, "firstName", "lastName", "accountStatus", "programType", phone FROM members WHERE email = $1 LIMIT 1`,
+        [emailIdentity.value]
+      );
+      if (memberRes.rows.length > 0) {
+        matchedMember = memberRes.rows[0];
+      }
+    }
+
+    res.json({ visitor, events, identities, matchedMember });
+  } catch (err) {
+    console.error('Visitor profile error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/tracking/visitors — list of unique visitors with identity info
+router.get('/visitors', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const configResult = await pool.query('SELECT token FROM tracking_site_config LIMIT 1');
+    if (configResult.rows.length === 0) { res.json([]); return; }
+    const token = configResult.rows[0].token;
+
+    const result = await pool.query(`
+      SELECT tv.*, vi.type as "identityType", vi.value as "identityValue", vi."memberId",
+             m."firstName", m."lastName", m."accountStatus"
+      FROM tracking_visitors tv
+      LEFT JOIN visitor_identities vi ON vi."visitorId" = tv."visitorId" AND vi.token = tv.token AND vi.type = 'email'
+      LEFT JOIN members m ON m.id = vi."memberId"
+      WHERE tv.token = $1
+      ORDER BY tv."lastSeen" DESC LIMIT 100
+    `, [token]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Visitors list error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/tracking/identity-settings
+router.get('/identity-settings', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    let result = await pool.query('SELECT * FROM identity_settings LIMIT 1');
+    if (result.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO identity_settings (priority, "autoResolve") VALUES ($1, $2)`,
+        [JSON.stringify(['email', 'phone', 'name']), true]
+      );
+      result = await pool.query('SELECT * FROM identity_settings LIMIT 1');
+    }
+    const row = result.rows[0];
+    res.json({
+      id: row.id,
+      priority: typeof row.priority === 'string' ? JSON.parse(row.priority) : row.priority,
+      autoResolve: row.autoResolve,
+    });
+  } catch (err) {
+    console.error('Identity settings GET error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PUT /api/tracking/identity-settings
+router.put('/identity-settings', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { priority, autoResolve } = req.body;
+    const existing = await pool.query('SELECT id FROM identity_settings LIMIT 1');
+    let row;
+    if (existing.rows.length > 0) {
+      const updated = await pool.query(
+        `UPDATE identity_settings SET priority = $1, "autoResolve" = $2, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *`,
+        [JSON.stringify(priority), autoResolve, existing.rows[0].id]
+      );
+      row = updated.rows[0];
+    } else {
+      const inserted = await pool.query(
+        `INSERT INTO identity_settings (priority, "autoResolve") VALUES ($1, $2) RETURNING *`,
+        [JSON.stringify(priority), autoResolve]
+      );
+      row = inserted.rows[0];
+    }
+    res.json({
+      id: row.id,
+      priority: typeof row.priority === 'string' ? JSON.parse(row.priority) : row.priority,
+      autoResolve: row.autoResolve,
+    });
+  } catch (err) {
+    console.error('Identity settings PUT error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // POST /api/tracking/audiences — create a behavior-based audience

@@ -98,7 +98,7 @@ router.post('/reset-password', resetLimiter, async (req, res) => {
     const { userId } = rows[0];
 
     const hashed = await bcrypt.hash(String(password), 12);
-    await pool.query(`UPDATE users SET password = $1 WHERE id = $2`, [hashed, userId]);
+    await pool.query(`UPDATE users SET password = $1, "mustChangePassword" = false WHERE id = $2`, [hashed, userId]);
     await pool.query(`DELETE FROM password_resets WHERE "userId" = $1 AND "usedAt" IS NULL`, [userId]);
 
     res.json({ ok: true });

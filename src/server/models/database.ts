@@ -1,15 +1,32 @@
 import { Pool } from 'pg';
 
-// Railway provides DATABASE_URL automatically when PostgreSQL is attached
-const connectionString = process.env.DATABASE_URL || process.env.DATABASE_PRIVATE_URL;
+// Railway provides two URLs:
+//   DATABASE_PRIVATE_URL — internal network (no SSL, faster, preferred)
+//   DATABASE_URL          — public proxy (SSL required)
+const privateUrl = process.env.DATABASE_PRIVATE_URL;
+const publicUrl  = process.env.DATABASE_URL;
+const connectionString = privateUrl || publicUrl;
 
 if (!connectionString) {
-  console.error('DATABASE_URL or DATABASE_PRIVATE_URL environment variable is not set');
+  console.error('FATAL: No database connection string found (DATABASE_PRIVATE_URL or DATABASE_URL)');
+  process.exit(1);
 }
+
+// Private URL: internal Railway network, no SSL needed.
+// Public URL: goes through Railway proxy, needs SSL but skip cert verification
+//             because Railway uses a self-signed cert on the proxy.
+const sslConfig = process.env.NODE_ENV !== 'production'
+  ? false
+  : privateUrl
+    ? false                          // internal — no SSL
+    : { rejectUnauthorized: false }; // public proxy — SSL, skip cert check
 
 export const pool = new Pool({
   connectionString,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: sslConfig,
+  max: 4,                    // Stay under Railway free plan's 5-connection limit
+  idleTimeoutMillis: 30000,  // Release idle connections after 30s
+  connectionTimeoutMillis: 5000,
 });
 
 pool.on('connect', () => {
@@ -20,8 +37,23 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
 
-// Initialize database on startup
-initializeDatabase();
+// Initialize database on startup — retry up to 10 times so a slow-starting
+// Railway Postgres doesn't crash the app before it's ready.
+(async () => {
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      await initializeDatabase();
+      return;
+    } catch (err) {
+      console.error(`DB init attempt ${attempt}/10 failed:`, err);
+      if (attempt === 10) {
+        console.error('Could not connect to database after 10 attempts. Exiting.');
+        process.exit(1);
+      }
+      await new Promise(r => setTimeout(r, attempt * 3000)); // 3s, 6s, 9s…
+    }
+  }
+})();
 
 async function initializeDatabase() {
   const client = await pool.connect();
@@ -86,8 +118,10 @@ async function initializeDatabase() {
         "lastName" TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         phone TEXT,
-        "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member')),
-        "accountType" TEXT NOT NULL CHECK("accountType" IN ('basic', 'premium', 'elite', 'family')),
+        "accountStatus" TEXT NOT NULL CHECK("accountStatus" IN ('lead', 'trialer', 'member', 'cancelled')),
+        -- DEPRECATED: superseded by membership_seats. Kept nullable because the
+        -- CSV importer and lead intake paths still write it.
+        "accountType" TEXT DEFAULT 'basic',
         "programType" TEXT,
         "membershipAge" TEXT NOT NULL CHECK("membershipAge" IN ('Adult', 'Kids')),
         ranking TEXT NOT NULL,
@@ -426,12 +460,26 @@ async function initializeDatabase() {
       )
     `);
 
+    // Memberships table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS memberships (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Programs table
     await client.query(`
       CREATE TABLE IF NOT EXISTS programs (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         description TEXT,
+        "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL,
         "isActive" BOOLEAN DEFAULT true,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -862,6 +910,16 @@ async function initializeDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_visitor ON tracking_events("visitorId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_type ON tracking_events("eventType")`);
 
+    // Performance indexes for the Contacts/Events list queries (filter + sort)
+    // and for participant→account-holder lookups (used heavily during CSV import).
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_location ON members("locationId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_status ON members("accountStatus")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_member_type ON members("memberType")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_holder ON members("accountHolderId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_created_at ON members("createdAt")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_events_start ON events("startDateTime")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_events_location ON events("locationId")`);
+
     // Churn metrics table
     await client.query(`
       CREATE TABLE IF NOT EXISTS churn_metrics (
@@ -884,6 +942,15 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`);
     await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "companyName" TEXT`);
+    // DEPRECATED (see the membership_seats block below): retained only because
+    // the MyStudio CSV importer still writes them. Not a source of revenue.
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipId" INTEGER REFERENCES memberships(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "membershipName" TEXT`);
+    // Memberships carry the recurring price (monthly, in cents). Account holders
+    // buy one seat per participant they're covering; membership_seats is the
+    // single source of MRR/ARR. Programs have no price of their own beyond their
+    // Quick Start.
+    await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "priceAmount" INTEGER DEFAULT 0`);
 
     // Drop all programType CHECK constraints and NOT NULL on members — validation handled in application layer
     await client.query(`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_programtype_check`);
@@ -929,8 +996,460 @@ async function initializeDatabase() {
     `);
 
 
+    // Fix createdBy / instructorId foreign keys so users can be deleted.
+    // Default PostgreSQL FK behavior is RESTRICT — blocks deletion if any row
+    // references the user. We change them all to ON DELETE SET NULL.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE audiences DROP CONSTRAINT IF EXISTS audiences_createdby_fkey;
+        ALTER TABLE audiences ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE audiences ADD CONSTRAINT audiences_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_createdby_fkey;
+        ALTER TABLE campaigns ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE campaigns ADD CONSTRAINT campaigns_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE ab_tests DROP CONSTRAINT IF EXISTS ab_tests_createdby_fkey;
+        ALTER TABLE ab_tests ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE ab_tests ADD CONSTRAINT ab_tests_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE ab_tests DROP CONSTRAINT IF EXISTS ab_tests_audienceid_fkey;
+        ALTER TABLE ab_tests ALTER COLUMN "audienceId" DROP NOT NULL;
+        ALTER TABLE ab_tests ADD CONSTRAINT ab_tests_audienceid_fkey
+          FOREIGN KEY ("audienceId") REFERENCES audiences(id) ON DELETE SET NULL;
+
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS events_createdby_fkey;
+        ALTER TABLE events ADD CONSTRAINT events_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS events_instructorid_fkey;
+        ALTER TABLE events ADD CONSTRAINT events_instructorid_fkey
+          FOREIGN KEY ("instructorId") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE email_templates DROP CONSTRAINT IF EXISTS email_templates_createdby_fkey;
+        ALTER TABLE email_templates ADD CONSTRAINT email_templates_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE email_images DROP CONSTRAINT IF EXISTS email_images_uploadedby_fkey;
+        ALTER TABLE email_images ADD CONSTRAINT email_images_uploadedby_fkey
+          FOREIGN KEY ("uploadedBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE social_campaigns DROP CONSTRAINT IF EXISTS social_campaigns_createdby_fkey;
+        ALTER TABLE social_campaigns ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE social_campaigns ADD CONSTRAINT social_campaigns_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE sms_campaigns DROP CONSTRAINT IF EXISTS sms_campaigns_createdby_fkey;
+        ALTER TABLE sms_campaigns ALTER COLUMN "createdBy" DROP NOT NULL;
+        ALTER TABLE sms_campaigns ADD CONSTRAINT sms_campaigns_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE lead_forms DROP CONSTRAINT IF EXISTS lead_forms_createdby_fkey;
+        ALTER TABLE lead_forms ADD CONSTRAINT lead_forms_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE tracking_site_config DROP CONSTRAINT IF EXISTS tracking_site_config_createdby_fkey;
+        ALTER TABLE tracking_site_config ADD CONSTRAINT tracking_site_config_createdby_fkey
+          FOREIGN KEY ("createdBy") REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE social_comment_replies DROP CONSTRAINT IF EXISTS social_comment_replies_sentby_fkey;
+        ALTER TABLE social_comment_replies ADD CONSTRAINT social_comment_replies_sentby_fkey
+          FOREIGN KEY ("sentBy") REFERENCES users(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
+
+    // ── Account Holder / Participant split ─────────────────────────────────────
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "memberType" TEXT
+          DEFAULT 'account_holder'
+          CHECK("memberType" IN ('account_holder', 'participant'));
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "accountHolderId" INTEGER
+          REFERENCES members(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    // Make email nullable so participants (kids) don't need their own email
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ALTER COLUMN email DROP NOT NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
+    // ── Participant → program offering link ────────────────────────────────────
+    // Participants map to a Program (offering). Their profile already carries a
+    // free-text "programType"; this adds a real FK to the programs catalog and
+    // an index for lookups. The application keeps it in sync on create/update.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "programId" INTEGER
+          REFERENCES programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_program ON members("programId")`);
+    // One-time backfill: assign each participant to the program offering whose
+    // name matches their programType. Only touches rows not yet assigned (so it
+    // never clobbers a manual reassignment on restart) and leaves non-matches
+    // null — those are surfaced by GET /members/participants/unassigned.
+    await client.query(`
+      UPDATE members m
+      SET "programId" = p.id
+      FROM programs p
+      WHERE m."memberType" = 'participant'
+        AND m."programId" IS NULL
+        AND m."programType" IS NOT NULL
+        AND m."programType" = p.name
+    `);
+
+    // ── Participant ↔ programs (many-to-many) ──────────────────────────────────
+    // A participant trains in one OR MANY programs. This junction is the source
+    // of truth; members."programId"/"programType" are kept as the *primary*
+    // program for back-compat (program-segmented analytics, events, belt logic).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS member_programs (
+        "memberId" INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        "programId" INTEGER REFERENCES programs(id) ON DELETE CASCADE,
+        PRIMARY KEY ("memberId", "programId")
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_programs_member ON member_programs("memberId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_programs_program ON member_programs("programId")`);
+    // Backfill the junction from the existing single program link.
+    await client.query(`
+      INSERT INTO member_programs ("memberId", "programId")
+      SELECT id, "programId" FROM members
+      WHERE "memberType" = 'participant' AND "programId" IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    // Record which program a kiosk check-in was for.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE check_ins ADD COLUMN IF NOT EXISTS "programId" INTEGER
+          REFERENCES programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
+    // Generic app settings (key/value). Used for the default email provider (ESP).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Per-recipient rows for a sent email campaign — drives Engage analytics
+    // (unique opens via openedAt, conversions via statusAtSend vs current status).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS campaign_recipients (
+        id SERIAL PRIMARY KEY,
+        "campaignId" INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+        "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        email TEXT,
+        token TEXT UNIQUE,
+        "statusAtSend" TEXT,
+        "sentAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "openedAt" TIMESTAMP,
+        "openCount" INTEGER DEFAULT 0
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign ON campaign_recipients("campaignId")`);
+    await client.query(`ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS "clickedAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS "clickCount" INTEGER DEFAULT 0`);
+
+    // ── Marketing attribution (first-touch) ────────────────────────────────────
+    // One row per member, written once (first touch) and never overwritten, so a
+    // lead/member is credited to the campaign/channel that first brought them in.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS member_attribution (
+        "memberId" INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        "utmSource" TEXT,
+        "utmMedium" TEXT,
+        "utmCampaign" TEXT,
+        "utmTerm" TEXT,
+        "utmContent" TEXT,
+        gclid TEXT,
+        fbclid TEXT,
+        channel TEXT,
+        "landingPage" TEXT,
+        referrer TEXT,
+        "firstTouchAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_attribution_channel ON member_attribution(channel)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_member_attribution_campaign ON member_attribution("utmCampaign")`);
+
+    // First-touch attribution captured on the visitor (from the first pageview),
+    // used to attribute a form fill even when the form URL has no UTMs.
+    for (const col of ['utmSource', 'utmMedium', 'utmCampaign', 'utmTerm', 'utmContent', 'gclid', 'fbclid', 'landingPage', 'referrer']) {
+      await client.query(`ALTER TABLE tracking_visitors ADD COLUMN IF NOT EXISTS "${col}" TEXT`).catch(() => {});
+    }
+
+    // Per-form toggle for UTM capture (capture is automatic; this governs the
+    // hidden fields on the rendered form).
+    await client.query(`ALTER TABLE lead_forms ADD COLUMN IF NOT EXISTS "captureUtm" BOOLEAN DEFAULT true`).catch(() => {});
+
+    // Per-location email provider config (NULL locationId = org-wide default).
+    // Mirrors billing_settings. sendgridApiKey is stored encrypted (crypto util);
+    // env vars remain the fallback when a value is absent.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS email_settings (
+        id SERIAL PRIMARY KEY,
+        "locationId" INTEGER REFERENCES locations(id),
+        provider TEXT DEFAULT 'smtp' CHECK (provider IN ('smtp','sendgrid','mailgun','ses')),
+        "sendgridApiKey" TEXT,
+        "mailgunApiKey" TEXT,
+        "mailgunDomain" TEXT,
+        "mailgunRegion" TEXT DEFAULT 'us',
+        "sesAccessKeyId" TEXT,
+        "sesSecretAccessKey" TEXT,
+        "sesRegion" TEXT,
+        "fromEmail" TEXT,
+        "fromName" TEXT,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    // Migrations for existing email_settings tables: Mailgun + Amazon SES columns
+    // and widen the provider CHECK to include the new providers.
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "mailgunApiKey" TEXT`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "mailgunDomain" TEXT`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "mailgunRegion" TEXT DEFAULT 'us'`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "sesAccessKeyId" TEXT`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "sesSecretAccessKey" TEXT`);
+    await client.query(`ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS "sesRegion" TEXT`);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE email_settings DROP CONSTRAINT IF EXISTS email_settings_provider_check;
+        ALTER TABLE email_settings ADD CONSTRAINT email_settings_provider_check CHECK (provider IN ('smtp','sendgrid','mailgun','ses'));
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    // Seed the org-wide row's provider from the legacy app_settings default (if any).
+    await client.query(`
+      INSERT INTO email_settings ("locationId", provider)
+      SELECT NULL, value FROM app_settings
+      WHERE key = 'email_default_esp' AND value IN ('smtp','sendgrid','mailgun','ses')
+        AND NOT EXISTS (SELECT 1 FROM email_settings WHERE "locationId" IS NULL)
+    `);
+
+    // Per-location Twilio SMS config (NULL locationId = org-wide default).
+    // authToken is stored encrypted (crypto util); env vars are the fallback.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sms_settings (
+        id SERIAL PRIMARY KEY,
+        "locationId" INTEGER REFERENCES locations(id),
+        "accountSid" TEXT,
+        "authToken" TEXT,
+        "fromNumber" TEXT,
+        "messagingServiceSid" TEXT,
+        "isActive" BOOLEAN DEFAULT true,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // SMS consent / opt-out on members (TCPA + carrier compliance).
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "smsOptOut" BOOLEAN DEFAULT false`).catch(() => {});
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "smsOptOutAt" TIMESTAMP`).catch(() => {});
+
+    // ── Stage / product model ──────────────────────────────────────────────────
+    // Contacts move through three stages (members."accountStatus"): lead →
+    // trialer → member. Each stage exposes exactly one product:
+    //
+    //   Lead    → Program Interest        (members."programInterestId")
+    //   Trial   → Quick Start             (quick_start_enrollments)
+    //   Member  → Membership Type ($)     (membership_seats, held by the account
+    //             holder) and Programs    (member_programs, per participant)
+    //
+    // Every martial art IS a program, and every program has a Quick Start — so a
+    // Quick Start is a property of a program rather than a separate catalog. The
+    // old trial_programs table is retired here.
+    await client.query(`ALTER TABLE members DROP COLUMN IF EXISTS "trialProgramId"`).catch(() => {});
+    await client.query(`DROP TABLE IF EXISTS trial_programs`).catch(() => {});
+
+    // Programs: age grouping (Kids/Adult programs) + the program's Quick Start.
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "ageGroup" TEXT DEFAULT 'All'`).catch(() => {});
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartPriceAmount" INTEGER DEFAULT 0`).catch(() => {});
+    // A Quick Start is a fixed number of CLASSES, not a time window — it ends
+    // when the classes are used up, however long that takes.
+    await client.query(`ALTER TABLE programs ADD COLUMN IF NOT EXISTS "quickStartClassCount" INTEGER DEFAULT 3`).catch(() => {});
+    await client.query(`ALTER TABLE programs DROP COLUMN IF EXISTS "quickStartDurationDays"`).catch(() => {});
+    // programs."membershipId" encoded program→membership, which is the wrong
+    // direction now: a membership grants a NUMBER of programs, not specific ones.
+    await client.query(`ALTER TABLE programs DROP COLUMN IF EXISTS "membershipId"`).catch(() => {});
+
+    // Membership types are the priced "licenses" an account holder buys.
+    // "maxProgramsPerParticipant" NULL = unlimited; "isFamilyPlan" means a single
+    // seat covers every participant on the account rather than just one.
+    await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "isFamilyPlan" BOOLEAN DEFAULT false`).catch(() => {});
+    await client.query(`ALTER TABLE memberships ADD COLUMN IF NOT EXISTS "maxProgramsPerParticipant" INTEGER DEFAULT 1`).catch(() => {});
+
+    // Leads express interest in a program (captured from the lead form field).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS "programInterestId" INTEGER
+          REFERENCES programs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
+    // ── Membership seats ───────────────────────────────────────────────────────
+    // One row = one purchased seat/license. The account holder pays for it; the
+    // participant occupying it trains under it. A family-plan seat leaves
+    // "participantId" NULL and covers everyone on the account.
+    //
+    // "priceAmount" is snapshotted at purchase so that editing a price in
+    // Settings never silently rewrites historical revenue.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS membership_seats (
+        id SERIAL PRIMARY KEY,
+        "accountHolderId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "membershipId" INTEGER NOT NULL REFERENCES memberships(id) ON DELETE RESTRICT,
+        "participantId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        "priceAmount" INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'cancelled')),
+        "startDate" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "endDate" TIMESTAMP,
+        "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_membership_seats_holder ON membership_seats("accountHolderId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_membership_seats_participant ON membership_seats("participantId")`);
+    // A participant can occupy at most one active seat.
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_membership_seats_one_active_per_participant
+        ON membership_seats("participantId") WHERE "participantId" IS NOT NULL AND status = 'active'
+    `).catch(() => {});
+
+    // ── Quick Start enrollments ────────────────────────────────────────────────
+    // A trialer's paid Quick Start into one program: a fixed number of classes,
+    // consumed by check-ins. Held by account holders and participants alike.
+    // Price and class count are snapshotted from the program at enrollment, so
+    // later Settings edits don't retroactively change someone's live trial.
+    // "endDate" records when it actually finished, not a planned expiry.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quick_start_enrollments (
+        id SERIAL PRIMARY KEY,
+        "memberId" INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        "programId" INTEGER REFERENCES programs(id) ON DELETE SET NULL,
+        "priceAmount" INTEGER NOT NULL DEFAULT 0,
+        "classesIncluded" INTEGER NOT NULL DEFAULT 3,
+        "classesUsed" INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'converted', 'expired')),
+        "startDate" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "endDate" TIMESTAMP,
+        "locationId" INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    // Added after the table shipped with a duration-based model.
+    await client.query(`ALTER TABLE quick_start_enrollments ADD COLUMN IF NOT EXISTS "classesIncluded" INTEGER NOT NULL DEFAULT 3`).catch(() => {});
+    await client.query(`ALTER TABLE quick_start_enrollments ADD COLUMN IF NOT EXISTS "classesUsed" INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_member ON quick_start_enrollments("memberId")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_quick_start_program ON quick_start_enrollments("programId")`);
+
+    // Mark seats/quick starts created by the MyStudio importer so a re-import can
+    // rebuild a member's synced records without touching ones added by hand.
+    await client.query(`ALTER TABLE membership_seats ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
+    await client.query(`ALTER TABLE quick_start_enrollments ADD COLUMN IF NOT EXISTS "syncedFromMyStudio" BOOLEAN DEFAULT false`).catch(() => {});
+
+    // DEPRECATED, retained deliberately: "accountType", "membershipId" and
+    // "membershipName" are superseded by membership_seats — a contact's plan is
+    // no longer a single value, since an account holder buys one seat per
+    // participant. Nothing reads them for money any more (see analytics.ts).
+    //
+    // They are NOT dropped because the MyStudio CSV importer and several lead
+    // intake paths still write them via positional SQL; dropping would break
+    // those inserts. Relax the constraints instead so new code can ignore them.
+    await client.query(`ALTER TABLE members ALTER COLUMN "accountType" DROP NOT NULL`).catch(() => {});
+    await client.query(`ALTER TABLE members ALTER COLUMN "accountType" SET DEFAULT 'basic'`).catch(() => {});
+
+    // "Student Details" export fields (payments / portal / contact recency)
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalPayments" NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "pastDue" NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastContactText" TEXT`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "customerFor" TEXT`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "portalEnabled" BOOLEAN DEFAULT false`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "portalUsername" TEXT`);
+
+    // Attendance tracking columns (added after initial deploy)
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "totalClassesAttended" INTEGER DEFAULT 0`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "lastCheckInAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS "attendanceStreak" INTEGER DEFAULT 0`);
+
+    // Campaign send timestamp — powers email-marketing trends over time in the
+    // Engage analytics tab. Distinct from updatedAt, which changes on any edit.
+    // Backfill existing completed campaigns from updatedAt so history still charts.
+    await client.query(`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS "sentAt" TIMESTAMP`).catch(() => {});
+    await client.query(`UPDATE campaigns SET "sentAt" = "updatedAt" WHERE "sentAt" IS NULL AND status = 'completed'`).catch(() => {});
+
+    // Ensure event_attendees unique constraint exists (needed for ON CONFLICT upsert in kiosk check-in)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE event_attendees ADD CONSTRAINT event_attendees_eventid_memberid_unique UNIQUE ("eventId", "memberId");
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      WHEN others THEN NULL;
+      END $$;
+    `);
+
+    // Rebuild programType CHECK constraint to include 'All' (was missing in older deployments)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE events DROP CONSTRAINT IF EXISTS "events_programType_check";
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE events ADD CONSTRAINT "events_programType_check"
+          CHECK("programType" IN (
+            'Children''s Martial Arts', 'Adult BJJ', 'Adult TKD & HKD', 'DG Barbell',
+            'Adult Muay Thai & Kickboxing', 'The Ashtanga Club', 'Dragon Gym Learning Center',
+            'Kids BJJ', 'Kids Muay Thai', 'Young Ladies Yoga', 'DG Workspace',
+            'Dragon Launch', 'Personal Training', 'DGMT Private Training', 'All'
+          ));
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
+    // ── DragonDesk: Optimize — experience types + All Traffic audience ─────────
+    // Experiences can be page edits (default), promo bars, or offer modals. The
+    // bar/modal config rides inside the variant JSON, so no new columns for it.
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "experienceType" TEXT DEFAULT 'page_edit'`).catch(() => {});
+    // Conversion goal for an experience (JSON): {type:'form_submit'|'tel_click'|
+    // 'email_click'|'selector_click', selector?}. A goal completion is recorded
+    // as a 'lead' event so it flows into the existing conversion-rate analytics.
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS goal TEXT`).catch(() => {});
+    // Statistical-significance milestone: stamped once, the first time a running
+    // test crosses 95% confidence, so it can be surfaced as a notification.
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigReachedAt" TIMESTAMP`).catch(() => {});
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigWinner" TEXT`).catch(() => {});
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigConfidence" NUMERIC`).catch(() => {});
+    await client.query(`ALTER TABLE ab_tests ADD COLUMN IF NOT EXISTS "sigLevel" INTEGER`).catch(() => {});
+    // System audiences (like "All Traffic") are seeded and cannot be deleted.
+    await client.query(`ALTER TABLE audiences ADD COLUMN IF NOT EXISTS "isSystem" BOOLEAN DEFAULT false`).catch(() => {});
+
     // Seed admin user if none exists
     await seedAdminUser(client);
+
+    // Seed the "All Traffic" audience — an empty-filter audience that matches
+    // everyone, the default target for Optimize experiences. createdBy points at
+    // any existing user (seedAdminUser guarantees one). Guarded on name.
+    await client.query(`
+      INSERT INTO audiences (name, description, filters, "createdBy", "isSystem")
+      SELECT 'All Traffic', 'Everyone — the default target for website experiences.', '{}',
+             (SELECT id FROM users ORDER BY id ASC LIMIT 1), true
+      WHERE NOT EXISTS (SELECT 1 FROM audiences WHERE name = 'All Traffic')
+        AND EXISTS (SELECT 1 FROM users)
+    `).catch(() => {});
 
     console.log('Database tables initialized');
   } catch (err) {
@@ -944,15 +1463,30 @@ async function seedAdminUser(client: any) {
   const bcrypt = await import('bcryptjs');
 
   const result = await client.query('SELECT id FROM users WHERE role = $1', ['admin']);
+  if (result.rows.length > 0) return;
 
-  if (result.rows.length === 0) {
-    const hashedPassword = await bcrypt.default.hash('admin123', 10);
-    await client.query(
-      'INSERT INTO users (username, email, password, role, "firstName", "lastName") VALUES ($1, $2, $3, $4, $5, $6)',
-      ['admin', 'admin@dragondesk.com', hashedPassword, 'admin', 'System', 'Administrator']
-    );
-    console.log('Default admin user created (username: admin, password: admin123)');
+  // SECURITY: never seed a hardcoded password. Only bootstrap an admin when a
+  // strong password is supplied via SEED_ADMIN_PASSWORD, and force a change on
+  // first login. Otherwise skip and rely on the INIT_ADMIN_SECRET-gated
+  // /api/auth/init-admin endpoint to create the first admin.
+  const seedPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!seedPassword || seedPassword.length < 12) {
+    console.log('No admin user found. Set SEED_ADMIN_PASSWORD (>=12 chars) or use /api/auth/init-admin to create one.');
+    return;
   }
+
+  const username = process.env.SEED_ADMIN_USERNAME || 'admin';
+  const email = process.env.SEED_ADMIN_EMAIL || 'admin@dragondesk.com';
+  const hashedPassword = await bcrypt.default.hash(seedPassword, 12);
+  // Ensure the column exists — the migration that adds it elsewhere is
+  // fire-and-forget and can race this seed on a brand-new database.
+  await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN DEFAULT false`).catch(() => {});
+  await client.query(
+    `INSERT INTO users (username, email, password, role, "firstName", "lastName", "mustChangePassword")
+     VALUES ($1, $2, $3, 'admin', 'System', 'Administrator', true)`,
+    [username, email, hashedPassword]
+  );
+  console.log(`Seeded admin "${username}" from SEED_ADMIN_PASSWORD (must change password on first login).`);
 }
 
 // List of camelCase column names that need quoting in PostgreSQL
@@ -990,10 +1524,11 @@ const camelCaseColumns = [
   'instructorNotes', 'fromRanking', 'toRanking', 'minClassAttendance', 'minTimeInRankDays',
   'requiredSkillCategories', 'passType', 'recipientEmail', 'submitButtonText',
   'successMessage', 'redirectUrl', 'formId', 'sourceUrl', 'ipAddress', 'userAgent',
-  'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB',
+  'zipCode', 'isPrimary', 'allowedLocations', 'isInstructor', 'variantA', 'variantB', 'membershipId', 'membershipName',
   'pageUrl', 'trafficSplit', 'clickThroughRate', 'openRate', 'beltLevel',
   'visitorId', 'firstSeen', 'lastSeen', 'eventCount', 'pageCount',
-  'pagePath', 'pageTitle', 'elementText'
+  'pagePath', 'pageTitle', 'elementText',
+  'memberType', 'accountHolderId'
 ];
 
 // Function to quote camelCase identifiers for PostgreSQL

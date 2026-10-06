@@ -19,6 +19,12 @@ const TOOL_LABELS: Record<string, string> = {
   list_campaigns: 'Loading campaigns',
   list_audiences: 'Loading audiences',
   get_analytics_summary: 'Fetching analytics',
+  list_experiences: 'Loading experiences',
+  get_experience: 'Looking up experience',
+  get_experience_results: 'Analyzing experience results',
+  create_experience: 'Creating experience',
+  update_experience: 'Updating experience',
+  delete_experience: 'Deleting experience',
 };
 
 const AIAssistant: React.FC = () => {

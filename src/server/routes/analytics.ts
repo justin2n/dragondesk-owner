@@ -1,3 +1,4 @@
+import { serverError } from '../utils/errors';
 import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -24,6 +25,26 @@ const generateMonthPeriods = (monthsBack: number) => {
   return periods;
 };
 
+// Helper function to generate day periods (for short windows like "Last 30 Days")
+const generateDayPeriods = (daysBack: number) => {
+  const now = new Date();
+  const periods: { start: Date; end: Date; label: string; monthKey: string }[] = [];
+
+  for (let i = daysBack - 1; i >= 0; i--) {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59);
+
+    periods.push({
+      start,
+      end,
+      label: start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      monthKey: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
+    });
+  }
+
+  return periods;
+};
+
 // Get analytics data for dashboard (legacy endpoint)
 router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
   try {
@@ -31,26 +52,34 @@ router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
 
     const params: any[] = [];
     let sql = `SELECT
-        id,
-        "accountStatus",
-        "programType",
-        "locationId",
-        "createdAt",
-        "updatedAt"
-      FROM members
+        m.id,
+        m."accountStatus",
+        m."programType",
+        m."locationId",
+        m."createdAt",
+        m."updatedAt",
+        COALESCE((
+          SELECT array_agg(p.name) FROM member_programs mp
+          JOIN programs p ON p.id = mp."programId"
+          WHERE mp."memberId" = m.id
+        ), ARRAY[]::text[]) AS "programNames"
+      FROM members m
       WHERE 1=1`;
 
     if (locationId && locationId !== 'all') {
       params.push(locationId);
-      sql += ` AND "locationId" = $${params.length}`;
+      sql += ` AND m."locationId" = $${params.length}`;
     }
 
-    sql += ' ORDER BY "createdAt" ASC';
+    sql += ' ORDER BY m."createdAt" ASC';
 
     let members: any[] = (await pool.query(sql, params)).rows;
 
+    // Match on actual enrollment (member_programs) as well as the denormalized
+    // primary program, so participants training in several aren't dropped.
     if (program && program !== 'all') {
-      members = members.filter(m => m.programType === program);
+      members = members.filter(m =>
+        (Array.isArray(m.programNames) && m.programNames.includes(program)) || m.programType === program);
     }
 
     const now = new Date();
@@ -138,15 +167,19 @@ router.get('/dashboard', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
 // NEW: Comprehensive program-based analytics for DragonDesk: Analytics page
 router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { locationId, months = '12' } = req.query;
+    const { locationId, months = '12', days } = req.query;
     const monthsBack = parseInt(months as string) || 12;
+    const daysBack = days ? parseInt(days as string) : 0;
+    // Daily granularity for short windows (e.g. "Last 30 Days"); else monthly.
+    const useDays = daysBack > 0;
+    const truncUnit = useDays ? 'day' : 'month';
 
     // Build base query
     const params: any[] = [];
@@ -155,15 +188,43 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         m."accountStatus",
         m."programType",
         m."locationId",
+        m."leadSource",
         m."trialStartDate",
         m."memberStartDate",
         m."createdAt",
         m."updatedAt",
         m."pricingPlanId",
+        m."memberType",
+        m."accountHolderId",
         pp.amount AS "planAmount",
         pp."billingInterval",
         pp."intervalCount",
-        pp.name AS "planName"
+        pp.name AS "planName",
+        -- Recurring revenue is the sum of the ACTIVE SEATS this contact pays
+        -- for, not a single plan price: an account holder buys one seat per
+        -- participant they cover, so 2 kids on the same plan bill twice.
+        COALESCE((
+          SELECT SUM(s."priceAmount") FROM membership_seats s
+          WHERE s."accountHolderId" = m.id AND s.status = 'active'
+        ), 0) AS "seatRevenue",
+        COALESCE((
+          SELECT COUNT(*) FROM membership_seats s
+          WHERE s."accountHolderId" = m.id AND s.status = 'active'
+        ), 0) AS "seatCount",
+        -- Quick Starts are one-time trial revenue, counted where they were sold.
+        -- Every status counts: the money changes hands at enrollment, and
+        -- 'expired' is the normal end state once all the classes are used.
+        COALESCE((
+          SELECT SUM(q."priceAmount") FROM quick_start_enrollments q
+          WHERE q."memberId" = m.id
+        ), 0) AS "quickStartRevenue",
+        -- Programs a contact actually trains in (member_programs is the source
+        -- of truth; a participant may be in several).
+        COALESCE((
+          SELECT array_agg(p.name) FROM member_programs mp
+          JOIN programs p ON p.id = mp."programId"
+          WHERE mp."memberId" = m.id
+        ), ARRAY[]::text[]) AS "programNames"
       FROM members m
       LEFT JOIN pricing_plans pp ON m."pricingPlanId" = pp.id
       WHERE 1=1`;
@@ -174,6 +235,12 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     }
 
     const allMembers: any[] = (await pool.query(sql, params)).rows;
+
+    // A contact counts toward a program if they train in it (member_programs,
+    // which supports several) or it's their denormalized primary program.
+    // Using programType alone under-counts every multi-program participant.
+    const inProgram = (m: any, program: string) =>
+      (Array.isArray(m.programNames) && m.programNames.includes(program)) || m.programType === program;
     const membersByStatus = {
       member: allMembers.filter(m => m.accountStatus === 'member').length,
       trialer: allMembers.filter(m => m.accountStatus === 'trialer').length,
@@ -200,15 +267,15 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
     // Get available programs
     const programs = [...new Set(allMembers.map(m => m.programType))].filter(Boolean);
 
-    // Generate month periods
-    const periods = generateMonthPeriods(monthsBack);
+    // Generate periods (daily for short windows, else monthly)
+    const periods = useDays ? generateDayPeriods(daysBack) : generateMonthPeriods(monthsBack);
 
     // Calculate trials data by program and month
     const trialsData = periods.map(period => {
       const dataPoint: any = { month: period.label };
 
       programs.forEach(program => {
-        const programMembers = allMembers.filter(m => m.programType === program);
+        const programMembers = allMembers.filter(m => inProgram(m, program));
 
         // Count trials started in this month
         const trialsStarted = programMembers.filter(m => {
@@ -243,15 +310,16 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
-    // Calculate leads data by program and month
+    // Calculate leads data by program and month.
+    // Count ALL new contacts created in the period regardless of current status —
+    // a lead that quickly converted to trialer/member is still a lead acquisition.
     const leadsData = periods.map(period => {
       const dataPoint: any = { month: period.label };
 
       programs.forEach(program => {
         const newLeads = allMembers.filter(m => {
           const createdAt = new Date(m.createdAt);
-          return m.programType === program &&
-            m.accountStatus === 'lead' &&
+          return inProgram(m, program) &&
             createdAt >= period.start && createdAt <= period.end;
         }).length;
 
@@ -264,6 +332,16 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
+    // Lead source breakdown — shows how many contacts came in from each source
+    const leadSourceCounts: Record<string, number> = {};
+    for (const m of allMembers) {
+      const src = m.leadSource || 'unknown';
+      leadSourceCounts[src] = (leadSourceCounts[src] || 0) + 1;
+    }
+    const leadSources = Object.entries(leadSourceCounts)
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count);
+
     // Calculate members data (active members and churn) by program and month
     const membersData = periods.map(period => {
       const dataPoint: any = { month: period.label };
@@ -272,7 +350,7 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
         // Active members at end of period
         const activeMembers = allMembers.filter(m => {
           const memberDate = m.memberStartDate ? new Date(m.memberStartDate) : new Date(m.createdAt);
-          return m.programType === program &&
+          return inProgram(m, program) &&
             m.accountStatus === 'member' &&
             memberDate <= period.end;
         }).length;
@@ -301,28 +379,25 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       return dataPoint;
     });
 
-    // Helper: annualised monthly revenue for a member given their plan
-    const annualizedMonthly = (m: any): number => {
-      if (!m.planAmount) return 0;
-      const amount = m.planAmount / 100; // cents → dollars
-      const count = m.intervalCount || 1;
-      switch (m.billingInterval) {
-        case 'week':  return (amount * 52) / 12;
-        case 'month': return amount / count;
-        case 'year':  return (amount / count) / 12;
-        default:      return amount;
-      }
-    };
+    // Monthly recurring revenue for a contact: the sum of the active membership
+    // seats they pay for. Seats hang off account holders, so participants add $0
+    // here — their cost is already counted on their account holder's row and
+    // double-counting it would inflate MRR by the size of every family.
+    const memberMonthly = (m: any): number => Number(m.seatRevenue || 0) / 100;
+
+    // One-time Quick Start revenue. Held by account holders and participants
+    // alike, and never recurring, so it's reported separately from MRR.
+    const quickStartRevenue = allMembers.reduce(
+      (sum, m) => sum + Number(m.quickStartRevenue || 0) / 100, 0);
 
     // Summary statistics
     const summary = {
       programs: programs.map(program => {
-        const programMembers = allMembers.filter(m => m.programType === program);
+        const programMembers = allMembers.filter(m => inProgram(m, program));
         const activeMembers = programMembers.filter(m => m.accountStatus === 'member');
         const currentTrials = programMembers.filter(m => m.accountStatus === 'trialer').length;
         const currentLeads = programMembers.filter(m => m.accountStatus === 'lead').length;
         const programCancellations = churnData.filter(c => c.programType === program).length;
-        const mrr = activeMembers.reduce((sum, m) => sum + annualizedMonthly(m), 0);
 
         return {
           name: program,
@@ -330,8 +405,6 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
           currentTrials,
           currentLeads,
           totalCancellations: programCancellations,
-          mrr: Math.round(mrr * 100) / 100,
-          arr: Math.round(mrr * 12 * 100) / 100,
           overallChurnRate: activeMembers.length > 0
             ? parseFloat(((programCancellations / (activeMembers.length + programCancellations)) * 100).toFixed(1))
             : 0,
@@ -348,16 +421,62 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
           const daysSince = (Date.now() - start.getTime()) / (1000 * 60 * 60 * 24);
           return daysSince > 30;
         }).length,
-        mrr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 100) / 100,
-        arr: Math.round(allMembers.filter(m => m.accountStatus === 'member').reduce((sum, m) => sum + annualizedMonthly(m), 0) * 12 * 100) / 100,
+        mrr: Math.round(allMembers.reduce((sum, m) => sum + memberMonthly(m), 0) * 100) / 100,
+        arr: Math.round(allMembers.reduce((sum, m) => sum + memberMonthly(m), 0) * 12 * 100) / 100,
+        // One-time Quick Start revenue, reported apart from MRR so recurring and
+        // non-recurring money are never conflated.
+        quickStartRevenue: Math.round(quickStartRevenue * 100) / 100,
+        activeSeats: allMembers.reduce((sum, m) => sum + Number(m.seatCount || 0), 0),
+        // What the average paying account actually costs — the number that makes
+        // "2 kids on Basic" visible rather than averaging it away per contact.
+        avgRevenuePerAccount: (() => {
+          const paying = allMembers.filter(m => Number(m.seatRevenue || 0) > 0);
+          if (paying.length === 0) return 0;
+          const total = paying.reduce((sum, m) => sum + memberMonthly(m), 0);
+          return Math.round((total / paying.length) * 100) / 100;
+        })(),
       },
     };
 
     // Program distribution for pie chart
     const programDistribution = programs.map(program => ({
       name: program,
-      value: allMembers.filter(m => m.programType === program && m.accountStatus === 'member').length,
+      value: allMembers.filter(m => inProgram(m, program) && m.accountStatus === 'member').length,
     }));
+
+    // Zapier webhook activity by month — from log table so duplicates are tracked too
+    let zapierActivityData: any[] = periods.map(p => ({
+      month: p.label,
+      total: 0,
+      new_contacts: 0,
+      returning_contacts: 0,
+    }));
+    try {
+      const zapierResult = await pool.query(
+        `SELECT DATE_TRUNC($2, "receivedAt" AT TIME ZONE 'UTC') AS month,
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE "wasNew" = true)::int AS new_contacts,
+           COUNT(*) FILTER (WHERE "wasNew" = false)::int AS returning_contacts
+         FROM zapier_webhook_log
+         WHERE "receivedAt" >= $1
+         GROUP BY DATE_TRUNC($2, "receivedAt" AT TIME ZONE 'UTC')`,
+        [periods[0].start, truncUnit]
+      );
+      zapierActivityData = periods.map(period => {
+        const row = zapierResult.rows.find(r => {
+          const d = new Date(r.month);
+          return d >= period.start && d <= period.end;
+        });
+        return {
+          month: period.label,
+          total: row?.total ?? 0,
+          new_contacts: row?.new_contacts ?? 0,
+          returning_contacts: row?.returning_contacts ?? 0,
+        };
+      });
+    } catch {
+      // table may not exist on older deployments — return zeros
+    }
 
     res.json({
       programs,
@@ -366,10 +485,12 @@ router.get('/programs', authenticateToken, async (req: AuthRequest, res) => {
       membersData,
       summary,
       programDistribution,
+      leadSources,
+      zapierActivityData,
     });
   } catch (error: any) {
     console.error('Error fetching program analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -562,7 +683,7 @@ router.get('/value', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     console.error('Error fetching value analytics:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -574,11 +695,20 @@ router.get('/web/overview', authenticateToken, async (req: AuthRequest, res) => 
       return res.json({ configured: false });
     }
     const days = parseInt(String(req.query.days || '30'));
-    const data = await getWebOverview(days);
+    let data: any;
+    try {
+      data = await getWebOverview(days);
+    } catch (gaErr: any) {
+      console.error('[GA] getWebOverview failed:', gaErr);
+      return res.json({ configured: true, error: gaErr?.message || 'GA API request failed' });
+    }
+    if (!data) {
+      return res.json({ configured: true, error: 'Could not initialise GA client — verify GA_SERVICE_ACCOUNT_JSON is valid JSON and GA_PROPERTY_ID uses the format properties/XXXXXXXXX.' });
+    }
     res.json({ configured: true, ...data });
   } catch (error: any) {
     console.error('GA overview error:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
   }
 });
 
@@ -591,7 +721,71 @@ router.get('/web/user/:clientId', authenticateToken, async (req: AuthRequest, re
     res.json({ configured: true, sessions });
   } catch (error: any) {
     console.error('GA user sessions error:', error);
-    res.status(500).json({ error: error.message });
+    serverError(res, error);
+  }
+});
+
+// Marketing attribution: leads/trialers/members grouped by channel and campaign,
+// from first-touch member_attribution. `leads` = attributed contacts acquired in
+// the window; convRate = members / leads.
+router.get('/attribution', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { locationId, months = '12' } = req.query;
+    const monthsBack = parseInt(months as string) || 12;
+    const start = new Date();
+    start.setMonth(start.getMonth() - monthsBack);
+
+    const params: any[] = [start.toISOString()];
+    let locFilter = '';
+    if (locationId && locationId !== 'all') {
+      params.push(locationId);
+      locFilter = `AND m."locationId" = $${params.length}::int`;
+    }
+    const base = `FROM member_attribution ma JOIN members m ON m.id = ma."memberId"
+                  WHERE m."createdAt" >= $1 ${locFilter}`;
+
+    const channelsRes = await pool.query(
+      `SELECT COALESCE(ma.channel, 'Direct') AS channel,
+         COUNT(*)::int AS leads,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'trialer')::int AS trialers,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'member')::int AS members
+       ${base}
+       GROUP BY COALESCE(ma.channel, 'Direct')
+       ORDER BY leads DESC`, params);
+
+    const campaignsRes = await pool.query(
+      `SELECT COALESCE(NULLIF(ma."utmCampaign", ''), '(no campaign)') AS campaign,
+         ma."utmSource" AS source, ma."utmMedium" AS medium,
+         COALESCE(ma.channel, 'Direct') AS channel,
+         COUNT(*)::int AS leads,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'trialer')::int AS trialers,
+         COUNT(*) FILTER (WHERE m."accountStatus" = 'member')::int AS members
+       ${base}
+       GROUP BY COALESCE(NULLIF(ma."utmCampaign", ''), '(no campaign)'), ma."utmSource", ma."utmMedium", COALESCE(ma.channel, 'Direct')
+       ORDER BY leads DESC`, params);
+
+    const withRate = (rows: any[]) => rows.map(r => ({
+      ...r, convRate: r.leads > 0 ? Math.round((r.members / r.leads) * 1000) / 10 : 0,
+    }));
+    const channels = withRate(channelsRes.rows);
+    const campaigns = withRate(campaignsRes.rows);
+
+    const attributedLeads = channels.reduce((s, c) => s + c.leads, 0);
+    const totalMembers = channels.reduce((s, c) => s + c.members, 0);
+
+    res.json({
+      kpis: {
+        attributedLeads,
+        members: totalMembers,
+        leadToMemberRate: attributedLeads > 0 ? Math.round((totalMembers / attributedLeads) * 1000) / 10 : 0,
+        topChannel: channels[0]?.channel || null,
+        topCampaign: campaigns.find(c => c.campaign !== '(no campaign)')?.campaign || null,
+      },
+      channels,
+      campaigns,
+    });
+  } catch (error: any) {
+    serverError(res, error);
   }
 });
 

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
+import ForcePasswordChange from '../components/ForcePasswordChange';
 
 interface AuthContextType {
   user: User | null;
@@ -16,24 +17,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Restore session from HttpOnly cookie on page load — no localStorage needed
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-    }
-
-    setIsLoading(false);
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.token && data?.user) {
+          setToken(data.token);
+          setUser(data.user);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
   }, []);
 
   const login = async (username: string, password: string) => {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // receive the HttpOnly cookie
       body: JSON.stringify({ username, password }),
     });
 
@@ -43,22 +45,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const data = await response.json();
+    // Token lives in the HttpOnly cookie for persistence; keep a copy in memory
+    // for existing Bearer-header API calls — never written to localStorage
     setToken(data.token);
     setUser(data.user);
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
   };
 
   const logout = () => {
+    // Clear the HttpOnly cookie server-side
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     setToken(null);
     setUser(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  };
+
+  const handlePasswordChanged = () => {
+    setUser(u => u ? { ...u, mustChangePassword: false } : u);
   };
 
   return (
     <AuthContext.Provider value={{ user, token, login, logout, isLoading }}>
       {children}
+      {user?.mustChangePassword && (
+        <ForcePasswordChange onComplete={handlePasswordChanged} />
+      )}
     </AuthContext.Provider>
   );
 };

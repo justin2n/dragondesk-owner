@@ -7,6 +7,47 @@ import { useToast } from '../components/Toast';
 import styles from './DragonDeskOptimize.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit' | 'analytics' | 'tracking';
+type ExperienceType = 'page_edit' | 'promo_bar' | 'offer_modal';
+
+const EXPERIENCE_TYPES: { value: ExperienceType; label: string; desc: string }[] = [
+  { value: 'page_edit', label: 'Page Edit', desc: 'Change text, styles, or attributes on an existing page.' },
+  { value: 'promo_bar', label: 'Promo Bar', desc: 'A banner injected at the top or bottom of every page.' },
+  { value: 'offer_modal', label: 'Offer Modal', desc: 'A popup shown on load, exit intent, or scroll depth.' },
+];
+
+// Treatment config defaults. The bar/modal config rides inside variantB so the
+// existing two-variant structure is reused (A = control, B = treatment).
+const DEFAULT_PROMO_BAR = {
+  message: 'Join today and get your first month free!',
+  ctaLabel: 'Claim Offer', ctaLink: '',
+  bgColor: '#c0392b', textColor: '#ffffff',
+  position: 'top' as 'top' | 'bottom',
+  dismissible: true, frequency: 'session' as 'session' | 'once' | 'always',
+};
+const DEFAULT_OFFER_MODAL = {
+  heading: 'Limited-time offer', body: 'Sign up this week and get your first month free.',
+  imageUrl: '', ctaLabel: 'Get Started', ctaLink: '',
+  bgColor: '#ffffff', textColor: '#1a1a2e', accentColor: '#c0392b',
+  trigger: { type: 'load' as 'load' | 'exit' | 'scroll', delaySeconds: 3, scrollPct: 50 },
+  dismissible: true, frequency: 'session' as 'session' | 'once' | 'always',
+};
+// Where a bar/modal shows: the whole site, or a specific page matched by path.
+const DEFAULT_TARGETING = {
+  scope: 'site' as 'site' | 'page',
+  matchType: 'contains' as 'contains' | 'exact' | 'startsWith',
+  value: '',
+};
+
+// Conversion goal — completing it records a 'lead' event, which drives the
+// conversion rate + winner in analytics. 'none' just tracks views/clicks.
+type GoalType = 'none' | 'form_submit' | 'tel_click' | 'email_click' | 'selector_click';
+const GOAL_OPTIONS: { value: GoalType; label: string }[] = [
+  { value: 'none', label: 'No goal (track views & clicks only)' },
+  { value: 'form_submit', label: 'Form submitted (a lead fills out any form)' },
+  { value: 'tel_click', label: 'Phone number clicked (tel: link)' },
+  { value: 'email_click', label: 'Email clicked (mailto: link)' },
+  { value: 'selector_click', label: 'Specific button/link clicked (by CSS selector)' },
+];
 
 const DragonDeskOptimize = () => {
   const { toast, confirm } = useToast();
@@ -20,7 +61,7 @@ const DragonDeskOptimize = () => {
 
   // Behavior tracking state
   const [trackingToken, setTrackingToken] = useState('');
-  const [trackingTab, setTrackingTab] = useState<'install' | 'events' | 'pages' | 'audiences'>('install');
+  const [trackingTab, setTrackingTab] = useState<'events' | 'pages' | 'audiences' | 'identity' | 'install'>('events');
   const [trackingSummary, setTrackingSummary] = useState<any>(null);
   const [trackingEvents, setTrackingEvents] = useState<any[]>([]);
   const [topElements, setTopElements] = useState<any[]>([]);
@@ -30,9 +71,15 @@ const DragonDeskOptimize = () => {
   const [audienceOperator, setAudienceOperator] = useState<'any' | 'all'>('any');
   const [eventsFilter, setEventsFilter] = useState('');
   const [showEmbedCode, setShowEmbedCode] = useState(false);
+  const [selectedVisitorId, setSelectedVisitorId] = useState<string | null>(null);
+  const [visitorDetail, setVisitorDetail] = useState<any | null>(null);
+  const [visitorDetailLoading, setVisitorDetailLoading] = useState(false);
+  const [identitySettings, setIdentitySettings] = useState<{ priority: string[]; autoResolve: boolean } | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const [formData, setFormData] = useState({
     name: '',
+    experienceType: 'page_edit' as ExperienceType,
     audienceId: '',
     pageUrl: '',
     trafficSplit: 50,
@@ -53,7 +100,11 @@ const DragonDeskOptimize = () => {
       ctaLink: '',
       image: '',
       changes: [] as any[],
+      promoBar: { ...DEFAULT_PROMO_BAR },
+      offerModal: { ...DEFAULT_OFFER_MODAL },
+      targeting: { ...DEFAULT_TARGETING },
     },
+    goal: { type: 'none' as GoalType, selector: '' },
     status: 'draft' as 'draft' | 'running' | 'completed',
   });
 
@@ -89,16 +140,22 @@ const DragonDeskOptimize = () => {
     }
   };
 
+  // The legacy seeded "All Traffic" audience. Audience is now optional (empty =
+  // everyone), so an experience pointing at it is shown as "Everyone".
+  const allTrafficId = audiences.find(a => a.name === 'All Traffic')?.id;
+
   const handleCreateTest = () => {
     setEditingTest(null);
     setPreviewUrl('');
     setFormData({
       name: '',
-      audienceId: '',
+      experienceType: 'page_edit',
+      audienceId: '', // empty = everyone (no audience)
       pageUrl: '',
       trafficSplit: 50,
       variantA: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
-      variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [] },
+      variantB: { title: '', headline: '', content: '', cta: '', ctaLink: '', image: '', changes: [], promoBar: { ...DEFAULT_PROMO_BAR }, offerModal: { ...DEFAULT_OFFER_MODAL }, targeting: { ...DEFAULT_TARGETING } },
+      goal: { type: 'none', selector: '' },
       status: 'draft',
     });
     setActiveTab('variantA');
@@ -109,13 +166,19 @@ const DragonDeskOptimize = () => {
     setEditingTest(test);
     const url = (test as any).pageUrl || '';
     setPreviewUrl(url);
+    const vb: any = test.variantB || {};
     setFormData({
       name: test.name,
-      audienceId: test.audienceId.toString(),
+      experienceType: ((test as any).experienceType as ExperienceType) || 'page_edit',
+      // Empty = everyone. A test pointing at the legacy All Traffic audience is
+      // treated the same, so it reads as "Everyone".
+      audienceId: test.audienceId && test.audienceId !== allTrafficId ? test.audienceId.toString() : '',
       pageUrl: url,
-      trafficSplit: (test as any).trafficSplit || 50,
+      trafficSplit: (test as any).trafficSplit ?? 50,
       variantA: { ...test.variantA, changes: test.variantA.changes || [] },
-      variantB: { ...test.variantB, changes: test.variantB.changes || [] },
+      // Backfill bar/modal config for older tests that predate these fields.
+      variantB: { ...vb, changes: vb.changes || [], promoBar: { ...DEFAULT_PROMO_BAR, ...(vb.promoBar || {}) }, offerModal: { ...DEFAULT_OFFER_MODAL, ...(vb.offerModal || {}), trigger: { ...DEFAULT_OFFER_MODAL.trigger, ...((vb.offerModal || {}).trigger || {}) } }, targeting: { ...DEFAULT_TARGETING, ...(vb.targeting || {}) } },
+      goal: (() => { const g: any = (test as any).goal; const parsed = typeof g === 'string' ? (g ? JSON.parse(g) : null) : g; return { type: (parsed?.type as GoalType) || 'none', selector: parsed?.selector || '' }; })(),
       status: test.status,
     });
     setActiveTab('variantA');
@@ -127,7 +190,8 @@ const DragonDeskOptimize = () => {
     try {
       const payload = {
         ...formData,
-        audienceId: parseInt(formData.audienceId),
+        // Empty audience = show to everyone (no targeting).
+        audienceId: formData.audienceId ? parseInt(formData.audienceId) : null,
       };
 
       if (editingTest) {
@@ -140,6 +204,32 @@ const DragonDeskOptimize = () => {
       loadData();
     } catch (error: any) {
       toast(error.message || 'Failed to save A/B test', 'error');
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!formData.name) {
+      toast('Please enter a test name before saving.', 'error');
+      return;
+    }
+    try {
+      const payload = {
+        ...formData,
+        status: 'draft',
+        audienceId: formData.audienceId ? parseInt(formData.audienceId) : null,
+      };
+
+      if (editingTest) {
+        await api.put(`/abtests/${editingTest.id}`, payload);
+      } else {
+        await api.post('/abtests', payload);
+      }
+
+      toast('Draft saved.', 'success');
+      setViewMode('list');
+      loadData();
+    } catch (error: any) {
+      toast(error.message || 'Failed to save draft', 'error');
     }
   };
 
@@ -162,6 +252,135 @@ const DragonDeskOptimize = () => {
   const handleViewAnalytics = (test: ABTest) => {
     setEditingTest(test);
     setViewMode('analytics');
+  };
+
+  // Patch the treatment (variant B) bar/modal config.
+  const updateBar = (patch: Partial<typeof DEFAULT_PROMO_BAR>) =>
+    setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, promoBar: { ...fd.variantB.promoBar, ...patch } } }));
+  const updateModal = (patch: Partial<typeof DEFAULT_OFFER_MODAL>) =>
+    setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, offerModal: { ...fd.variantB.offerModal, ...patch } } }));
+  const updateTargeting = (patch: Partial<typeof DEFAULT_TARGETING>) =>
+    setFormData(fd => ({ ...fd, variantB: { ...fd.variantB, targeting: { ...fd.variantB.targeting, ...patch } } }));
+
+  // Config form + live preview for promo bar / offer modal experiences. Variant A
+  // is always control (nothing shown), so there's a single treatment editor.
+  const renderTreatmentEditor = () => {
+    const isBar = formData.experienceType === 'promo_bar';
+    const bar = formData.variantB.promoBar;
+    const modal = formData.variantB.offerModal;
+    const field = (label: string, node: React.ReactNode) => (
+      <div className={styles.formGroup}><label>{label}</label>{node}</div>
+    );
+    return (
+      <div style={{ padding: '1.5rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+        <div>
+          <h3 style={{ marginTop: 0 }}>{isBar ? 'Promo Bar' : 'Offer Modal'} — Treatment</h3>
+          <p className={styles.fieldHelp} style={{ marginBottom: '1rem' }}>
+            Variant A is the control (nothing shown). This is what the treatment group sees.
+          </p>
+
+          {isBar ? (
+            <>
+              {field('Message', <input className={styles.input} value={bar.message} onChange={e => updateBar({ message: e.target.value })} />)}
+              {field('Button Label', <input className={styles.input} value={bar.ctaLabel} onChange={e => updateBar({ ctaLabel: e.target.value })} placeholder="Leave blank for no button" />)}
+              {field('Button Link', <input className={styles.input} value={bar.ctaLink} onChange={e => updateBar({ ctaLink: e.target.value })} placeholder="https://..." />)}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                {field('Background', <input type="color" value={bar.bgColor} onChange={e => updateBar({ bgColor: e.target.value })} />)}
+                {field('Text', <input type="color" value={bar.textColor} onChange={e => updateBar({ textColor: e.target.value })} />)}
+                {field('Position', <select className={styles.input} value={bar.position} onChange={e => updateBar({ position: e.target.value as 'top' | 'bottom' })}><option value="top">Top</option><option value="bottom">Bottom</option></select>)}
+              </div>
+            </>
+          ) : (
+            <>
+              {field('Heading', <input className={styles.input} value={modal.heading} onChange={e => updateModal({ heading: e.target.value })} />)}
+              {field('Body', <textarea className={styles.input} rows={3} value={modal.body} onChange={e => updateModal({ body: e.target.value })} />)}
+              {field('Image URL', <input className={styles.input} value={modal.imageUrl} onChange={e => updateModal({ imageUrl: e.target.value })} placeholder="Optional https://..." />)}
+              {field('Button Label', <input className={styles.input} value={modal.ctaLabel} onChange={e => updateModal({ ctaLabel: e.target.value })} />)}
+              {field('Button Link', <input className={styles.input} value={modal.ctaLink} onChange={e => updateModal({ ctaLink: e.target.value })} placeholder="https://..." />)}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                {field('Background', <input type="color" value={modal.bgColor} onChange={e => updateModal({ bgColor: e.target.value })} />)}
+                {field('Text', <input type="color" value={modal.textColor} onChange={e => updateModal({ textColor: e.target.value })} />)}
+                {field('Button', <input type="color" value={modal.accentColor} onChange={e => updateModal({ accentColor: e.target.value })} />)}
+              </div>
+              {field('Trigger', (
+                <select className={styles.input} value={modal.trigger.type} onChange={e => updateModal({ trigger: { ...modal.trigger, type: e.target.value as 'load' | 'exit' | 'scroll' } })}>
+                  <option value="load">On page load (after delay)</option>
+                  <option value="exit">Exit intent</option>
+                  <option value="scroll">On scroll depth</option>
+                </select>
+              ))}
+              {modal.trigger.type === 'load' && field('Delay (seconds)', <input type="number" min="0" className={styles.input} value={modal.trigger.delaySeconds} onChange={e => updateModal({ trigger: { ...modal.trigger, delaySeconds: parseInt(e.target.value) || 0 } })} />)}
+              {modal.trigger.type === 'scroll' && field('Scroll depth (%)', <input type="number" min="1" max="100" className={styles.input} value={modal.trigger.scrollPct} onChange={e => updateModal({ trigger: { ...modal.trigger, scrollPct: parseInt(e.target.value) || 50 } })} />)}
+            </>
+          )}
+
+          {field('Show frequency', (
+            <select className={styles.input} value={isBar ? bar.frequency : modal.frequency} onChange={e => (isBar ? updateBar : updateModal)({ frequency: e.target.value as 'session' | 'once' | 'always' })}>
+              <option value="session">Once per session</option>
+              <option value="once">Once ever (per visitor)</option>
+              <option value="always">Every page view</option>
+            </select>
+          ))}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <input type="checkbox" checked={isBar ? bar.dismissible : modal.dismissible} onChange={e => (isBar ? updateBar : updateModal)({ dismissible: e.target.checked })} />
+            Visitors can dismiss it
+          </label>
+
+          {/* URL targeting — whole site or a specific page. */}
+          <h4 style={{ margin: '1.5rem 0 0.5rem' }}>Show on</h4>
+          {field('Pages', (
+            <select className={styles.input} value={formData.variantB.targeting.scope} onChange={e => updateTargeting({ scope: e.target.value as 'site' | 'page' })}>
+              <option value="site">Whole site — every page</option>
+              <option value="page">A specific page</option>
+            </select>
+          ))}
+          {formData.variantB.targeting.scope === 'page' && (
+            <>
+              {field('Match', (
+                <select className={styles.input} value={formData.variantB.targeting.matchType} onChange={e => updateTargeting({ matchType: e.target.value as 'contains' | 'exact' | 'startsWith' })}>
+                  <option value="exact">URL path is exactly</option>
+                  <option value="startsWith">URL path starts with</option>
+                  <option value="contains">URL path contains</option>
+                </select>
+              ))}
+              {field('Path', (
+                <input className={styles.input} value={formData.variantB.targeting.value}
+                  onChange={e => updateTargeting({ value: e.target.value })}
+                  placeholder="/pricing" />
+              ))}
+              <p className={styles.fieldHelp}>
+                Match the page path, e.g. <code>/pricing</code>. Paste a full <code>https://</code> URL to match the whole address instead.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Live preview */}
+        <div>
+          <h3 style={{ marginTop: 0 }}>Preview</h3>
+          {isBar ? (
+            <div style={{ background: bar.bgColor, color: bar.textColor, padding: '12px 16px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, fontWeight: 600 }}>
+              <span>{bar.message}</span>
+              {bar.ctaLabel && <span style={{ background: bar.textColor, color: bar.bgColor, padding: '7px 16px', borderRadius: 6, fontWeight: 700 }}>{bar.ctaLabel}</span>}
+              {bar.dismissible && <span style={{ marginLeft: 8, opacity: 0.8 }}>×</span>}
+            </div>
+          ) : (
+            <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 8, padding: 24, display: 'flex', justifyContent: 'center' }}>
+              <div style={{ background: modal.bgColor, color: modal.textColor, borderRadius: 12, padding: 28, maxWidth: 340, textAlign: 'center', position: 'relative' }}>
+                {modal.dismissible && <span style={{ position: 'absolute', right: 12, top: 8, opacity: 0.6 }}>×</span>}
+                {modal.imageUrl && <img src={modal.imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 12 }} />}
+                {modal.heading && <h2 style={{ margin: '0 0 10px', fontSize: 20 }}>{modal.heading}</h2>}
+                {modal.body && <p style={{ margin: '0 0 16px', opacity: 0.9 }}>{modal.body}</p>}
+                {modal.ctaLabel && <span style={{ display: 'inline-block', background: modal.accentColor, color: '#fff', padding: '12px 24px', borderRadius: 8, fontWeight: 700 }}>{modal.ctaLabel}</span>}
+              </div>
+            </div>
+          )}
+          <p className={styles.fieldHelp} style={{ marginTop: '1rem' }}>
+            Runs on any page where your DragonDesk tracking snippet is installed. Set status to Running to go live.
+          </p>
+        </div>
+      </div>
+    );
   };
 
   // Render test list
@@ -245,7 +464,7 @@ const DragonDeskOptimize = () => {
                   </div>
                   <div className={styles.cardInfo}>
                     <span className={styles.label}>Audience:</span>
-                    <span>{audience?.name || 'Unknown'}</span>
+                    <span>{!test.audienceId || audience?.name === 'All Traffic' ? 'Everyone' : (audience?.name || 'Unknown')}</span>
                   </div>
                   <div className={styles.cardInfo}>
                     <span className={styles.label}>Traffic Split:</span>
@@ -330,6 +549,26 @@ const DragonDeskOptimize = () => {
           </div>
 
           <div className={styles.formGroup}>
+            <label>Experience Type</label>
+            <select
+              value={formData.experienceType}
+              onChange={(e) => {
+                const experienceType = e.target.value as ExperienceType;
+                // Bar/modal default to 100% ("just run it"); page edits to a 50/50 split.
+                const trafficSplit = experienceType === 'page_edit' ? 50 : 100;
+                setFormData({ ...formData, experienceType, trafficSplit });
+              }}
+              className={styles.input}
+            >
+              {EXPERIENCE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <p className={styles.fieldHelp}>
+              {EXPERIENCE_TYPES.find(t => t.value === formData.experienceType)?.desc}
+            </p>
+          </div>
+
+          {formData.experienceType === 'page_edit' && (
+          <div className={styles.formGroup}>
             <label>Page URL *</label>
             <div className={styles.urlInputRow}>
               <input
@@ -354,26 +593,36 @@ const DragonDeskOptimize = () => {
               Enter a URL then click Load Preview to open the visual editor
             </p>
           </div>
+          )}
 
           <div className={styles.formGroup}>
-            <label>Target Audience *</label>
+            <label>Who sees it</label>
             <select
               value={formData.audienceId}
               onChange={(e) => setFormData({ ...formData, audienceId: e.target.value })}
               className={styles.input}
-              required
             >
-              <option value="">Select an audience</option>
-              {audiences.map((audience) => (
-                <option key={audience.id} value={audience.id}>
-                  {audience.name}
-                </option>
-              ))}
+              {/* Empty = everyone (no audience). Behavior audiences below narrow
+                  to visitors matching their rules. The legacy All Traffic system
+                  audience is hidden since "Everyone" already covers it. */}
+              <option value="">Everyone — show to all visitors</option>
+              {audiences
+                .filter((a) => a.name !== 'All Traffic')
+                .map((audience) => (
+                  <option key={audience.id} value={audience.id}>
+                    {audience.name}
+                  </option>
+                ))}
             </select>
+            <p className={styles.fieldHelp}>
+              {!formData.audienceId
+                ? 'No audience needed — shown to every visitor. Set "Show To" to 100% to reach everyone.'
+                : 'Only visitors matching this audience will see it.'}
+            </p>
           </div>
 
           <div className={styles.formGroup}>
-            <label>Traffic Split</label>
+            <label>{formData.experienceType === 'page_edit' ? 'Traffic Split' : 'Show To'}</label>
             <div className={styles.trafficSplitContainer}>
               <div className={styles.trafficSplitSlider}>
                 <input
@@ -387,17 +636,54 @@ const DragonDeskOptimize = () => {
                   className={styles.slider}
                 />
               </div>
-              <div className={styles.trafficSplitLabels}>
-                <div className={styles.trafficSplitLabel}>
-                  <span className={styles.variantLetter}>A</span>
-                  <span className={styles.percentage}>{formData.trafficSplit}%</span>
+              {formData.experienceType === 'page_edit' ? (
+                <div className={styles.trafficSplitLabels}>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.variantLetter}>A</span>
+                    <span className={styles.percentage}>{formData.trafficSplit}%</span>
+                  </div>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.variantLetter}>B</span>
+                    <span className={styles.percentage}>{100 - formData.trafficSplit}%</span>
+                  </div>
                 </div>
-                <div className={styles.trafficSplitLabel}>
-                  <span className={styles.variantLetter}>B</span>
-                  <span className={styles.percentage}>{100 - formData.trafficSplit}%</span>
+              ) : (
+                <div className={styles.trafficSplitLabels}>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.percentage}>{formData.trafficSplit}% see it</span>
+                  </div>
+                  <div className={styles.trafficSplitLabel}>
+                    <span className={styles.percentage}>{100 - formData.trafficSplit}% control</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
+            {formData.experienceType !== 'page_edit' && (
+              <p className={styles.fieldHelp}>100% just runs it. Lower it to A/B test showing it vs not.</p>
+            )}
+          </div>
+
+          <div className={styles.formGroup}>
+            <label>Conversion Goal</label>
+            <select
+              value={formData.goal.type}
+              onChange={(e) => setFormData({ ...formData, goal: { ...formData.goal, type: e.target.value as GoalType } })}
+              className={styles.input}
+            >
+              {GOAL_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+            </select>
+            {formData.goal.type === 'selector_click' && (
+              <input
+                className={styles.input}
+                style={{ marginTop: 8 }}
+                value={formData.goal.selector}
+                onChange={(e) => setFormData({ ...formData, goal: { ...formData.goal, selector: e.target.value } })}
+                placeholder=".book-now, #signup-btn"
+              />
+            )}
+            <p className={styles.fieldHelp}>
+              Completing the goal counts as a conversion in analytics. Works for any experience type.
+            </p>
           </div>
 
           <div className={styles.formGroup}>
@@ -415,13 +701,20 @@ const DragonDeskOptimize = () => {
             </select>
           </div>
 
-          <button type="submit" className={styles.saveBtn}>
-            {editingTest ? 'Update Test' : 'Create Test'}
-          </button>
+          <div className={styles.editorActions}>
+            <button type="button" onClick={handleSaveDraft} className={styles.saveDraftBtn}>
+              Save Draft
+            </button>
+            <button type="submit" className={styles.saveBtn}>
+              {editingTest ? 'Update Test' : 'Create Test'}
+            </button>
+          </div>
         </div>
 
         <div className={styles.editorMain}>
-          {previewUrl ? (
+          {formData.experienceType !== 'page_edit' ? (
+            renderTreatmentEditor()
+          ) : previewUrl ? (
             <>
               <div className={styles.tabsContainer}>
                 <div className={styles.tabs}>
@@ -522,6 +815,45 @@ const DragonDeskOptimize = () => {
     } catch (e) { console.error(e); }
   };
 
+  const loadEvents = async () => {
+    try {
+      const events = await api.get(`/tracking/events?limit=50${eventsFilter ? `&type=${eventsFilter}` : ''}`);
+      setTrackingEvents(events);
+    } catch (e) { console.error(e); }
+  };
+
+  const loadVisitorDetail = async (visitorId: string) => {
+    setSelectedVisitorId(visitorId);
+    setVisitorDetailLoading(true);
+    setVisitorDetail(null);
+    try {
+      const data = await api.get(`/tracking/visitor/${visitorId}`);
+      setVisitorDetail(data);
+    } catch (e) { console.error(e); }
+    finally { setVisitorDetailLoading(false); }
+  };
+
+  const loadIdentitySettings = async () => {
+    try {
+      const data = await api.get('/tracking/identity-settings');
+      setIdentitySettings(data);
+    } catch (e) { console.error(e); }
+  };
+
+  // Auto-refresh events every 10 seconds when on events tab
+  useEffect(() => {
+    if (trackingTab !== 'events' || !autoRefresh) return;
+    const interval = setInterval(() => { loadEvents(); }, 10000);
+    return () => clearInterval(interval);
+  }, [trackingTab, autoRefresh, eventsFilter]);
+
+  // Load identity settings when switching to identity tab
+  useEffect(() => {
+    if (trackingTab === 'identity' && identitySettings === null) {
+      loadIdentitySettings();
+    }
+  }, [trackingTab]);
+
   const handleCreateBehaviorAudience = async () => {
     if (!audienceName || behaviorRules.length === 0) {
       toast('Please enter a name and add at least one rule.', 'error');
@@ -571,10 +903,13 @@ const DragonDeskOptimize = () => {
         )}
 
         <div className={styles.trackingTabs}>
-          {(['install', 'events', 'pages', 'audiences'] as const).map(tab => (
+          {(['events', 'pages', 'audiences', 'identity', 'install'] as const).map(tab => (
             <button key={tab} className={`${styles.trackingTab} ${trackingTab === tab ? styles.trackingTabActive : ''}`}
-              onClick={() => setTrackingTab(tab)}>
-              {tab === 'install' ? 'Install' : tab === 'events' ? 'Event Feed' : tab === 'pages' ? 'Top Pages & Elements' : 'Audience Builder'}
+              onClick={() => {
+                setTrackingTab(tab);
+                if (tab === 'identity' && identitySettings === null) loadIdentitySettings();
+              }}>
+              {tab === 'install' ? 'Install' : tab === 'events' ? 'Event Feed' : tab === 'pages' ? 'Top Pages & Elements' : tab === 'audiences' ? 'Audience Builder' : 'Identity Settings'}
             </button>
           ))}
         </div>
@@ -621,18 +956,26 @@ const DragonDeskOptimize = () => {
                   <option value="scroll_depth">Scroll depth</option>
                 </select>
                 <button onClick={loadTrackingData} className={styles.refreshBtn}>Refresh</button>
+                <button
+                  onClick={() => setAutoRefresh(v => !v)}
+                  className={autoRefresh ? styles.autoRefreshOn : styles.refreshBtn}
+                  title={autoRefresh ? 'Auto-refresh on (every 10s)' : 'Auto-refresh off'}
+                >
+                  {autoRefresh ? '⟳ Live' : '⟳ Paused'}
+                </button>
               </div>
             </div>
             <table className={styles.eventsTable}>
-              <thead><tr><th>Type</th><th>Visitor</th><th>Page</th><th>Selector / Detail</th><th>Time</th></tr></thead>
+              <thead><tr><th>Type</th><th>Visitor</th><th>Identity</th><th>Page</th><th>Selector / Detail</th><th>Time</th></tr></thead>
               <tbody>
                 {trackingEvents.length === 0 && (
-                  <tr><td colSpan={5} className={styles.emptyRow}>No events yet — install the tracking script on your website to start collecting data.</td></tr>
+                  <tr><td colSpan={6} className={styles.emptyRow}>No events yet — install the tracking script on your website to start collecting data.</td></tr>
                 )}
                 {trackingEvents.map(evt => (
-                  <tr key={evt.id}>
+                  <tr key={evt.id} onClick={() => loadVisitorDetail(evt.visitorId)} style={{ cursor: 'pointer' }}>
                     <td><span className={`${styles.eventBadge} ${styles[`evt_${evt.eventType}`]}`}>{evt.eventType}</span></td>
                     <td className={styles.visitorCell}>{evt.visitorId?.slice(0, 8)}…</td>
+                    <td></td>
                     <td className={styles.pathCell}>{evt.pagePath || '—'}</td>
                     <td className={styles.selectorCell}>{evt.selector || evt.elementText || evt.pageTitle || '—'}</td>
                     <td className={styles.timeCell}>{new Date(evt.createdAt).toLocaleTimeString()}</td>
@@ -736,6 +1079,181 @@ const DragonDeskOptimize = () => {
                 disabled={!audienceName || behaviorRules.length === 0}>
                 Create Audience
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* IDENTITY SETTINGS TAB */}
+        {trackingTab === 'identity' && !identitySettings && (
+          <div className={styles.trackingPanel}>
+            <div className={styles.drawerLoading}>Loading...</div>
+          </div>
+        )}
+
+        {trackingTab === 'identity' && identitySettings && (
+          <div className={styles.trackingPanel}>
+            <h3 className={styles.trackingPanelTitle}>Identity Resolution Settings</h3>
+            <p className={styles.trackingPanelDesc}>
+              Configure how anonymous visitor IDs are matched to known contacts. When a visitor submits a form with their email,
+              they are automatically resolved to a contact if one exists.
+            </p>
+
+            {/* Auto-resolve toggle */}
+            <div className={styles.identitySettingRow}>
+              <div>
+                <div className={styles.identitySettingLabel}>Auto-resolve identities</div>
+                <div className={styles.identitySettingDesc}>Automatically link visitors to contacts when email is captured from form submissions</div>
+              </div>
+              <button
+                className={identitySettings.autoResolve ? styles.toggleOn : styles.toggleOff}
+                onClick={async () => {
+                  const updated = { ...identitySettings, autoResolve: !identitySettings.autoResolve };
+                  setIdentitySettings(updated);
+                  await api.put('/tracking/identity-settings', updated);
+                }}
+              >
+                {identitySettings.autoResolve ? 'On' : 'Off'}
+              </button>
+            </div>
+
+            {/* Priority order */}
+            <div className={styles.identitySettingRow} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.75rem' }}>
+              <div className={styles.identitySettingLabel}>Identity signal priority</div>
+              <div className={styles.identitySettingDesc}>Order in which identity signals are used for matching. Use arrows to reorder.</div>
+              <div className={styles.priorityList}>
+                {identitySettings.priority.map((signal: string, idx: number) => (
+                  <div key={signal} className={styles.priorityItem}>
+                    <span className={styles.priorityRank}>{idx + 1}</span>
+                    <span className={styles.prioritySignal}>{signal}</span>
+                    <div className={styles.priorityActions}>
+                      <button
+                        disabled={idx === 0}
+                        onClick={async () => {
+                          const newPriority = [...identitySettings.priority];
+                          [newPriority[idx-1], newPriority[idx]] = [newPriority[idx], newPriority[idx-1]];
+                          const updated = { ...identitySettings, priority: newPriority };
+                          setIdentitySettings(updated);
+                          await api.put('/tracking/identity-settings', updated);
+                        }}
+                        className={styles.priorityBtn}
+                      >↑</button>
+                      <button
+                        disabled={idx === identitySettings.priority.length - 1}
+                        onClick={async () => {
+                          const newPriority = [...identitySettings.priority];
+                          [newPriority[idx], newPriority[idx+1]] = [newPriority[idx+1], newPriority[idx]];
+                          const updated = { ...identitySettings, priority: newPriority };
+                          setIdentitySettings(updated);
+                          await api.put('/tracking/identity-settings', updated);
+                        }}
+                        className={styles.priorityBtn}
+                      >↓</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* How it works */}
+            <div className={styles.identityHowItWorks}>
+              <h4>How identity resolution works</h4>
+              <ol>
+                <li>Visitor arrives on your site — assigned anonymous ID stored in a 1-year cookie</li>
+                <li>Script captures email address when visitor submits any form containing an email field</li>
+                <li>Email is matched against Contacts — if found, the visitor is linked to that contact</li>
+                <li>All past and future events from that anonymous ID are attributed to the matched contact</li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {/* VISITOR DETAIL DRAWER */}
+        {selectedVisitorId && (
+          <div className={styles.drawerOverlay} onClick={() => setSelectedVisitorId(null)}>
+            <div className={styles.drawer} onClick={e => e.stopPropagation()}>
+              <div className={styles.drawerHeader}>
+                <h3>Visitor Profile</h3>
+                <button onClick={() => setSelectedVisitorId(null)} className={styles.drawerClose}>✕</button>
+              </div>
+
+              {visitorDetailLoading ? (
+                <div className={styles.drawerLoading}>Loading...</div>
+              ) : visitorDetail ? (
+                <div className={styles.drawerBody}>
+                  {/* Anonymous ID */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Anonymous ID</div>
+                    <code className={styles.visitorIdFull}>{visitorDetail.visitor?.visitorId}</code>
+                  </div>
+
+                  {/* Location */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Location</div>
+                    <div>{visitorDetail.visitor?.city && visitorDetail.visitor?.country
+                      ? `${visitorDetail.visitor.city}, ${visitorDetail.visitor.country}`
+                      : visitorDetail.visitor?.country || 'Unknown'}</div>
+                  </div>
+
+                  {/* Identity / Matched Contact */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Identity</div>
+                    {visitorDetail.matchedMember ? (
+                      <div className={styles.matchedContact}>
+                        <div className={styles.matchedContactName}>
+                          {visitorDetail.matchedMember.firstName} {visitorDetail.matchedMember.lastName}
+                        </div>
+                        <div className={styles.matchedContactEmail}>{visitorDetail.matchedMember.email}</div>
+                        <div className={styles.matchedContactMeta}>
+                          <span className={styles.statusBadge}>{visitorDetail.matchedMember.accountStatus}</span>
+                          {visitorDetail.matchedMember.programType && (
+                            <span className={styles.programBadge}>{visitorDetail.matchedMember.programType}</span>
+                          )}
+                        </div>
+                        <a href={`/contacts?id=${visitorDetail.matchedMember.id}`} className={styles.viewContactLink} target="_blank" rel="noreferrer">
+                          View in Contacts →
+                        </a>
+                      </div>
+                    ) : visitorDetail.identities?.length > 0 ? (
+                      <div>
+                        {visitorDetail.identities.map((id: any) => (
+                          <div key={id.id} className={styles.identityChip}>
+                            <span className={styles.identityType}>{id.type}</span>
+                            <span>{id.value}</span>
+                          </div>
+                        ))}
+                        <div className={styles.noMatch}>No contact match found</div>
+                      </div>
+                    ) : (
+                      <div className={styles.anonymous}>Anonymous visitor — no identity signals captured yet</div>
+                    )}
+                  </div>
+
+                  {/* Stats */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Activity</div>
+                    <div className={styles.visitorStats}>
+                      <div><strong>{visitorDetail.visitor?.eventCount || 0}</strong> events</div>
+                      <div><strong>{visitorDetail.visitor?.pageCount || 0}</strong> page views</div>
+                      <div>First seen: {visitorDetail.visitor?.firstSeen ? new Date(visitorDetail.visitor.firstSeen).toLocaleDateString() : '—'}</div>
+                      <div>Last seen: {visitorDetail.visitor?.lastSeen ? new Date(visitorDetail.visitor.lastSeen).toLocaleString() : '—'}</div>
+                    </div>
+                  </div>
+
+                  {/* Recent events timeline */}
+                  <div className={styles.drawerSection}>
+                    <div className={styles.drawerSectionLabel}>Recent Events</div>
+                    <div className={styles.eventTimeline}>
+                      {(visitorDetail.events || []).slice(0, 20).map((evt: any) => (
+                        <div key={evt.id} className={styles.timelineEvent}>
+                          <span className={`${styles.eventBadge} ${styles[`evt_${evt.eventType}`]}`}>{evt.eventType}</span>
+                          <span className={styles.timelinePath}>{evt.pagePath || '—'}</span>
+                          <span className={styles.timelineTime}>{new Date(evt.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

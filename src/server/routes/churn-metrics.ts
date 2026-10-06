@@ -1,7 +1,10 @@
 import express from 'express';
 import { pool } from '../models/database';
+import { authenticateToken } from '../middleware/auth';
 
 const router = express.Router();
+
+router.use(authenticateToken);
 
 router.get('/', async (req, res) => {
   try {

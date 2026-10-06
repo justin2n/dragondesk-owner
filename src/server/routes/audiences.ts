@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query, run, get } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { AudienceFilter } from '../types';
+import { buildAudienceQuery } from '../utils/audienceMembers';
 
 const router = Router();
 
@@ -42,61 +42,31 @@ router.get('/:id/members', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Audience not found' });
     }
 
-    const filters: AudienceFilter = JSON.parse(audience.filters);
+    const filters = JSON.parse(audience.filters);
 
-    let sql = 'SELECT * FROM members WHERE 1=1';
-    const params: any[] = [];
-
-    // Filter by locationIds stored in audience filters (saved with audience definition)
-    if (filters.locationIds && filters.locationIds.length > 0) {
-      sql += ` AND "locationId" IN (${filters.locationIds.map(() => '?').join(',')})`;
-      params.push(...filters.locationIds);
-    } else if (locationId && locationId !== 'all') {
-      // Fallback: filter by query param for ad-hoc queries
-      sql += ' AND "locationId" = ?';
-      params.push(locationId);
-    }
-
-    if (filters.accountStatus && filters.accountStatus.length > 0) {
-      sql += ` AND accountStatus IN (${filters.accountStatus.map(() => '?').join(',')})`;
-      params.push(...filters.accountStatus);
-    }
-
-    if (filters.accountType && filters.accountType.length > 0) {
-      sql += ` AND accountType IN (${filters.accountType.map(() => '?').join(',')})`;
-      params.push(...filters.accountType);
-    }
-
-    if (filters.programType && filters.programType.length > 0) {
-      sql += ` AND programType IN (${filters.programType.map(() => '?').join(',')})`;
-      params.push(...filters.programType);
-    }
-
-    if (filters.membershipAge && filters.membershipAge.length > 0) {
-      sql += ` AND membershipAge IN (${filters.membershipAge.map(() => '?').join(',')})`;
-      params.push(...filters.membershipAge);
-    }
-
-    if (filters.ranking && filters.ranking.length > 0) {
-      sql += ` AND ranking IN (${filters.ranking.map(() => '?').join(',')})`;
-      params.push(...filters.ranking);
-    }
-
-    if (filters.leadSource && filters.leadSource.length > 0) {
-      sql += ` AND leadSource IN (${filters.leadSource.map(() => '?').join(',')})`;
-      params.push(...filters.leadSource);
-    }
-
-    if (filters.tags && filters.tags.length > 0) {
-      const tagConditions = filters.tags.map(() => 'tags LIKE ?').join(' OR ');
-      sql += ` AND (${tagConditions})`;
-      params.push(...filters.tags.map(tag => `%${tag}%`));
-    }
-
+    // Shared with campaign sending so the preview and the actual send always
+    // target the exact same members.
+    const { sql, params } = buildAudienceQuery(filters, { locationId: locationId as string | undefined });
     const members = await query(sql, params);
     res.json(members);
   } catch (error) {
     console.error('Get audience members error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Preview matching members for a set of filters WITHOUT saving an audience.
+// Powers the live preview in the create/edit modal — uses the same
+// buildAudienceQuery as the saved-audience members endpoint and campaign
+// sending, so the preview always matches the eventual send.
+router.post('/preview', async (req: AuthRequest, res) => {
+  try {
+    const { filters, locationId } = req.body;
+    const { sql, params } = buildAudienceQuery(filters, { locationId: locationId as string | undefined });
+    const members = await query(sql, params);
+    res.json(members);
+  } catch (error) {
+    console.error('Preview audience error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -158,6 +128,12 @@ router.delete('/:id', async (req: AuthRequest, res) => {
 
     if (!existingAudience) {
       return res.status(404).json({ error: 'Audience not found' });
+    }
+
+    // System audiences (e.g. "All Traffic") are the default targets for Optimize
+    // experiences and can't be deleted.
+    if (existingAudience.isSystem) {
+      return res.status(400).json({ error: 'The All Traffic audience is built in and cannot be deleted.' });
     }
 
     await run('DELETE FROM audiences WHERE id = ?', [id]);

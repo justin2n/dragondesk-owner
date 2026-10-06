@@ -33,13 +33,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 24px 40px;
+  padding: 20px 40px;
   background: var(--color-dark-grey);
   border-bottom: 1px solid var(--color-border);
 }
 
-.header .locationName {
-  font-size: 26px;
+.headerTitle {
+  font-size: 24px;
   font-weight: 700;
   margin: 0;
   color: var(--color-text-primary);
@@ -60,168 +60,45 @@
   font-size: 20px;
 }
 
-/* Main Content */
-.mainContent {
+/* Flow Container — single centered column */
+.flowContainer {
   flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1.5fr;
-  gap: 24px;
-  padding: 28px 40px;
-}
-
-/* Classes Panel */
-.classesPanel {
-  background: var(--color-dark-grey);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 24px;
-  overflow-y: auto;
-  max-height: calc(100vh - 150px);
-}
-
-.sectionTitle {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 18px 0;
-  color: var(--color-text-primary);
-}
-
-.noClasses {
-  color: var(--color-text-secondary);
-  text-align: center;
-  padding: 40px 20px;
-}
-
-.classesList {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.classCard {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 18px;
-  background: var(--color-grey);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: left;
-  color: var(--color-text-primary);
-}
-
-.classCard:hover {
-  background: var(--color-light-grey);
-  border-color: var(--color-red);
-}
-
-.classCard.selected {
-  background: rgba(220, 38, 38, 0.15);
-  border-color: var(--color-red);
-}
-
-.classTime {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-red);
-  min-width: 75px;
-}
-
-.classInfo {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.className {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.instructor {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.programBadge {
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-primary);
-}
-
-.programBadge.bjj       { background: #7c3aed; }
-.programBadge.taekwondo { background: var(--color-red); }
-.programBadge.muaythai  { background: #059669; }
-.programBadge.general   { background: var(--color-light-grey); }
-
-/* Check-in Panel */
-.checkInPanel {
-  background: var(--color-dark-grey);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: 40px 24px;
 }
 
-/* Scan View */
-.scanView {
-  width: 100%;
-  max-width: 460px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.primaryBtn {
-  width: 100%;
-  padding: 20px 32px;
-  background: var(--color-red);
-  border: none;
-  border-radius: 10px;
-  color: #fff;
-  font-size: 20px;
+.sectionTitle {
+  font-size: 22px;
   font-weight: 700;
-  cursor: pointer;
-  transition: background-color 0.2s, transform 0.15s;
+  margin: 0 0 24px 0;
+  text-align: center;
+  color: var(--color-text-primary);
 }
 
-.primaryBtn:hover {
-  background: var(--color-red-hover);
-  transform: translateY(-1px);
-}
-
-/* Search View */
+/* ── Step 1: Search ───────────────────────────────────────── */
 .searchView {
   width: 100%;
-  max-width: 520px;
+  max-width: 580px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
 }
 
 .searchBox {
   display: flex;
   gap: 10px;
-  width: 100%;
   margin-bottom: 20px;
 }
 
 .searchInput {
   flex: 1;
-  padding: 16px 20px;
+  padding: 18px 20px;
   background: var(--color-grey);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--color-text-primary);
   font-size: 18px;
   outline: none;
@@ -237,12 +114,12 @@
 }
 
 .searchSubmitBtn {
-  padding: 16px 28px;
+  padding: 18px 32px;
   background: var(--color-red);
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #fff;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.2s;
@@ -259,13 +136,11 @@
 }
 
 .searchResults {
-  width: 100%;
-  max-height: 340px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 20px;
+  max-height: 380px;
+  overflow-y: auto;
 }
 
 .memberCard {
@@ -275,7 +150,7 @@
   padding: 18px 22px;
   background: var(--color-grey);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
   text-align: left;
@@ -283,12 +158,12 @@
 }
 
 .memberCard:hover {
-  background: rgba(220, 38, 38, 0.15);
+  background: rgba(220, 38, 38, 0.12);
   border-color: var(--color-red);
 }
 
 .memberName {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 600;
 }
 
@@ -297,6 +172,7 @@
   gap: 10px;
   font-size: 13px;
   color: var(--color-text-secondary);
+  margin-top: 3px;
 }
 
 .ranking {
@@ -304,8 +180,119 @@
   font-weight: 600;
 }
 
+.noResults {
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  margin-top: 8px;
+}
+
+/* ── Step 2: Select class ─────────────────────────────────── */
+.selectClassView {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.memberHeader {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.memberWelcome {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 10px 0;
+  color: var(--color-text-primary);
+}
+
+.memberProgramBadge {
+  display: inline-block;
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  color: var(--color-red);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 4px 14px;
+}
+
+.selectClassTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 14px 0;
+}
+
+.memberClassesList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.classCheckInBtn {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 22px;
+  background: var(--color-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  color: var(--color-text-primary);
+  width: 100%;
+}
+
+.classCheckInBtn:hover {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: var(--color-red);
+  transform: translateX(4px);
+}
+
+.classTime {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-red);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.classInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.className {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.instructor {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.noClasses {
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: 32px 20px;
+  font-size: 16px;
+}
+
 .backBtn {
-  padding: 10px 22px;
+  align-self: center;
+  padding: 10px 24px;
   background: transparent;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -320,7 +307,7 @@
   color: var(--color-text-primary);
 }
 
-/* Success / Error Views */
+/* ── Result screens ───────────────────────────────────────── */
 .successView,
 .alreadyCheckedInView,
 .errorView {
@@ -330,6 +317,7 @@
   text-align: center;
   padding: 40px;
   animation: fadeIn 0.3s ease;
+  max-width: 480px;
 }
 
 @keyframes fadeIn {
@@ -351,21 +339,21 @@
 }
 
 .successTitle {
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 700;
   margin: 0 0 8px 0;
   color: #10b981;
 }
 
 .infoTitle {
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 700;
   margin: 0 0 8px 0;
   color: #3b82f6;
 }
 
 .errorTitle {
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 700;
   margin: 0 0 8px 0;
   color: var(--color-red);
@@ -394,7 +382,7 @@
   font-size: 16px;
   color: var(--color-text-secondary);
   margin: 0 0 24px 0;
-  max-width: 300px;
+  max-width: 320px;
 }
 
 .retryBtn {
@@ -413,7 +401,7 @@
   background: var(--color-red-hover);
 }
 
-/* Select Location View */
+/* ── Select Location ──────────────────────────────────────── */
 .selectLocationView {
   flex: 1;
   display: flex;
@@ -457,7 +445,7 @@
   transform: translateY(-3px);
 }
 
-.locationCard .locationName {
+.locationName {
   font-size: 22px;
   font-weight: 600;
 }
@@ -467,18 +455,7 @@
   color: var(--color-text-secondary);
 }
 
-/* Responsive */
-@media (max-width: 1024px) {
-  .mainContent {
-    grid-template-columns: 1fr;
-    padding: 20px;
-  }
-
-  .classesPanel {
-    max-height: 200px;
-  }
-}
-
+/* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 768px) {
   .header {
     flex-direction: column;
@@ -486,20 +463,20 @@
     padding: 16px 20px;
   }
 
-  .header .locationName {
+  .headerTitle {
     font-size: 20px;
   }
 
-  .mainContent {
-    padding: 16px;
-    gap: 16px;
-  }
-
-  .checkInPanel {
-    padding: 20px;
+  .flowContainer {
+    padding: 24px 16px;
   }
 
   .searchBox {
     flex-direction: column;
+  }
+
+  .memberCard,
+  .classCheckInBtn {
+    padding: 14px 16px;
   }
 }

@@ -89,10 +89,36 @@ const request = async (method: string, endpoint: string, data?: any): Promise<an
   return parseResponse(response);
 };
 
+// Multipart upload (e.g. CSV import). Mirrors request()'s 401 refresh-and-retry,
+// but sends FormData and lets the browser set the multipart Content-Type/boundary.
+const upload = async (endpoint: string, formData: FormData): Promise<any> => {
+  const authHeader = () => {
+    const token = localStorage.getItem('token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+  const send = () => fetch(`${API_URL}${endpoint}`, { method: 'POST', headers: authHeader(), body: formData });
+
+  let response = await send();
+  if (response.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) response = await send();
+    else { redirectToLogin(); throw new Error('Session expired. Please log in again.'); }
+  }
+  if (response.status === 401) { redirectToLogin(); throw new Error('Session expired. Please log in again.'); }
+
+  if (!response.ok) {
+    let errorMessage = `Request failed with status ${response.status}`;
+    try { const error = await response.json(); errorMessage = error.error || error.message || errorMessage; } catch {}
+    throw new Error(errorMessage);
+  }
+  return parseResponse(response);
+};
+
 export const api = {
   get: (endpoint: string) => request('GET', endpoint),
   post: (endpoint: string, data?: any) => request('POST', endpoint, data ?? {}),
   put: (endpoint: string, data: any) => request('PUT', endpoint, data),
   patch: (endpoint: string, data: any) => request('PATCH', endpoint, data),
   delete: (endpoint: string) => request('DELETE', endpoint),
+  upload,
 };

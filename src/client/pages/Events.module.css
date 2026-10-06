@@ -595,3 +595,225 @@
   color: var(--color-red);
   flex-shrink: 0;
 }
+
+/* ── Schedule Builder ──────────────────────────────────────── */
+.scheduleBtn {
+  padding: 0.75rem 1.5rem;
+  background-color: transparent;
+  color: var(--color-red);
+  border: 1px solid var(--color-red);
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.scheduleBtn:hover {
+  background-color: var(--color-red);
+  color: #fff;
+}
+
+.scheduleModalContent {
+  max-width: 780px;
+}
+
+.modalSubtitle {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+.scheduleSection {
+  margin-top: 0.5rem;
+}
+
+.scheduleHint {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin-bottom: 0.75rem;
+}
+
+.dayPicker {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.dayPill {
+  padding: 0.4rem 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dayPill:hover {
+  border-color: var(--color-red);
+  color: var(--color-text-primary);
+}
+
+.dayPillActive {
+  background-color: var(--color-red);
+  border-color: var(--color-red);
+  color: #fff;
+}
+
+.dayTimesSection {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.dayTimesHeader {
+  width: 90px;
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  padding-top: 0.5rem;
+}
+
+.dayTimesList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.dayTimeRow {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.timeInput {
+  width: 150px !important;
+}
+
+.removeTimeBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.removeTimeBtn:hover {
+  color: var(--color-red);
+}
+
+.addTimeBtn {
+  background: none;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.625rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.addTimeBtn:hover {
+  border-color: var(--color-red);
+  color: var(--color-red);
+}
+
+.noDaysHint {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+.schedulePreview {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.schedulePreview svg {
+  color: var(--color-red);
+  flex-shrink: 0;
+}
+
+.schedulePreviewWarn {
+  color: #f59e0b;
+  font-size: 0.875rem;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.seriesBanner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.seriesBannerLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.seriesScopeToggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.seriesScopeBtn {
+  padding: 0.375rem 0.875rem;
+  background: none;
+  border: none;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.seriesScopeBtn:hover {
+  background-color: var(--color-grey);
+  color: var(--color-text-primary);
+}
+
+.seriesScopeBtnActive {
+  background-color: var(--color-red);
+  color: #fff;
+  font-weight: 600;
+}
+
+.seriesScopeBtnActive:hover {
+  background-color: var(--color-red-hover);
+}

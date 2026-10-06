@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from '../contexts/LocationContext';
+import { api } from '../utils/api';
 import styles from './AttendanceTracking.module.css';
 
 interface CheckIn {
@@ -38,7 +39,8 @@ const AttendanceTracking: React.FC = () => {
     checkInsByProgram: {}
   });
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('today');
+  const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('week');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -55,35 +57,25 @@ const AttendanceTracking: React.FC = () => {
 
   const loadCheckIns = async () => {
     setLoading(true);
+    setError(null);
     try {
       const locationParam = isAllLocations ? 'all' : selectedLocation?.id;
-      let url = `/api/check-ins?locationId=${locationParam}`;
+      let endpoint = `/check-ins?locationId=${locationParam}`;
 
       if (dateRange === 'today') {
-        url = `/api/check-ins/today?locationId=${locationParam}`;
+        endpoint = `/check-ins/today?locationId=${locationParam}`;
       } else {
         const dates = getDateRange();
-        if (dates.start) url += `&startDate=${dates.start}`;
-        if (dates.end) url += `&endDate=${dates.end}`;
+        if (dates.start) endpoint += `&startDate=${dates.start}`;
+        if (dates.end) endpoint += `&endDate=${dates.end}`;
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) {
-        console.error('Check-ins API error:', response.status);
-        return;
-      }
-
-      const data = await response.json();
+      const data = await api.get(endpoint);
       if (Array.isArray(data)) {
         setCheckIns(data);
       }
-    } catch (error) {
-      console.error('Error loading check-ins:', error);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load check-ins');
     } finally {
       setLoading(false);
     }
@@ -93,22 +85,11 @@ const AttendanceTracking: React.FC = () => {
     try {
       const locationParam = isAllLocations ? 'all' : selectedLocation?.id;
       const dates = getDateRange();
-      let url = `/api/check-ins/stats?locationId=${locationParam}`;
-      if (dates.start) url += `&startDate=${dates.start}`;
-      if (dates.end) url += `&endDate=${dates.end}`;
+      let endpoint = `/check-ins/stats?locationId=${locationParam}`;
+      if (dates.start) endpoint += `&startDate=${dates.start}`;
+      if (dates.end) endpoint += `&endDate=${dates.end}`;
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) {
-        console.error('Stats API error:', response.status);
-        return;
-      }
-
-      const data = await response.json();
+      const data = await api.get(endpoint);
       if (data && typeof data === 'object') {
         setStats({
           totalCheckIns: data.totalCheckIns ?? 0,
@@ -182,17 +163,9 @@ const AttendanceTracking: React.FC = () => {
     if (!confirm('Are you sure you want to delete this check-in?')) return;
 
     try {
-      const response = await fetch(`/api/check-ins/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
-        setCheckIns(checkIns.filter(c => c.id !== id));
-        loadStats();
-      }
+      await api.delete(`/check-ins/${id}`);
+      setCheckIns(checkIns.filter(c => c.id !== id));
+      loadStats();
     } catch (error) {
       console.error('Error deleting check-in:', error);
     }
@@ -312,6 +285,8 @@ const AttendanceTracking: React.FC = () => {
       <div className={styles.tableContainer}>
         {loading ? (
           <div className={styles.loading}>Loading check-ins...</div>
+        ) : error ? (
+          <div className={styles.empty} style={{ color: '#ef4444' }}>Error: {error}</div>
         ) : checkIns.length === 0 ? (
           <div className={styles.empty}>No check-ins found for the selected period</div>
         ) : (

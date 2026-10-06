@@ -1,13 +1,23 @@
-import { Router } from 'express';
+import { Router, Request } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { get, run } from '../models/database';
 import { User } from '../types';
+import { authenticateToken, authorizeAdmin } from '../middleware/auth';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET!;
 
-router.post('/register', async (req, res) => {
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/register', authenticateToken, authorizeAdmin, async (req, res) => {
   try {
     const { username, email, password, role, firstName, lastName } = req.body;
 
@@ -45,7 +55,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -76,6 +86,15 @@ router.post('/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
     res.json({
       token,
       user: {
@@ -85,6 +104,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
         firstName: user.firstName,
         lastName: user.lastName,
+        mustChangePassword: !!(user as any).mustChangePassword,
       },
     });
   } catch (error) {
@@ -122,29 +142,88 @@ router.post('/refresh', async (req, res) => {
   }
 });
 
+// Restore session from HttpOnly cookie (called on page load)
+router.get('/me', async (req, res) => {
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).json({ error: 'No session' });
+
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    const user = await get('SELECT id, username, email, role, "firstName", "lastName", "mustChangePassword" FROM users WHERE id = ?', [decoded.id]);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    res.json({ token, user: { ...user, mustChangePassword: !!user.mustChangePassword } });
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired session' });
+  }
+});
+
+router.post('/change-password', authenticateToken, async (req: any, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password are required' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+
+    const user: any = await get('SELECT * FROM users WHERE id = ?', [req.user!.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const isValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isValid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await run('UPDATE users SET password = ?, "mustChangePassword" = false, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?', [hashed, req.user!.id]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Clear the session cookie
+router.post('/logout', (_req, res) => {
+  res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
+  res.json({ success: true });
+});
+
 router.post('/init-admin', async (req, res) => {
   try {
+    const initSecret = process.env.INIT_ADMIN_SECRET;
+
+    // Endpoint is disabled unless INIT_ADMIN_SECRET is explicitly set in the environment
+    if (!initSecret) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const { secret, password } = req.body;
+
+    if (!secret || secret !== initSecret) {
+      return res.status(403).json({ error: 'Invalid secret' });
+    }
+
+    if (!password || password.length < 12) {
+      return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    }
+
     const existingAdmin = await get('SELECT id FROM users WHERE role = ?', ['admin']);
 
     if (existingAdmin) {
       return res.status(409).json({ error: 'Admin user already exists' });
     }
 
-    const hashedPassword = await bcrypt.hash('admin123', 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     const result = await run(
       'INSERT INTO users (username, email, password, role, firstName, lastName) VALUES (?, ?, ?, ?, ?, ?)',
       ['admin', 'admin@dragondesk.com', hashedPassword, 'admin', 'System', 'Administrator']
     );
 
-    res.status(201).json({
-      message: 'Default admin user created successfully',
-      credentials: {
-        username: 'admin',
-        password: 'admin123',
-        note: 'Please change this password immediately',
-      },
-    });
+    res.status(201).json({ message: 'Admin user created.', userId: result.id });
   } catch (error) {
     console.error('Init admin error:', error);
     res.status(500).json({ error: 'Internal server error' });

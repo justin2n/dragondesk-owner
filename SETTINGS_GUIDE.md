@@ -12,6 +12,44 @@ The Settings page provides comprehensive configuration options for administrator
 
 ## Settings Sections
 
+Settings are grouped in the sidebar by the product they configure:
+
+| Group | Tabs |
+|---|---|
+| General | Branding, Appearance |
+| Gym Settings | Locations, Membership Plans, Programs |
+| DragonDesk: Engage | Email Settings, SMS (Twilio), Admin Email, DKIM Authentication |
+| DragonDesk: Social | Social Accounts |
+| DragonDesk: Optimize | Experiment Settings |
+| DragonDesk: Outreach | Telephony |
+| Integrations | MyStudio API, API Integrations, Lead Forms |
+| Billing | Stripe Payments, Point of Sale |
+| Administration | User Management, Database |
+
+Engage owns both email and SMS, since it sends those campaigns. Outreach places
+AI voice calls; it has no platform-level telephony settings yet, and its tab
+says so rather than presenting empty fields.
+
+### DragonDesk: Optimize — Experiment Settings
+
+Controls how Optimize decides an experiment has a winner. Studio-wide, stored in
+`app_settings`, and applied everywhere significance is computed — the analytics
+view, the notification sweep, and the AI assistant.
+
+**Confidence Threshold** (90% / 95% / 99%, default 95%)
+The bar a test must clear before a variant is called the winner. A lower bar
+calls winners sooner but is wrong more often.
+
+**Minimum Data** (default: 30 visitors per variant, 5 total conversions)
+Below these amounts no verdict is attempted — small samples swing too wildly to
+mean anything. Until an experience clears both, its analytics report how much
+more data it needs instead of a verdict.
+
+Changing these re-judges running experiments from that point on. Experiments
+already stamped significant keep that record: it reflects the bar in force when
+they crossed it, and is not rewritten.
+
+
 ### 1. MyStudio API Integration
 
 Connect DragonDesk CRM with MyStudio for seamless data synchronization.
