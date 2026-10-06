@@ -38,8 +38,12 @@ const tryRefresh = (): Promise<boolean> => {
   return refreshPromise;
 };
 
+// Logged-out pages. App-wide providers (e.g. LocationContext) still call the API
+// on them and get a 401; redirecting would bounce a reset link to the login form.
+const PUBLIC_AUTH_PATHS = ['/login', '/forgot', '/reset'];
+
 const redirectToLogin = () => {
-  if (window.location.pathname === '/login') return;
+  if (PUBLIC_AUTH_PATHS.includes(window.location.pathname)) return;
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   window.location.href = '/login';
