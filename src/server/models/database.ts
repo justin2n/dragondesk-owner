@@ -838,31 +838,10 @@ async function initializeDatabase() {
       console.log('Inserted default programs');
     }
 
-    // Seed default belt requirements
-    const beltResult = await client.query('SELECT COUNT(*) as count FROM belt_requirements');
-    if (parseInt(beltResult.rows[0].count) === 0) {
-      await client.query(`
-        INSERT INTO belt_requirements ("programType", "fromRanking", "toRanking", "minClassAttendance", "minTimeInRankDays") VALUES
-        ('BJJ', 'White', 'Blue', 100, 365),
-        ('BJJ', 'Blue', 'Purple', 150, 730),
-        ('BJJ', 'Purple', 'Brown', 150, 730),
-        ('BJJ', 'Brown', 'Black', 150, 730),
-        ('Taekwondo', 'White', 'Yellow', 30, 90),
-        ('Taekwondo', 'Yellow', 'Orange', 40, 120),
-        ('Taekwondo', 'Orange', 'Green', 40, 120),
-        ('Taekwondo', 'Green', 'Purple', 50, 150),
-        ('Taekwondo', 'Purple', 'Blue', 50, 150),
-        ('Taekwondo', 'Blue', 'Red', 60, 180),
-        ('Taekwondo', 'Red', 'Brown', 60, 180),
-        ('Taekwondo', 'Brown', 'Il Dan Bo', 80, 270),
-        ('Taekwondo', 'Il Dan Bo', 'Black', 100, 365),
-        ('Muay Thai', 'White', 'Green', 50, 180),
-        ('Muay Thai', 'Green', 'Purple', 60, 180),
-        ('Muay Thai', 'Purple', 'Blue', 80, 270),
-        ('Muay Thai', 'Blue', 'Red', 100, 365)
-      `);
-      console.log('Inserted default belt requirements');
-    }
+    // No default belt requirements: the old seed used program names ('BJJ',
+    // 'Taekwondo', 'Muay Thai') that belt_requirements' programType CHECK rejects,
+    // so on any database with an empty table it threw and aborted the rest of
+    // this init — every later migration was silently skipped.
 
     // Behavior Tracking — site config
     await client.query(`
