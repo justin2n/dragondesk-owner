@@ -4,6 +4,8 @@ import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { parseUtms } from '../utils/attribution';
 import { verifyClickSignature } from '../utils/emailClickTracking';
+import { getAgentConfig, publicAgentConfig } from '../services/inboundAgent';
+import { buildInboundAgentWidget } from '../services/inboundAgentWidget';
 
 const router = Router();
 
@@ -85,7 +87,15 @@ router.get('/script.js', async (req: Request, res: Response) => {
   const proto = req.get('x-forwarded-proto') || req.protocol;
   const endpoint = `${proto}://${req.get('host')}/api/tracking`;
 
-  const script = buildTrackingScript(token, endpoint);
+  let script = buildTrackingScript(token, endpoint);
+
+  // Outreach website chat agent rides along when it's switched on.
+  try {
+    const agent = await getAgentConfig();
+    if (agent.enabled) script += '\n' + buildInboundAgentWidget(publicAgentConfig(agent));
+  } catch (err) {
+    console.error('Inbound agent widget error (non-fatal):', err);
+  }
 
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Cache-Control', 'public, max-age=300');
@@ -97,6 +107,8 @@ router.get('/script.js', async (req: Request, res: Response) => {
 function buildTrackingScript(token: string, endpoint: string): string {
   return `/* DragonDesk Behavior Tracking v1 */
 (function(w,d){
+  /* The chat agent loads form pages in a hidden frame; don't track those. */
+  if(w.name==='dd-agent-frame')return;
   var TOKEN='${token}';
   var EP='${endpoint}';
 
