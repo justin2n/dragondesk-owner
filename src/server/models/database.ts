@@ -889,6 +889,49 @@ async function initializeDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_visitor ON tracking_events("visitorId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tracking_events_type ON tracking_events("eventType")`);
 
+    // Outreach: inbound website chat agent. One config row; the widget ships
+    // inside the tracking script, so it is keyed to the site's tracking token.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inbound_agent_config (
+        id SERIAL PRIMARY KEY,
+        enabled BOOLEAN DEFAULT false,
+        "agentName" TEXT,
+        "businessName" TEXT,
+        greeting TEXT,
+        "trialOffer" TEXT,
+        "businessInfo" TEXT,
+        "aiInstructions" TEXT,
+        "accentColor" TEXT,
+        "submitNativeForm" BOOLEAN DEFAULT true,
+        "formPageUrl" TEXT,
+        "formSelector" TEXT,
+        "fieldMap" JSONB DEFAULT '{}'::jsonb,
+        "updatedBy" INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // One row per website chat. messages holds the full Anthropic message
+    // history (including tool calls) so each turn can resume it as-is.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inbound_chats (
+        id TEXT PRIMARY KEY,
+        token TEXT NOT NULL,
+        "visitorId" TEXT,
+        "pageUrl" TEXT,
+        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        "userTurns" INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'open',
+        "memberId" INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        "leadData" JSONB,
+        "nativeStatus" TEXT,
+        "nativeDetail" TEXT,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_inbound_chats_updated ON inbound_chats("updatedAt" DESC)`);
+
     // Performance indexes for the Contacts/Events list queries (filter + sort)
     // and for participant→account-holder lookups (used heavily during CSV import).
     await client.query(`CREATE INDEX IF NOT EXISTS idx_members_location ON members("locationId")`);

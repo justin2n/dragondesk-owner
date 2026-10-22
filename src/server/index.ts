@@ -51,6 +51,7 @@ import posRoutes from './routes/pos';
 import adminEmailsRoutes from './routes/admin-emails';
 import salesSignalsRoutes from './routes/sales-signals';
 import alertsRoutes from './routes/alerts';
+import { publicRouter as inboundAgentPublicRoutes, adminRouter as inboundAgentRoutes } from './routes/inbound-agent';
 import { sweepRunningTests } from './services/abSignificance';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
 import { serverError } from './utils/errors';
@@ -351,6 +352,15 @@ const abAnalyticsLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false,
 });
 app.use('/api/kiosk', kioskLimiter);
+// Website chat agent: every message is a model call, so cap it well below the
+// general tracking limit.
+const agentChatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  message: { error: 'You are sending messages too quickly. Please wait a moment.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+app.use('/api/tracking/agent/chat', agentChatLimiter);
 app.use('/api/tracking', trackingLimiter);
 app.use('/api/ab-analytics', abAnalyticsLimiter);
 
@@ -391,7 +401,9 @@ app.use('/api/qr-codes', qrCodesRoutes);
 app.use('/api/kiosk', kioskRoutes);
 app.use('/api/proxy', proxyRoutes);
 app.use('/api/assistant', assistantRoutes);
+app.use('/api/tracking/agent', inboundAgentPublicRoutes);
 app.use('/api/tracking', trackingRoutes);
+app.use('/api/inbound-agent', inboundAgentRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/wallet-passes', walletPassesRoutes);
 app.use('/api/import-csv', importCsvRoutes);

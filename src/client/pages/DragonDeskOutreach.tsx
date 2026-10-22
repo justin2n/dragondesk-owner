@@ -2,13 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { Campaign, Audience } from '../types';
 import { useToast } from '../components/Toast';
+import WebsiteChatAgent from '../components/WebsiteChatAgent';
 import styles from './DragonDeskOutreach.module.css';
 
 type ViewMode = 'list' | 'create' | 'edit';
+type Tab = 'calls' | 'website';
 
 const DragonDeskOutreach = () => {
   const { toast, confirm } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [activeTab, setActiveTab] = useState<Tab>('calls');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -320,14 +323,34 @@ Example:
   return (
     <div className={styles.container}>
       {viewMode === 'list' && (
-        <div className={styles.header}>
-          <h1 className={styles.title}>DragonDesk: Outreach</h1>
-          <p className={styles.subtitle}>AI-Powered Outbound Call Agent</p>
-        </div>
+        <>
+          <div className={styles.header}>
+            <h1 className={styles.title}>DragonDesk: Outreach</h1>
+            <p className={styles.subtitle}>AI agents for outbound calls and inbound website chat</p>
+          </div>
+          <div className={styles.tabs}>
+            <button
+              onClick={() => setActiveTab('calls')}
+              className={`${styles.tab} ${activeTab === 'calls' ? styles.activeTab : ''}`}
+            >
+              Call Campaigns
+            </button>
+            <button
+              onClick={() => setActiveTab('website')}
+              className={`${styles.tab} ${activeTab === 'website' ? styles.activeTab : ''}`}
+            >
+              Website Chat Agent
+            </button>
+          </div>
+        </>
       )}
 
       <div className={styles.content}>
-        {viewMode === 'list' ? renderCampaignsList() : renderCampaignEditor()}
+        {viewMode !== 'list'
+          ? renderCampaignEditor()
+          : activeTab === 'website'
+            ? <WebsiteChatAgent />
+            : renderCampaignsList()}
       </div>
     </div>
   );
