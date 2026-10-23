@@ -4,7 +4,7 @@ import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { parseUtms } from '../utils/attribution';
 import { verifyClickSignature } from '../utils/emailClickTracking';
-import { getAgentConfig, publicAgentConfig } from '../services/inboundAgent';
+import { listAgents, publicAgentConfig } from '../services/inboundAgent';
 import { buildInboundAgentWidget } from '../services/inboundAgentWidget';
 
 const router = Router();
@@ -89,10 +89,11 @@ router.get('/script.js', async (req: Request, res: Response) => {
 
   let script = buildTrackingScript(token, endpoint);
 
-  // Outreach website chat agent rides along when it's switched on.
+  // Outreach website chat agents ride along when any is switched on; the
+  // widget picks the one assigned to the page's domain.
   try {
-    const agent = await getAgentConfig();
-    if (agent.enabled) script += '\n' + buildInboundAgentWidget(publicAgentConfig(agent));
+    const live = (await listAgents()).filter(a => a.enabled);
+    if (live.length) script += '\n' + buildInboundAgentWidget({ agents: live.map(publicAgentConfig) });
   } catch (err) {
     console.error('Inbound agent widget error (non-fatal):', err);
   }

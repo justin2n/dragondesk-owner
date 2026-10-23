@@ -339,7 +339,7 @@ Example:
               onClick={() => setActiveTab('website')}
               className={`${styles.tab} ${activeTab === 'website' ? styles.activeTab : ''}`}
             >
-              Website Chat Agent
+              Website Chat Agents
             </button>
           </div>
         </>
