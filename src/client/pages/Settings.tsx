@@ -6,6 +6,7 @@ import { api } from '../utils/api';
 import { CheckIcon, WarningIcon, AddIcon, EditIcon, DeleteIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import styles from './Settings.module.css';
+import NotificationSettings from '../components/NotificationSettings';
 
 interface User {
   id: number;
@@ -1465,6 +1466,7 @@ const Settings = () => {
       tabs: [
         { id: 'branding', label: 'Branding' },
         { id: 'theme', label: 'Appearance' },
+        { id: 'notifications', label: 'Notifications' },
       ]
     },
     {
@@ -3347,6 +3349,8 @@ const Settings = () => {
               </div>
             </div>
           )}
+
+          {activeTab === 'notifications' && <NotificationSettings />}
 
           {activeTab === 'theme' && (
             <div className={styles.section}>

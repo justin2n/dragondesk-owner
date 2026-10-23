@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Outlet, Link, useLocation as useRouterLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Outlet, Link, useLocation as useRouterLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranding } from '../contexts/BrandingContext';
 import { useLocation } from '../contexts/LocationContext';
@@ -26,6 +26,7 @@ import {
 } from './Icons';
 import styles from './Layout.module.css';
 import AIAssistant from './AIAssistant';
+import { useToast } from './Toast';
 import defaultLogo from '../assets/dragondesk-logo.png';
 
 const Layout = () => {
@@ -47,6 +48,13 @@ const Layout = () => {
     setDismissedAlerts(updated);
     localStorage.setItem('dd_dismissed_alerts', JSON.stringify(updated));
   };
+
+  // In-app notifications (new leads). Shared across users; unread is per user.
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<{ id: number; title: string; body: string | null; link: string | null; createdAt: string; unread: boolean }[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const newestSeenId = useRef<number | null>(null);
 
   const visibleAlerts = alerts.filter(a => {
     const dismissedAt = dismissedAlerts[a.type];
@@ -98,6 +106,58 @@ const Layout = () => {
     const interval = setInterval(fetchAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Poll notifications every minute; toast anything that arrived since the last poll.
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/notifications', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.notifications || [];
+        if (newestSeenId.current !== null) {
+          list.filter((n: any) => n.id > newestSeenId.current! && n.unread).slice(0, 3).forEach((n: any) => toast(n.title, 'info'));
+        }
+        if (list.length) newestSeenId.current = Math.max(newestSeenId.current ?? 0, ...list.map((n: any) => n.id));
+        else if (newestSeenId.current === null) newestSeenId.current = 0;
+        setNotifications(list);
+        setUnreadCount(data.unread || 0);
+      } catch {}
+    };
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const toggleAlerts = () => {
+    const opening = !showAlerts;
+    setShowAlerts(opening);
+    if (opening && unreadCount > 0) {
+      // Clear the badge now; rows stay highlighted until the next poll.
+      setUnreadCount(0);
+      const token = localStorage.getItem('token');
+      fetch('/api/notifications/seen', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {} }).catch(() => {});
+    }
+  };
+
+  const openNotification = (link: string | null) => {
+    setShowAlerts(false);
+    if (link) navigate(link);
+  };
+
+  const timeAgo = (iso: string) => {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  };
+
+  const bellCount = visibleAlerts.length + unreadCount;
 
   const navItems = [
     { path: '/', label: 'Dashboard', Icon: DashboardIcon },
@@ -185,20 +245,39 @@ const Layout = () => {
             )}
             <div className={styles.bellWrapper}>
               <button
-                className={`${styles.bellBtn} ${visibleAlerts.length > 0 ? styles.bellActive : ''}`}
-                onClick={() => setShowAlerts(v => !v)}
-                aria-label="System alerts"
+                className={`${styles.bellBtn} ${bellCount > 0 ? styles.bellActive : ''}`}
+                onClick={toggleAlerts}
+                aria-label="Notifications"
               >
                 <BellIcon size={20} />
-                {visibleAlerts.length > 0 && isSidebarOpen && (
-                  <span className={styles.bellBadge}>{visibleAlerts.length}</span>
+                {bellCount > 0 && isSidebarOpen && (
+                  <span className={styles.bellBadge}>{bellCount}</span>
                 )}
-                {visibleAlerts.length > 0 && !isSidebarOpen && (
+                {bellCount > 0 && !isSidebarOpen && (
                   <span className={styles.bellDot} />
                 )}
               </button>
               {showAlerts && (
                 <div className={styles.alertDropdown}>
+                  <div className={styles.alertDropdownTitle}>New Leads</div>
+                  {notifications.length === 0 ? (
+                    <div className={styles.alertEmpty}>No new leads yet</div>
+                  ) : (
+                    <div className={styles.notificationList}>
+                      {notifications.slice(0, 8).map(n => (
+                        <button
+                          key={n.id}
+                          className={`${styles.notificationItem} ${n.unread ? styles.notificationUnread : ''}`}
+                          onClick={() => openNotification(n.link)}
+                        >
+                          <span className={styles.notificationTitle}>{n.title}</span>
+                          <span className={styles.notificationMeta}>
+                            {n.body ? `${n.body} - ` : ''}{timeAgo(n.createdAt)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className={styles.alertDropdownTitle}>System Alerts</div>
                   {visibleAlerts.length === 0 ? (
                     <div className={styles.alertEmpty}>No active alerts</div>

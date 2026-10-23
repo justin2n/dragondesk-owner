@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../models/database';
 import { authenticateToken, authorizeAdmin, AuthRequest } from '../middleware/auth';
 import { captureLead } from '../services/leadCapture';
+import { requestOrigin } from '../services/leadAlerts';
 import { getAgentConfig, saveAgentConfig, InboundAgentConfig } from '../services/inboundAgent';
 import { isValidEmail, normalizeEmail } from '../utils/validate';
 
@@ -87,6 +88,7 @@ async function runSignupTool(
   input: any,
   chat: any,
   cfg: InboundAgentConfig,
+  appUrl: string | null,
 ): Promise<{ result: string; isError: boolean; fields?: SignupFields; memberId?: number }> {
   const fields: SignupFields = {
     firstName: clean(input?.firstName, 80),
@@ -125,6 +127,7 @@ async function runSignupTool(
     source: 'Website Chat Agent',
     visitorId: chat.visitorId,
     trackingToken: chat.token,
+    appUrl,
   });
   if (!lead.ok) {
     return { result: lead.error, isError: true };
@@ -225,7 +228,7 @@ publicRouter.post('/chat', async (req: Request, res: Response) => {
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Unknown tool.', is_error: true });
           continue;
         }
-        const out = await runSignupTool(block.input, { ...chat, ...(signup ? { memberId: signup.memberId, leadData: signup.fields } : {}) }, cfg);
+        const out = await runSignupTool(block.input, { ...chat, ...(signup ? { memberId: signup.memberId, leadData: signup.fields } : {}) }, cfg, requestOrigin(req));
         if (out.fields && out.memberId) {
           signup = { fields: out.fields, memberId: out.memberId };
           if (cfg.submitNativeForm) action = { type: 'submit_native_form', fields: out.fields };

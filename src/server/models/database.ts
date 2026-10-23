@@ -932,6 +932,35 @@ async function initializeDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_inbound_chats_updated ON inbound_chats("updatedAt" DESC)`);
 
+    // In-app notifications (the sidebar bell). Shared by every user; each
+    // user's users."notificationsSeenAt" marks what they have already seen.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT,
+        link TEXT,
+        "memberId" INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications("createdAt" DESC)`);
+
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "notificationsSeenAt" TIMESTAMP`);
+
+    // Which alerts go out, and to whom. Single row.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS alert_settings (
+        id SERIAL PRIMARY KEY,
+        "newLeadInApp" BOOLEAN DEFAULT true,
+        "newLeadEmail" BOOLEAN DEFAULT false,
+        "newLeadRecipients" TEXT DEFAULT '',
+        "updatedBy" INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Performance indexes for the Contacts/Events list queries (filter + sort)
     // and for participant→account-holder lookups (used heavily during CSV import).
     await client.query(`CREATE INDEX IF NOT EXISTS idx_members_location ON members("locationId")`);

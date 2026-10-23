@@ -1,6 +1,7 @@
 import { isValidEmail, normalizeEmail } from '../utils/validate';
 import { run, get, pool } from '../models/database';
 import { deriveChannel, hasAttribution, Utms } from '../utils/attribution';
+import { notifyNewLead } from './leadAlerts';
 
 export interface LeadInput {
   firstName: string;
@@ -15,6 +16,8 @@ export interface LeadInput {
   visitorId?: string | null;
   trackingToken?: string | null;
   attribution?: Utms | null;
+  // Public origin of this app, for the link in new-lead alert emails.
+  appUrl?: string | null;
 }
 
 export type LeadResult =
@@ -138,6 +141,8 @@ export async function captureLead(input: LeadInput): Promise<LeadResult> {
   } catch (attrErr) {
     console.error('Attribution capture error (non-fatal):', attrErr);
   }
+
+  if (!existing) notifyNewLead(memberId, source || 'Web Form', input.appUrl);
 
   return { ok: true, memberId, isNew: !existing, existingStatus: existing?.accountStatus ?? null };
 }
