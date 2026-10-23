@@ -1,4 +1,4 @@
-// Browser code for the Outreach website chat agent. Appended to the tracking
+// Browser code for the Outreach website chat agents. Appended to the tracking
 // script (routes/tracking.ts) when the agent is enabled, and relies on the
 // globals that script exposes: __ddToken, __ddEP, __ddVid.
 //
@@ -13,11 +13,19 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
 (function(w,d){
   if(w.name==='dd-agent-frame'||w.__ddAgentLoaded)return;
   w.__ddAgentLoaded=1;
-  var CFG=__DD_AGENT_CFG__;
+  var ALL=__DD_AGENT_CFG__;
   var TOKEN=w.__ddToken,EP=w.__ddEP,VID=w.__ddVid;
   if(!TOKEN||!EP)return;
+  /* Pick this site's agent: one listing this domain (or a parent domain),
+     else the catch-all with no domains. Same rule as the server. */
+  var HOST=location.hostname.toLowerCase().replace(/^www\./,'');
+  function covers(a){for(var i=0;i<a.domains.length;i++){var dm=a.domains[i];if(HOST===dm||HOST.slice(-dm.length-1)==='.'+dm)return true;}return false;}
+  var CFG=null;
+  (ALL.agents||[]).forEach(function(a){if(!CFG&&a.domains&&a.domains.length&&covers(a))CFG=a;});
+  if(!CFG)(ALL.agents||[]).forEach(function(a){if(!CFG&&(!a.domains||!a.domains.length))CFG=a;});
+  if(!CFG)return;
   var AEP=EP+'/agent';
-  var SKEY='_dd_agent';
+  var SKEY='_dd_agent_'+CFG.id;
 
   var state;
   try{state=JSON.parse(sessionStorage.getItem(SKEY)||'{}')||{};}catch(e){state={};}
@@ -120,7 +128,7 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     if(!text||busy)return;
     input.value='';grow();
     state.msgs.push({r:'v',t:text});busy=true;save();render();
-    post('/chat',{token:TOKEN,vid:VID,chatId:state.chatId,message:text,pageUrl:location.href})
+    post('/chat',{token:TOKEN,vid:VID,agentId:CFG.id,chatId:state.chatId,message:text,pageUrl:location.href})
       .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
       .then(function(res){
         busy=false;

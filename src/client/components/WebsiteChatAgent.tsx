@@ -4,11 +4,15 @@ import { useToast } from './Toast';
 import outreach from '../pages/DragonDeskOutreach.module.css';
 import styles from './WebsiteChatAgent.module.css';
 
-// DragonDesk: Outreach — inbound website chat agent settings and conversations.
+// DragonDesk: Outreach — inbound website chat agents (one per website, or a
+// catch-all), their settings, and conversations.
 
 type FieldKey = 'firstName' | 'lastName' | 'fullName' | 'email' | 'phone' | 'program' | 'message';
 
 interface AgentConfig {
+  id: number;
+  name: string;
+  domains: string[];
   enabled: boolean;
   agentName: string;
   businessName: string;
@@ -23,8 +27,14 @@ interface AgentConfig {
   fieldMap: Partial<Record<FieldKey, string>>;
 }
 
+interface AgentRow extends AgentConfig {
+  stats: { chats: number; signups: number };
+}
+
 interface ChatRow {
   id: string;
+  agentId: number | null;
+  agentLabel: string | null;
   pageUrl: string | null;
   userTurns: number;
   status: 'open' | 'lead_captured';
@@ -69,30 +79,46 @@ const pathOf = (url: string | null) => {
 };
 
 const WebsiteChatAgent = () => {
-  const { toast } = useToast();
+  const { toast, confirm } = useToast();
+  const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [config, setConfig] = useState<AgentConfig | null>(null);
+  const [domainsText, setDomainsText] = useState('');
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [chats, setChats] = useState<ChatRow[]>([]);
   const [stats, setStats] = useState({ chats: 0, signups: 0, nativeSubmitted: 0, nativeFailed: 0 });
   const [filter, setFilter] = useState<'all' | 'lead_captured'>('all');
+  const [agentFilter, setAgentFilter] = useState<number | 'all'>('all');
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const select = (agent: AgentConfig) => {
+    setSelectedId(agent.id);
+    setConfig({ ...agent, fieldMap: { ...agent.fieldMap } });
+    setDomainsText(agent.domains.join('\n'));
+    setShowAdvanced(Object.values(agent.fieldMap || {}).some(Boolean) || !!agent.formSelector);
+  };
+
+  const loadAgents = async (selectId?: number) => {
+    const data = await api.get('/inbound-agent/agents');
+    setAgents(data.agents);
+    setTrackingToken(data.trackingToken);
+    setAiConfigured(data.aiConfigured);
+    const want = data.agents.find((a: AgentRow) => a.id === (selectId ?? selectedId)) || data.agents[0];
+    if (want) select(want);
+  };
 
   useEffect(() => {
     (async () => {
       try {
         // Creates the site's tracking token if it doesn't exist yet.
         await api.get('/tracking/config').catch(() => null);
-        const data = await api.get('/inbound-agent/settings');
-        setConfig(data.config);
-        setTrackingToken(data.trackingToken);
-        setAiConfigured(data.aiConfigured);
-        if (Object.values(data.config.fieldMap || {}).some(Boolean) || data.config.formSelector) setShowAdvanced(true);
+        await loadAgents();
       } catch (error: any) {
-        toast(error.message || 'Failed to load chat agent settings', 'error');
+        toast(error.message || 'Failed to load chat agents', 'error');
       } finally {
         setIsLoading(false);
       }
@@ -101,11 +127,14 @@ const WebsiteChatAgent = () => {
 
   useEffect(() => {
     loadChats();
-  }, [filter]);
+  }, [filter, agentFilter]);
 
   const loadChats = async () => {
     try {
-      const data = await api.get(`/inbound-agent/chats?limit=100${filter === 'lead_captured' ? '&status=lead_captured' : ''}`);
+      const params = new URLSearchParams({ limit: '100' });
+      if (filter === 'lead_captured') params.set('status', 'lead_captured');
+      if (agentFilter !== 'all') params.set('agentId', String(agentFilter));
+      const data = await api.get(`/inbound-agent/chats?${params}`);
       setChats(data.chats);
       setStats(data.stats);
     } catch (error) {
@@ -121,11 +150,12 @@ const WebsiteChatAgent = () => {
     if (!body) return;
     setIsSaving(true);
     try {
-      const data = await api.put('/inbound-agent/settings', body);
-      setConfig(data.config);
-      toast(data.config.enabled ? 'Saved. The chat agent is live on your site.' : 'Saved.', 'success');
+      const data = await api.put(`/inbound-agent/agents/${body.id}`, { ...body, domains: domainsText });
+      await loadAgents(data.agent.id);
+      toast(data.agent.enabled ? `Saved. "${data.agent.name}" is live.` : 'Saved.', 'success');
     } catch (error: any) {
-      toast(error.message || 'Failed to save settings', 'error');
+      toast(error.message || 'Failed to save agent', 'error');
+      if (next) setConfig(c => (c ? { ...c, enabled: !next.enabled } : c));
     } finally {
       setIsSaving(false);
     }
@@ -136,6 +166,34 @@ const WebsiteChatAgent = () => {
     const next = { ...config, enabled: !config.enabled };
     setConfig(next);
     save(next);
+  };
+
+  const addAgent = async () => {
+    try {
+      const data = await api.post('/inbound-agent/agents', {
+        name: 'New website',
+        // Start from the current agent's look so a second site isn't built from scratch.
+        accentColor: config?.accentColor,
+        agentName: config?.agentName,
+      });
+      await loadAgents(data.agent.id);
+      toast('Agent added. Set its website, fill in what it should know, then go live.', 'success');
+    } catch (error: any) {
+      toast(error.message || 'Failed to add agent', 'error');
+    }
+  };
+
+  const removeAgent = async () => {
+    if (!config) return;
+    if (!await confirm({ title: 'Delete Agent', message: `Delete "${config.name}"? Its past conversations are kept.`, confirmLabel: 'Delete', danger: true })) return;
+    try {
+      await api.delete(`/inbound-agent/agents/${config.id}`);
+      setSelectedId(null);
+      await loadAgents(agents.find(a => a.id !== config.id)?.id);
+      if (agentFilter === config.id) setAgentFilter('all');
+    } catch (error: any) {
+      toast(error.message || 'Failed to delete agent', 'error');
+    }
   };
 
   const openTranscript = async (id: string) => {
@@ -150,46 +208,48 @@ const WebsiteChatAgent = () => {
     ? `<script async src="${window.location.origin}/api/tracking/script.js?token=${trackingToken}"></script>`
     : '';
 
-  if (isLoading || !config) return <div className={outreach.loading}>Loading chat agent...</div>;
+  if (isLoading || !config) return <div className={outreach.loading}>Loading chat agents...</div>;
 
   return (
     <>
       <div className={outreach.pageHeader}>
         <div>
-          <h2 className={outreach.pageTitle}>Website Chat Agent</h2>
+          <h2 className={outreach.pageTitle}>Website Chat Agents</h2>
           <p className={outreach.pageSubtitle}>
-            An AI sales rep that chats with visitors on your website and signs them up for your trial offer
+            AI sales reps that chat with visitors on your websites and sign them up for your offer. Use one agent per website.
           </p>
         </div>
-        <div className={styles.headerActions}>
-          <span className={`${styles.status} ${config.enabled ? styles.live : ''}`}>
-            <span className={styles.dot} />
-            {config.enabled ? 'Live' : 'Off'}
-          </span>
-          <button onClick={toggleEnabled} className={config.enabled ? outreach.cancelBtn : outreach.primaryBtn} disabled={isSaving}>
-            {config.enabled ? 'Turn Off' : 'Go Live'}
-          </button>
-        </div>
+        <button onClick={addAgent} className={outreach.primaryBtn}>+ New Agent</button>
       </div>
 
       {!aiConfigured && (
         <div className={styles.warning}>
-          ANTHROPIC_API_KEY is not set on the server, so the agent cannot reply yet. Add it to the server environment before going live.
+          ANTHROPIC_API_KEY is not set on the server, so the agents cannot reply yet. Add it to the server environment before going live.
         </div>
       )}
 
-      <div className={styles.stats}>
-        <div className={styles.stat}><span className={styles.statValue}>{stats.chats}</span><span className={styles.statLabel}>Chats (30 days)</span></div>
-        <div className={styles.stat}><span className={styles.statValue}>{stats.signups}</span><span className={styles.statLabel}>Trial signups</span></div>
-        <div className={styles.stat}><span className={styles.statValue}>{stats.chats ? Math.round((stats.signups / stats.chats) * 100) : 0}%</span><span className={styles.statLabel}>Chat to signup</span></div>
-        <div className={styles.stat}><span className={styles.statValue}>{stats.nativeSubmitted}</span><span className={styles.statLabel}>Site forms submitted</span></div>
-        <div className={styles.stat}><span className={`${styles.statValue} ${stats.nativeFailed ? styles.bad : ''}`}>{stats.nativeFailed}</span><span className={styles.statLabel}>Site forms failed</span></div>
+      <div className={styles.agentCards}>
+        {agents.map(a => (
+          <button
+            key={a.id}
+            type="button"
+            className={`${styles.agentCard} ${a.id === selectedId ? styles.agentCardActive : ''}`}
+            onClick={() => select(a)}
+          >
+            <span className={styles.agentCardTop}>
+              <span className={styles.agentCardName}>{a.name}</span>
+              <span className={`${styles.status} ${a.enabled ? styles.live : ''}`}><span className={styles.dot} />{a.enabled ? 'Live' : 'Off'}</span>
+            </span>
+            <span className={styles.agentCardSites}>{a.domains.length ? a.domains.join(', ') : 'All other websites'}</span>
+            <span className={styles.agentCardStats}>{a.stats.chats} chats, {a.stats.signups} signups (30 days)</span>
+          </button>
+        ))}
       </div>
 
       <div className={outreach.info}>
         <p className={styles.infoText}>
-          The agent runs through your DragonDesk tracking snippet. If it is already in your website's <code>&lt;head&gt;</code>, there is nothing else to
-          install. Changes reach your site within about 5 minutes.
+          Agents run through your DragonDesk tracking snippet. Put the same snippet in the <code>&lt;head&gt;</code> of each website; each page shows the
+          agent assigned to its domain, or the agent with no websites listed if none matches. Changes reach your sites within about 5 minutes.
         </p>
         {snippet && (
           <div className={styles.snippet}>
@@ -205,10 +265,46 @@ const WebsiteChatAgent = () => {
         )}
       </div>
 
+      <div className={styles.editorBar}>
+        <h3 className={styles.sectionTitle}>{config.name}</h3>
+        <div className={styles.headerActions}>
+          <span className={`${styles.status} ${config.enabled ? styles.live : ''}`}>
+            <span className={styles.dot} />
+            {config.enabled ? 'Live' : 'Off'}
+          </span>
+          <button onClick={toggleEnabled} className={config.enabled ? outreach.cancelBtn : outreach.primaryBtn} disabled={isSaving}>
+            {config.enabled ? 'Turn Off' : 'Go Live'}
+          </button>
+          {agents.length > 1 && (
+            <button onClick={removeAgent} className={outreach.deleteBtn} disabled={isSaving}>Delete</button>
+          )}
+        </div>
+      </div>
+
       <form
         className={styles.settings}
         onSubmit={(e) => { e.preventDefault(); save(); }}
       >
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Website</h3>
+          <div className={styles.row}>
+            <div className={outreach.formGroup}>
+              <label>Label</label>
+              <input className={outreach.input} value={config.name} maxLength={80}
+                onChange={(e) => update('name', e.target.value)} placeholder="e.g., Dragon Gym website" />
+              <span className={styles.hint}>Only shown here, to tell your agents apart.</span>
+            </div>
+            <div className={outreach.formGroup}>
+              <label>Websites</label>
+              <textarea className={outreach.textarea} rows={2} value={domainsText} style={{ minHeight: 0 }}
+                onChange={(e) => setDomainsText(e.target.value)} placeholder={'dragongym.com'} />
+              <span className={styles.hint}>
+                One domain per line. Covers www and other subdomains. Leave empty to use this agent on any website no other agent claims.
+              </span>
+            </div>
+          </div>
+        </section>
+
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Agent</h3>
           <div className={styles.row}>
@@ -324,10 +420,29 @@ const WebsiteChatAgent = () => {
       <div className={styles.chatsHeader}>
         <h3 className={styles.sectionTitle}>Conversations</h3>
         <div className={styles.filters}>
+          {agents.length > 1 && (
+            <select
+              className={styles.filterSelect}
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10))}
+              aria-label="Filter by agent"
+            >
+              <option value="all">All agents</option>
+              {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          )}
           <button className={`${styles.filterBtn} ${filter === 'all' ? styles.filterActive : ''}`} onClick={() => setFilter('all')}>All</button>
           <button className={`${styles.filterBtn} ${filter === 'lead_captured' ? styles.filterActive : ''}`} onClick={() => setFilter('lead_captured')}>Signups</button>
           <button className={styles.filterBtn} onClick={loadChats}>Refresh</button>
         </div>
+      </div>
+
+      <div className={styles.stats}>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.chats}</span><span className={styles.statLabel}>Chats (30 days)</span></div>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.signups}</span><span className={styles.statLabel}>Signups</span></div>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.chats ? Math.round((stats.signups / stats.chats) * 100) : 0}%</span><span className={styles.statLabel}>Chat to signup</span></div>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.nativeSubmitted}</span><span className={styles.statLabel}>Site forms submitted</span></div>
+        <div className={styles.stat}><span className={`${styles.statValue} ${stats.nativeFailed ? styles.bad : ''}`}>{stats.nativeFailed}</span><span className={styles.statLabel}>Site forms failed</span></div>
       </div>
 
       {chats.length === 0 ? (
@@ -336,7 +451,7 @@ const WebsiteChatAgent = () => {
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
-              <tr><th>Last message</th><th>Visitor</th><th>Opened with</th><th>Page</th><th>Messages</th><th>Status</th></tr>
+              <tr><th>Last message</th><th>Visitor</th><th>Opened with</th>{agents.length > 1 && <th>Agent</th>}<th>Page</th><th>Messages</th><th>Status</th></tr>
             </thead>
             <tbody>
               {chats.map(c => {
@@ -346,6 +461,7 @@ const WebsiteChatAgent = () => {
                     <td className={styles.nowrap}>{formatDate(c.updatedAt)}</td>
                     <td>{name ? <><div>{name}</div><div className={styles.sub}>{c.email || c.leadData?.email}</div></> : <span className={styles.sub}>Anonymous</span>}</td>
                     <td className={styles.preview}>{c.firstMessage}</td>
+                    {agents.length > 1 && <td className={styles.sub}>{c.agentLabel || 'Deleted agent'}</td>}
                     <td className={styles.sub}>{pathOf(c.pageUrl)}</td>
                     <td>{c.userTurns}</td>
                     <td>

@@ -385,6 +385,84 @@
   border: 1px dashed var(--color-border);
 }
 
+.agentCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.agentCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-align: left;
+  padding: 1rem 1.25rem;
+  background: var(--color-dark-grey);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-text-primary);
+  transition: border-color 0.15s;
+}
+
+.agentCard:hover {
+  border-color: var(--color-text-secondary);
+}
+
+.agentCardActive,
+.agentCardActive:hover {
+  border-color: var(--color-red);
+  box-shadow: 0 0 0 1px var(--color-red);
+}
+
+.agentCardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.agentCardName {
+  font-weight: 600;
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentCardSites {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentCardStats {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.editorBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.filterSelect {
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-dark-grey);
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+}
+
 @media (max-width: 768px) {
   .row {
     grid-template-columns: 1fr;

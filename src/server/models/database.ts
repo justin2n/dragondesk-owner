@@ -932,6 +932,20 @@ async function initializeDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_inbound_chats_updated ON inbound_chats("updatedAt" DESC)`);
 
+    // Multiple chat agents: inbound_agent_config now holds one row per agent,
+    // each assigned to the websites (domains) it appears on.
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS name TEXT`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS domains TEXT DEFAULT ''`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    const hadAgentId = await client.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'inbound_chats' AND column_name = 'agentId'`
+    );
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "agentId" INTEGER REFERENCES inbound_agent_config(id) ON DELETE SET NULL`);
+    if (hadAgentId.rows.length === 0) {
+      // One-time: chats from before multiple agents belong to the original agent.
+      await client.query(`UPDATE inbound_chats SET "agentId" = (SELECT MIN(id) FROM inbound_agent_config) WHERE "agentId" IS NULL`);
+    }
+
     // In-app notifications (the sidebar bell). Shared by every user; each
     // user's users."notificationsSeenAt" marks what they have already seen.
     await client.query(`
