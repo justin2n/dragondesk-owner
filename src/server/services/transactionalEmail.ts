@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { sendAdminEmail, isSendgridConfigured } from './sendgrid';
 
 // Platform email (password resets) via Resend on the verified dragondeskapp.com
 // domain — the same setup as DragonDesk: Optimize, with this app's own API key.
@@ -18,7 +19,7 @@ function client(): Resend | null {
 const FROM = () => process.env.EMAIL_FROM || 'DragonDesk <noreply@dragondeskapp.com>';
 export const appUrl = (fallback: string) => (process.env.APP_URL || fallback).replace(/\/$/, '');
 
-const escapeHtml = (s: string) =>
+export const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 export async function sendPasswordResetEmail(to: string, username: string, link: string): Promise<void> {
@@ -49,4 +50,28 @@ export async function sendPasswordResetEmail(to: string, username: string, link:
     return;
   }
   console.log(`[email] password reset sent to ${to}`);
+}
+
+// Which transport platform notifications (lead alerts) will use: Resend when
+// RESEND_API_KEY is set, otherwise the SendGrid admin-email setup.
+export function platformEmailTransport(): 'resend' | 'sendgrid' | null {
+  if (process.env.RESEND_API_KEY) return 'resend';
+  if (isSendgridConfigured()) return 'sendgrid';
+  return null;
+}
+
+// Sends a platform notification to staff. Throws when nothing is configured
+// or the provider rejects it, so callers can surface or log the reason.
+export async function sendPlatformEmail(opts: { to: string[]; subject: string; html: string; text: string }): Promise<void> {
+  const transport = platformEmailTransport();
+  if (transport === 'resend') {
+    const { error } = await client()!.emails.send({ from: FROM(), to: opts.to, subject: opts.subject, html: opts.html, text: opts.text });
+    if (error) throw new Error(error.message);
+    return;
+  }
+  if (transport === 'sendgrid') {
+    await sendAdminEmail(opts);
+    return;
+  }
+  throw new Error('No email provider configured. Set RESEND_API_KEY (or SENDGRID_API_KEY and SENDGRID_FROM_EMAIL).');
 }

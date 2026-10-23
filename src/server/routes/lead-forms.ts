@@ -3,6 +3,7 @@ import express from 'express';
 import { query, run, get, pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { captureLead } from '../services/leadCapture';
+import { requestOrigin } from '../services/leadAlerts';
 
 const router = express.Router();
 
@@ -28,6 +29,7 @@ router.post('/submit', async (req, res) => {
     const result = await captureLead({
       firstName, lastName, email, phone, programType, membershipAge,
       notes, locationId, source, visitorId, trackingToken, attribution,
+      appUrl: requestOrigin(req),
     });
     if (!result.ok) {
       return res.status(400).json({ error: result.error });

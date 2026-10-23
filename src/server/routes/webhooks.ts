@@ -4,6 +4,7 @@ import express from 'express';
 import { pool } from '../models/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { randomBytes, createHash } from 'crypto';
+import { notifyNewLead, requestOrigin } from '../services/leadAlerts';
 
 const router = express.Router();
 
@@ -136,6 +137,7 @@ router.post('/zapier/leads', async (req, res) => {
          VALUES ($1, NULL, 'Zapier webhook', 'created', NULL)`,
         [member.id]
       ).catch(() => {});
+      notifyNewLead(member.id, source === 'zapier' ? 'Zapier' : `Zapier (${source})`, requestOrigin(req));
     }
 
     // Retroactive identity resolution: back-fill any unlinked visitor_identities

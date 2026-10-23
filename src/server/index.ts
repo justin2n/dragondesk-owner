@@ -51,6 +51,8 @@ import posRoutes from './routes/pos';
 import adminEmailsRoutes from './routes/admin-emails';
 import salesSignalsRoutes from './routes/sales-signals';
 import alertsRoutes from './routes/alerts';
+import { notifyNewLead, requestOrigin } from './services/leadAlerts';
+import notificationsRoutes from './routes/notifications';
 import { publicRouter as inboundAgentPublicRoutes, adminRouter as inboundAgentRoutes } from './routes/inbound-agent';
 import { sweepRunningTests } from './services/abSignificance';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
@@ -412,6 +414,7 @@ app.use('/api/pos', posRoutes);
 app.use('/api/admin-emails', adminEmailsRoutes);
 app.use('/api/sales-signals', salesSignalsRoutes);
 app.use('/api/alerts', alertsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'DragonDesk CRM API is running' });
@@ -442,12 +445,13 @@ app.post('/api/public/lead', publicLeadLimiter, async (req, res) => {
       }
     }
 
-    await pool.query(
+    const inserted = await pool.query(
       `INSERT INTO members ("firstName", "lastName", email, phone, "accountStatus", "programType", "membershipAge", ranking, "companyName", notes, "gaClientId", "programInterestId")
        VALUES ($1, $2, $3, $4, 'lead', $8, 'Adult', 'White', $5, $6, $7, $9)
        ON CONFLICT (email) DO UPDATE SET
          "gaClientId" = COALESCE(members."gaClientId", EXCLUDED."gaClientId"),
-         "programInterestId" = COALESCE(members."programInterestId", EXCLUDED."programInterestId")`,
+         "programInterestId" = COALESCE(members."programInterestId", EXCLUDED."programInterestId")
+       RETURNING id, (xmax::text::bigint = 0) AS "wasInserted"`,
       [
         firstName.trim(),
         (lastName || '').trim(),
@@ -460,6 +464,8 @@ app.post('/api/public/lead', publicLeadLimiter, async (req, res) => {
         programInterestId,
       ]
     );
+    const row = inserted.rows[0];
+    if (row?.wasInserted) notifyNewLead(row.id, 'Website form', requestOrigin(req));
     res.json({ success: true });
   } catch (error: any) {
     serverError(res, error);
