@@ -463,6 +463,26 @@
   font-size: 0.85rem;
 }
 
+.radioGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.radio .smallNumber {
+  width: 84px;
+  padding: 0.45rem 0.6rem;
+}
+
 @media (max-width: 768px) {
   .row {
     grid-template-columns: 1fr;

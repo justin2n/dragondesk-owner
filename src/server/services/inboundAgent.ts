@@ -25,8 +25,20 @@ export interface InboundAgentConfig {
   formPageUrl: string;
   formSelector: string;
   fieldMap: Partial<Record<NativeField, string>>;
+  autoOpen: AutoOpen;
+  autoOpenDelay: number;
+  autoOpenScroll: number;
   updatedAt: string;
 }
+
+// When the chat opens without a click: never, after N seconds, or after the
+// visitor scrolls N% of the page.
+export type AutoOpen = 'off' | 'time' | 'scroll';
+const AUTO_OPEN: AutoOpen[] = ['off', 'time', 'scroll'];
+const clampInt = (v: unknown, min: number, max: number, fallback: number) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
 
 const DEFAULTS = {
   agentName: 'Website Assistant',
@@ -70,6 +82,9 @@ function normalize(row: any): InboundAgentConfig {
     formPageUrl: row.formPageUrl || '',
     formSelector: row.formSelector || '',
     fieldMap: (typeof row.fieldMap === 'string' ? JSON.parse(row.fieldMap) : row.fieldMap) || {},
+    autoOpen: AUTO_OPEN.includes(row.autoOpen) ? row.autoOpen : 'off',
+    autoOpenDelay: clampInt(row.autoOpenDelay, 1, 600, 10),
+    autoOpenScroll: clampInt(row.autoOpenScroll, 5, 100, 50),
     updatedAt: row.updatedAt,
   };
 }
@@ -125,6 +140,9 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
     submitNativeForm: typeof input.submitNativeForm === 'boolean' ? input.submitNativeForm : current.submitNativeForm,
     formPageUrl: str(input.formPageUrl, 1000) ?? current.formPageUrl,
     formSelector: str(input.formSelector, 300) ?? current.formSelector,
+    autoOpen: AUTO_OPEN.includes(input.autoOpen as AutoOpen) ? input.autoOpen as AutoOpen : current.autoOpen,
+    autoOpenDelay: input.autoOpenDelay === undefined ? current.autoOpenDelay : clampInt(input.autoOpenDelay, 1, 600, current.autoOpenDelay),
+    autoOpenScroll: input.autoOpenScroll === undefined ? current.autoOpenScroll : clampInt(input.autoOpenScroll, 5, 100, current.autoOpenScroll),
   };
 
   const result = await pool.query(
@@ -132,11 +150,13 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
        name=$1, domains=$2, enabled=$3, "agentName"=$4, "businessName"=$5, greeting=$6, "trialOffer"=$7,
        "businessInfo"=$8, "aiInstructions"=$9, "accentColor"=$10, "submitNativeForm"=$11,
        "formPageUrl"=$12, "formSelector"=$13, "fieldMap"=$14, "updatedBy"=$15,
+       "autoOpen"=$17, "autoOpenDelay"=$18, "autoOpenScroll"=$19,
        "updatedAt"=CURRENT_TIMESTAMP
      WHERE id=$16 RETURNING *`,
     [next.name, next.domains.join(','), next.enabled, next.agentName, next.businessName, next.greeting,
      next.trialOffer, next.businessInfo, next.aiInstructions, next.accentColor, next.submitNativeForm,
-     next.formPageUrl, next.formSelector, JSON.stringify(fieldMap), userId, id]
+     next.formPageUrl, next.formSelector, JSON.stringify(fieldMap), userId, id,
+     next.autoOpen, next.autoOpenDelay, next.autoOpenScroll]
   );
   return normalize(result.rows[0]);
 }
@@ -168,5 +188,8 @@ export function publicAgentConfig(cfg: InboundAgentConfig) {
     formPageUrl: cfg.formPageUrl,
     formSelector: cfg.formSelector,
     fieldMap: cfg.fieldMap,
+    autoOpen: cfg.autoOpen,
+    autoOpenDelay: cfg.autoOpenDelay,
+    autoOpenScroll: cfg.autoOpenScroll,
   };
 }

@@ -101,7 +101,9 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     sendBtn.disabled=busy;
   }
   function setOpen(open){
-    state.open=open;save();
+    state.open=open;
+    if(!open)state.closed=1; /* closed by the visitor: never auto-open again this visit */
+    save();
     panel.classList.toggle('hide',!open);
     launch.classList.toggle('open',open);
     launch.setAttribute('aria-expanded',open?'true':'false');
@@ -141,8 +143,25 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
       .catch(function(){busy=false;state.msgs.push({r:'e',t:'Connection problem. Please try again.'});save();render();});
   }
 
+  /* Auto-open after a delay or a scroll depth, at most once per visit. Phones
+     get the greeting bubble instead, since the open chat fills the screen. */
+  function nudge(){
+    if(state.open||state.closed||state.autoDone)return;
+    state.autoDone=1;save();
+    if(w.innerWidth<=480){if(CFG.greeting){teaser.classList.remove('hide');}}
+    else setOpen(true);
+  }
+  var waiting=!state.open&&!state.closed&&!state.autoDone;
   if(state.open)setOpen(true);
-  else if(!state.teased&&CFG.greeting){setTimeout(function(){if(!state.open&&!state.teased)teaser.classList.remove('hide');},8000);}
+  else if(CFG.autoOpen==='time'&&waiting){setTimeout(nudge,Math.max(1,CFG.autoOpenDelay||10)*1000);}
+  else if(CFG.autoOpen==='scroll'&&waiting){
+    var onScroll=function(){
+      var max=d.documentElement.scrollHeight-w.innerHeight;
+      if(max>0&&(w.scrollY/max)*100>=(CFG.autoOpenScroll||50)){w.removeEventListener('scroll',onScroll);nudge();}
+    };
+    w.addEventListener('scroll',onScroll,{passive:true});
+  }
+  else if(CFG.autoOpen!=='time'&&CFG.autoOpen!=='scroll'&&!state.teased&&CFG.greeting){setTimeout(function(){if(!state.open&&!state.teased)teaser.classList.remove('hide');},8000);}
   (d.body||d.documentElement).appendChild(host);
 
   /* ── Native form submission ── */
