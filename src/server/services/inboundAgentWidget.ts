@@ -60,6 +60,10 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     '.a{align-self:flex-start;background:#fff;border:1px solid #e6e6e9;border-bottom-left-radius:4px}'+
     '.v{align-self:flex-end;background:'+C+';color:#fff;border-bottom-right-radius:4px}'+
     '.err{align-self:center;background:none;color:#a33;font-size:13px;text-align:center}'+
+    '.a .btn{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;padding:10px 14px;border-radius:10px;background:'+C+';color:#fff;text-decoration:none;font-weight:600;font-size:14px;line-height:1.3;text-align:center;white-space:normal}'+
+    '.a .btn:hover{filter:brightness(1.08)}'+
+    '.a .btn svg{flex-shrink:0}'+
+    '.a div+.btn{margin-top:12px}'+
     '.typing{align-self:flex-start;display:flex;gap:4px;padding:12px 14px;background:#fff;border:1px solid #e6e6e9;border-radius:14px}'+
     '.typing i{width:6px;height:6px;border-radius:50%;background:#999;animation:b 1s infinite}'+
     '.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}'+
@@ -88,12 +92,42 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
   $('.tt').textContent=CFG.greeting||'';
   var busy=false;
 
+  /* Agent text with its links pulled out as buttons. The agent writes links
+     as [Label](https://...); any bare URL becomes an "Open link" button. */
+  var ICON_OUT='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+  function agentBody(el,text){
+    var links=[];
+    /* A labeled link inside a sentence keeps its label as words there; one
+       standing on its own (end of a line, after a colon) is just the button. */
+    text=text.replace(/\[([^\]\n]{1,80})\]\((https?:\/\/[^\s)]+)\)/g,function(match,label,url,at,all){
+      label=label.trim();links.push({label:label,url:url});
+      var before=all.slice(all.lastIndexOf('\n',at-1)+1,at).trim();
+      var after=all.slice(at+match.length).split('\n')[0];
+      return (before&&!/[:.!?]$/.test(before))||/[a-z0-9]/i.test(after)?label:'';
+    });
+    text=text.replace(/https?:\/\/[^\s<>"')\]]+/g,function(url){
+      var trail=(url.match(/[.,;:!?]+$/)||[''])[0];
+      links.push({label:'Open link',url:url.slice(0,url.length-trail.length)});return trail;
+    });
+    /* Tidy what the removed links leave behind: "here: ." or "at ." */
+    text=text.replace(/[ \t]+([.,;:!?])/g,'$1').replace(/:\s*([.!?]?)\s*$/,function(_,p){return p||'.';}).replace(/[ \t]{2,}/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    if(text){var t=d.createElement('div');t.textContent=text;el.appendChild(t);}
+    var seen={};
+    links.forEach(function(l){
+      if(seen[l.url])return;seen[l.url]=1;
+      var a=d.createElement('a');
+      a.className='btn';a.href=l.url;a.target='_blank';a.rel='noopener noreferrer';
+      var span=d.createElement('span');span.textContent=l.label;a.appendChild(span);
+      a.insertAdjacentHTML('beforeend',ICON_OUT);
+      el.appendChild(a);
+    });
+  }
   function render(){
     log.innerHTML='';
     state.msgs.forEach(function(m){
       var el=d.createElement('div');
       el.className='m '+(m.r==='v'?'v':m.r==='e'?'err':'a');
-      el.textContent=m.t;
+      if(m.r==='a')agentBody(el,m.t);else el.textContent=m.t;
       log.appendChild(el);
     });
     if(busy){var t=d.createElement('div');t.className='typing';t.innerHTML='<i></i><i></i><i></i>';log.appendChild(t);}
