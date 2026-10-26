@@ -25,6 +25,9 @@ interface AgentConfig {
   formPageUrl: string;
   formSelector: string;
   fieldMap: Partial<Record<FieldKey, string>>;
+  autoOpen: 'off' | 'time' | 'scroll';
+  autoOpenDelay: number;
+  autoOpenScroll: number;
 }
 
 interface AgentRow extends AgentConfig {
@@ -357,6 +360,36 @@ const WebsiteChatAgent = () => {
               onChange={(e) => update('aiInstructions', e.target.value)}
               placeholder="e.g., Mention that beginners are welcome in every class. If someone asks about competition team, say coach Mike will reach out." />
           </div>
+        </section>
+
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>When the chat opens</h3>
+          <div className={styles.radioGroup}>
+            <label className={styles.radio}>
+              <input type="radio" name="autoOpen" checked={config.autoOpen === 'off'} onChange={() => update('autoOpen', 'off')} />
+              <span>Only when the visitor clicks the chat button <span className={styles.hint}>(the greeting pops up next to the button after 8 seconds)</span></span>
+            </label>
+            <label className={styles.radio}>
+              <input type="radio" name="autoOpen" checked={config.autoOpen === 'time'} onChange={() => update('autoOpen', 'time')} />
+              <span>Open automatically after</span>
+              <input type="number" className={`${outreach.input} ${styles.smallNumber}`} min={1} max={600}
+                value={config.autoOpenDelay} disabled={config.autoOpen !== 'time'}
+                onChange={(e) => update('autoOpenDelay', parseInt(e.target.value, 10) || 1)} />
+              <span>seconds on a page</span>
+            </label>
+            <label className={styles.radio}>
+              <input type="radio" name="autoOpen" checked={config.autoOpen === 'scroll'} onChange={() => update('autoOpen', 'scroll')} />
+              <span>Open automatically after the visitor scrolls</span>
+              <input type="number" className={`${outreach.input} ${styles.smallNumber}`} min={5} max={100}
+                value={config.autoOpenScroll} disabled={config.autoOpen !== 'scroll'}
+                onChange={(e) => update('autoOpenScroll', parseInt(e.target.value, 10) || 5)} />
+              <span>% of the page</span>
+            </label>
+          </div>
+          <p className={styles.hint}>
+            Opens at most once per visit, and never again once the visitor closes it. On phones, where the chat fills the screen, it shows the
+            greeting next to the button instead of opening.
+          </p>
         </section>
 
         <section className={styles.section}>

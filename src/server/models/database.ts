@@ -937,6 +937,10 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS name TEXT`);
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS domains TEXT DEFAULT ''`);
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    // When the chat opens by itself: 'off' (click only), 'time', or 'scroll'.
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "autoOpen" TEXT DEFAULT 'off'`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "autoOpenDelay" INTEGER DEFAULT 10`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "autoOpenScroll" INTEGER DEFAULT 50`);
     const hadAgentId = await client.query(
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'inbound_chats' AND column_name = 'agentId'`
     );
