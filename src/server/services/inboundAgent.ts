@@ -6,7 +6,7 @@ import { pool } from '../models/database';
 
 // Lead-form fields the widget knows how to find on the client's site. Each can
 // be pinned to a CSS selector in fieldMap; unmapped fields are auto-detected.
-export const NATIVE_FIELDS = ['firstName', 'lastName', 'fullName', 'email', 'phone', 'program', 'message'] as const;
+export const NATIVE_FIELDS = ['firstName', 'lastName', 'fullName', 'email', 'phone', 'program', 'location', 'message'] as const;
 export type NativeField = typeof NATIVE_FIELDS[number];
 
 export interface InboundAgentConfig {
@@ -28,8 +28,17 @@ export interface InboundAgentConfig {
   autoOpen: AutoOpen;
   autoOpenDelay: number;
   autoOpenScroll: number;
+  bookingUrl: string;
+  bookingLabel: string;
+  followUpEnabled: boolean;
+  followUpMinutes: number;
+  followUpMessage: string;
+  requirePhone: boolean;
   updatedAt: string;
 }
+
+export const DEFAULT_BOOKING_LABEL = 'Pick your first class';
+export const DEFAULT_FOLLOW_UP = "Were you able to pick a class and get started? If anything got in the way, I'm happy to help.";
 
 // When the chat opens without a click: never, after N seconds, or after the
 // visitor scrolls N% of the page.
@@ -85,6 +94,12 @@ function normalize(row: any): InboundAgentConfig {
     autoOpen: AUTO_OPEN.includes(row.autoOpen) ? row.autoOpen : 'off',
     autoOpenDelay: clampInt(row.autoOpenDelay, 1, 600, 10),
     autoOpenScroll: clampInt(row.autoOpenScroll, 5, 100, 50),
+    bookingUrl: row.bookingUrl || '',
+    bookingLabel: row.bookingLabel || DEFAULT_BOOKING_LABEL,
+    followUpEnabled: row.followUpEnabled !== false,
+    followUpMinutes: clampInt(row.followUpMinutes, 1, 120, 3),
+    followUpMessage: row.followUpMessage || DEFAULT_FOLLOW_UP,
+    requirePhone: row.requirePhone !== false,
     updatedAt: row.updatedAt,
   };
 }
@@ -143,6 +158,12 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
     autoOpen: AUTO_OPEN.includes(input.autoOpen as AutoOpen) ? input.autoOpen as AutoOpen : current.autoOpen,
     autoOpenDelay: input.autoOpenDelay === undefined ? current.autoOpenDelay : clampInt(input.autoOpenDelay, 1, 600, current.autoOpenDelay),
     autoOpenScroll: input.autoOpenScroll === undefined ? current.autoOpenScroll : clampInt(input.autoOpenScroll, 5, 100, current.autoOpenScroll),
+    bookingUrl: input.bookingUrl === undefined ? current.bookingUrl : httpUrl(input.bookingUrl),
+    bookingLabel: str(input.bookingLabel, 40) || current.bookingLabel,
+    followUpEnabled: typeof input.followUpEnabled === 'boolean' ? input.followUpEnabled : current.followUpEnabled,
+    followUpMinutes: input.followUpMinutes === undefined ? current.followUpMinutes : clampInt(input.followUpMinutes, 1, 120, current.followUpMinutes),
+    followUpMessage: str(input.followUpMessage, 500) || current.followUpMessage,
+    requirePhone: typeof input.requirePhone === 'boolean' ? input.requirePhone : current.requirePhone,
   };
 
   const result = await pool.query(
@@ -151,12 +172,16 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
        "businessInfo"=$8, "aiInstructions"=$9, "accentColor"=$10, "submitNativeForm"=$11,
        "formPageUrl"=$12, "formSelector"=$13, "fieldMap"=$14, "updatedBy"=$15,
        "autoOpen"=$17, "autoOpenDelay"=$18, "autoOpenScroll"=$19,
+       "bookingUrl"=$20, "bookingLabel"=$21, "followUpEnabled"=$22, "followUpMinutes"=$23,
+       "followUpMessage"=$24, "requirePhone"=$25,
        "updatedAt"=CURRENT_TIMESTAMP
      WHERE id=$16 RETURNING *`,
     [next.name, next.domains.join(','), next.enabled, next.agentName, next.businessName, next.greeting,
      next.trialOffer, next.businessInfo, next.aiInstructions, next.accentColor, next.submitNativeForm,
      next.formPageUrl, next.formSelector, JSON.stringify(fieldMap), userId, id,
-     next.autoOpen, next.autoOpenDelay, next.autoOpenScroll]
+     next.autoOpen, next.autoOpenDelay, next.autoOpenScroll,
+     next.bookingUrl, next.bookingLabel, next.followUpEnabled, next.followUpMinutes,
+     next.followUpMessage, next.requirePhone]
   );
   return normalize(result.rows[0]);
 }
@@ -191,5 +216,39 @@ export function publicAgentConfig(cfg: InboundAgentConfig) {
     autoOpen: cfg.autoOpen,
     autoOpenDelay: cfg.autoOpenDelay,
     autoOpenScroll: cfg.autoOpenScroll,
+    bookingUrl: cfg.bookingUrl,
+    followUpEnabled: cfg.followUpEnabled,
+    followUpMinutes: cfg.followUpMinutes,
   };
+}
+
+// '' unless it's an absolute http(s) URL.
+export function httpUrl(v: unknown): string {
+  const s = typeof v === 'string' ? v.trim().slice(0, 1000) : '';
+  try { return /^https?:$/.test(new URL(s).protocol) ? s : ''; } catch { return ''; }
+}
+
+// Same page, ignoring scheme, www, trailing slash, and hash.
+export function sameUrl(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    try {
+      const x = new URL(u);
+      return x.hostname.replace(/^www\./, '').toLowerCase() + x.pathname.replace(/\/+$/, '') + x.search;
+    } catch { return ''; }
+  };
+  const na = norm(a);
+  return !!na && na === norm(b);
+}
+
+// A form page the agent can actually fill: on one of its own websites (the
+// browser blocks scripting other sites). Returns an error message or null.
+export function formPageProblem(formPageUrl: string, domains: string[]): string | null {
+  if (!formPageUrl) return null;
+  let host = '';
+  try { host = new URL(formPageUrl).hostname; } catch { return 'The form page URL is not a valid web address.'; }
+  if (domains.length && !domainMatches(host, domains)) {
+    return `The form page has to be on one of this agent's websites (${domains.join(', ')}). ` +
+      `Browsers don't let a website fill in another site's form. If ${normalizeDomain(host)} is where visitors book, put it in Booking link instead.`;
+  }
+  return null;
 }

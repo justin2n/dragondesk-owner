@@ -941,6 +941,41 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "autoOpen" TEXT DEFAULT 'off'`);
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "autoOpenDelay" INTEGER DEFAULT 10`);
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "autoOpenScroll" INTEGER DEFAULT 50`);
+    // Booking link (e.g. the class picker): shared after signup, and clicks on
+    // it are the agent's main conversion. Follow-up: a while after that click,
+    // the chat asks whether they managed to book.
+    const hadBookingUrl = await client.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'inbound_agent_config' AND column_name = 'bookingUrl'`
+    );
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "bookingUrl" TEXT DEFAULT ''`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "bookingLabel" TEXT DEFAULT ''`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "followUpEnabled" BOOLEAN DEFAULT true`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "followUpMinutes" INTEGER DEFAULT 3`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "followUpMessage" TEXT DEFAULT ''`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "requirePhone" BOOLEAN DEFAULT true`);
+    if (hadBookingUrl.rows.length === 0) {
+      // One-time: a "form page" on a domain the agent doesn't run on can never
+      // be filled in (browsers block it); in practice it's the booking page.
+      const rows = await client.query(`SELECT id, domains, "formPageUrl" FROM inbound_agent_config WHERE COALESCE("formPageUrl", '') <> ''`);
+      for (const r of rows.rows) {
+        let host = '';
+        try { host = new URL(r.formPageUrl).hostname.toLowerCase().replace(/^www\./, ''); } catch { continue; }
+        const domains = String(r.domains || '').split(',').filter(Boolean);
+        const covered = domains.some((d: string) => host === d || host.endsWith('.' + d));
+        if (domains.length && !covered) {
+          await client.query(
+            `UPDATE inbound_agent_config SET "bookingUrl" = "formPageUrl", "formPageUrl" = '' WHERE id = $1`,
+            [r.id]
+          );
+        }
+      }
+    }
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "linkClicks" INTEGER DEFAULT 0`);
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "bookingClickedAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpSentAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpText" TEXT`);
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpPending" BOOLEAN DEFAULT false`);
+
     const hadAgentId = await client.query(
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'inbound_chats' AND column_name = 'agentId'`
     );

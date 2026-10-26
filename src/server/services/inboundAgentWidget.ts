@@ -33,7 +33,7 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
   function save(){try{sessionStorage.setItem(SKEY,JSON.stringify(state));}catch(e){}}
 
   function post(path,body){
-    return fetch(AEP+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'omit',keepalive:path==='/native-result'});
+    return fetch(AEP+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'omit',keepalive:path!=='/chat'});
   }
 
   /* ── UI ── */
@@ -117,10 +117,37 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
       if(seen[l.url])return;seen[l.url]=1;
       var a=d.createElement('a');
       a.className='btn';a.href=l.url;a.target='_blank';a.rel='noopener noreferrer';
+      a.addEventListener('click',function(){linkClicked(l.url);});
       var span=d.createElement('span');span.textContent=l.label;a.appendChild(span);
       a.insertAdjacentHTML('beforeend',ICON_OUT);
       el.appendChild(a);
     });
+  }
+  /* Link clicks: the booking link is the conversion, and starts the clock on
+     the follow-up ("were you able to book?"). */
+  function sameUrl(a,b){
+    function n(u){try{var x=new URL(u);return x.hostname.replace(/^www\./,'').toLowerCase()+x.pathname.replace(/\/+$/,'')+x.search;}catch(e){return '';}}
+    var na=n(a);return !!na&&na===n(b);
+  }
+  function linkClicked(url){
+    if(state.chatId)post('/link-click',{token:TOKEN,vid:VID,chatId:state.chatId,url:url}).catch(function(){});
+    var booking=!CFG.bookingUrl||sameUrl(url,CFG.bookingUrl);
+    if(booking&&CFG.followUpEnabled&&state.chatId&&!state.followUpAt&&!state.followedUp){
+      state.followUpAt=Date.now()+Math.max(1,CFG.followUpMinutes||3)*60000;save();
+    }
+  }
+  function checkFollowUp(){
+    if(!state.followUpAt||state.followedUp||Date.now()<state.followUpAt)return;
+    state.followedUp=1;save();
+    post('/followup',{token:TOKEN,vid:VID,chatId:state.chatId})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!j||!j.message)return;
+        state.msgs.push({r:'a',t:j.message});save();
+        if(state.open){render();return;}
+        if(w.innerWidth<=480){$('.tt').textContent=j.message;teaser.classList.remove('hide');}
+        else setOpen(true);
+      }).catch(function(){});
   }
   function render(){
     log.innerHTML='';
@@ -185,6 +212,10 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     if(w.innerWidth<=480){if(CFG.greeting){teaser.classList.remove('hide');}}
     else setOpen(true);
   }
+  setInterval(checkFollowUp,10000);
+  d.addEventListener('visibilitychange',function(){if(!d.hidden)checkFollowUp();});
+  w.addEventListener('focus',checkFollowUp);
+  setTimeout(checkFollowUp,500);
   var waiting=!state.open&&!state.closed&&!state.autoDone;
   if(state.open)setOpen(true);
   else if(CFG.autoOpen==='time'&&waiting){setTimeout(nudge,Math.max(1,CFG.autoOpenDelay||10)*1000);}
@@ -205,6 +236,8 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     try{
       if(el.id){var l=doc.querySelector('label[for="'+(w.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]');if(l)parts.push(l.textContent);}
       var pl=el.closest('label');if(pl)parts.push(pl.textContent);
+      /* A dropdown's placeholder option often names it ("Programs *"). */
+      if(el.tagName==='SELECT'&&el.options.length&&!el.options[0].value)parts.push(el.options[0].text);
     }catch(e){}
     return parts.filter(Boolean).join(' ').toLowerCase();
   }
@@ -214,10 +247,11 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     firstName:function(el,s){return /given-name/.test(s)||/first|fname|given/.test(s);},
     lastName:function(el,s){return /family-name/.test(s)||/last|lname|surname|family/.test(s);},
     fullName:function(el,s){return el.tagName!=='TEXTAREA'&&el.tagName!=='SELECT'&&/(^|[^a-z])(full ?|your ?)?name([^a-z]|$)/.test(s)&&!/first|last|user|company|business|e-?mail/.test(s);},
-    program:function(el,s){return /program|class|interest|service|course|style|discipline/.test(s);},
+    program:function(el,s){return /program|class|interest|service|course|style|discipline|practice ?area/.test(s);},
+    location:function(el,s){return /location|branch|campus|studio|venue/.test(s);},
     message:function(el,s){return el.tagName==='TEXTAREA'||/message|comment|question|note|goal/.test(s);}
   };
-  var ORDER=['email','phone','firstName','lastName','fullName','program','message'];
+  var ORDER=['email','phone','firstName','lastName','fullName','location','program','message'];
   function mapFields(box,doc){
     var map={},used=[],els=[].slice.call(box.querySelectorAll(FIELD_TYPES));
     var pins=CFG.fieldMap||{};
@@ -248,11 +282,35 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     });
     return best;
   }
+  /* Pick the dropdown option that best matches what the visitor said:
+     shared words count, with common martial-arts shorthand expanded. */
+  var SYN={bjj:'jiu jitsu',jj:'jiu jitsu',jiujitsu:'jiu jitsu',tkd:'taekwondo',mma:'mixed martial arts',mt:'muay thai',kickboxing:'kickboxing muay thai',kid:'kids',children:'kids',childrens:'kids',youth:'kids',junior:'kids',juniors:'kids',teen:'teens',adults:'adult',pt:'personal training'};
+  function words(t){
+    return String(t||'').toLowerCase().replace(/&[a-z#0-9]+;/g,' ').replace(/['’]/g,'').split(/[^a-z0-9]+/).filter(Boolean)
+      .map(function(x){return (SYN[x]||x);}).join(' ').split(' ').filter(function(x){return x.length>1&&x!=='and'&&x!=='the'&&x!=='only';});
+  }
+  function bestOption(el,v){
+    var want=words(v),best=null,bestScore=0;
+    if(!want.length)return null;
+    [].slice.call(el.options).forEach(function(o){
+      if(!o.value||o.disabled)return;
+      var have=words(o.text),score=0,core=0;
+      want.forEach(function(x){if(have.indexOf(x)>=0){score+=1;if(!/^(kids|adult|teens)$/.test(x))core++;}});
+      have.forEach(function(x){if(want.indexOf(x)<0)score-=0.3;}); /* extra words make it a looser match */
+      /* Kids vs adult programs share names; never cross them. */
+      var wk=want.indexOf('kids')>=0,hk=have.indexOf('kids')>=0;
+      if(hk&&!wk)score-=1;if(wk&&!hk)score-=0.5;
+      if(String(o.text).trim().toLowerCase()===String(v).trim().toLowerCase())score+=10;
+      /* Needs a real shared word (not just "kids"), unless it's an exact match. */
+      if(!core&&score<10)return;
+      if(score>bestScore){best=o;bestScore=score;}
+    });
+    return bestScore>0?best:null;
+  }
   function setValue(el,v,win){
     if(v==null||v==='')return;
     if(el.tagName==='SELECT'){
-      var want=String(v).toLowerCase(),opts=[].slice.call(el.options),hit=null;
-      for(var i=0;i<opts.length&&!hit;i++){var t=(opts[i].text+' '+opts[i].value).toLowerCase();if(opts[i].value&&(t.indexOf(want)>=0||want.indexOf(opts[i].text.toLowerCase().trim())>=0&&opts[i].text.trim().length>2))hit=opts[i];}
+      var hit=bestOption(el,v);
       if(!hit)return;
       el.value=hit.value;
     }else{
@@ -271,8 +329,15 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     if(m.email)setValue(m.email,f.email,win);
     if(m.phone)setValue(m.phone,f.phone,win);
     if(m.program)setValue(m.program,f.program,win);
+    if(m.location)setValue(m.location,f.location,win);
+    /* Any other required dropdown still empty: try the program, then the location. */
+    [].slice.call(box.querySelectorAll('select[required]')).forEach(function(sel){
+      if(sel.value||sel===m.program||sel===m.location)return;
+      var o=bestOption(sel,f.program)||bestOption(sel,f.location);
+      if(o)setValue(sel,o.text,win);
+    });
     if(m.message){
-      var note=['Trial signup via website chat.',f.program?'Program: '+f.program+'.':'',f.notes||''].filter(Boolean).join(' ');
+      var note=['Trial signup via website chat.',f.program?'Program: '+f.program+'.':'',f.location?'Location: '+f.location+'.':'',f.notes||''].filter(Boolean).join(' ');
       setValue(m.message,note,win);
     }
     return m;
