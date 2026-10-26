@@ -7,7 +7,7 @@ import styles from './WebsiteChatAgent.module.css';
 // DragonDesk: Outreach — inbound website chat agents (one per website, or a
 // catch-all), their settings, and conversations.
 
-type FieldKey = 'firstName' | 'lastName' | 'fullName' | 'email' | 'phone' | 'program' | 'message';
+type FieldKey = 'firstName' | 'lastName' | 'fullName' | 'email' | 'phone' | 'program' | 'location' | 'message';
 
 interface AgentConfig {
   id: number;
@@ -28,10 +28,16 @@ interface AgentConfig {
   autoOpen: 'off' | 'time' | 'scroll';
   autoOpenDelay: number;
   autoOpenScroll: number;
+  bookingUrl: string;
+  bookingLabel: string;
+  followUpEnabled: boolean;
+  followUpMinutes: number;
+  followUpMessage: string;
+  requirePhone: boolean;
 }
 
 interface AgentRow extends AgentConfig {
-  stats: { chats: number; signups: number };
+  stats: { chats: number; signups: number; bookings: number };
 }
 
 interface ChatRow {
@@ -45,6 +51,8 @@ interface ChatRow {
   leadData: { firstName?: string; lastName?: string; email?: string } | null;
   nativeStatus: 'pending' | 'submitted' | 'failed' | null;
   nativeDetail: string | null;
+  bookingClickedAt: string | null;
+  followUpSentAt: string | null;
   createdAt: string;
   updatedAt: string;
   firstName: string | null;
@@ -64,6 +72,7 @@ const FIELD_LABELS: { key: FieldKey; label: string }[] = [
   { key: 'email', label: 'Email' },
   { key: 'phone', label: 'Phone' },
   { key: 'program', label: 'Program / interest' },
+  { key: 'location', label: 'Location' },
   { key: 'message', label: 'Message / notes' },
 ];
 
@@ -90,8 +99,8 @@ const WebsiteChatAgent = () => {
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [chats, setChats] = useState<ChatRow[]>([]);
-  const [stats, setStats] = useState({ chats: 0, signups: 0, nativeSubmitted: 0, nativeFailed: 0 });
-  const [filter, setFilter] = useState<'all' | 'lead_captured'>('all');
+  const [stats, setStats] = useState({ chats: 0, signups: 0, bookings: 0, followUps: 0, nativeSubmitted: 0, nativeFailed: 0 });
+  const [filter, setFilter] = useState<'all' | 'booked' | 'lead_captured'>('all');
   const [agentFilter, setAgentFilter] = useState<number | 'all'>('all');
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -135,7 +144,7 @@ const WebsiteChatAgent = () => {
   const loadChats = async () => {
     try {
       const params = new URLSearchParams({ limit: '100' });
-      if (filter === 'lead_captured') params.set('status', 'lead_captured');
+      if (filter !== 'all') params.set('status', filter);
       if (agentFilter !== 'all') params.set('agentId', String(agentFilter));
       const data = await api.get(`/inbound-agent/chats?${params}`);
       setChats(data.chats);
@@ -244,7 +253,7 @@ const WebsiteChatAgent = () => {
               <span className={`${styles.status} ${a.enabled ? styles.live : ''}`}><span className={styles.dot} />{a.enabled ? 'Live' : 'Off'}</span>
             </span>
             <span className={styles.agentCardSites}>{a.domains.length ? a.domains.join(', ') : 'All other websites'}</span>
-            <span className={styles.agentCardStats}>{a.stats.chats} chats, {a.stats.signups} signups (30 days)</span>
+            <span className={styles.agentCardStats}>{a.stats.chats} chats, {a.stats.bookings} booking clicks (30 days)</span>
           </button>
         ))}
       </div>
@@ -360,6 +369,58 @@ const WebsiteChatAgent = () => {
               onChange={(e) => update('aiInstructions', e.target.value)}
               placeholder="e.g., Mention that beginners are welcome in every class. If someone asks about competition team, say coach Mike will reach out." />
           </div>
+          <label className={styles.checkbox}>
+            <input type="checkbox" checked={config.requirePhone}
+              onChange={(e) => update('requirePhone', e.target.checked)} />
+            Require a phone number to sign up
+          </label>
+          <span className={styles.hint}>Turn this on if your website's signup form requires a phone number, or that form will fail.</span>
+        </section>
+
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Booking link and follow-up</h3>
+          <div className={styles.row}>
+            <div className={outreach.formGroup}>
+              <label>Booking link</label>
+              <input className={outreach.input} value={config.bookingUrl} maxLength={1000}
+                onChange={(e) => update('bookingUrl', e.target.value)} placeholder="e.g., https://cp.mystudio.io/t/..." />
+              <span className={styles.hint}>
+                Where visitors pick their first class. The agent shares it as a button right after signup, and clicks on it are this
+                agent's main result. It can be on any website.
+              </span>
+            </div>
+            <div className={outreach.formGroup}>
+              <label>Button label</label>
+              <input className={outreach.input} value={config.bookingLabel} maxLength={40}
+                onChange={(e) => update('bookingLabel', e.target.value)} placeholder="Pick your first class" />
+            </div>
+          </div>
+          <label className={styles.checkbox}>
+            <input type="checkbox" checked={config.followUpEnabled}
+              onChange={(e) => update('followUpEnabled', e.target.checked)} />
+            Follow up after they click the booking link
+          </label>
+          {config.followUpEnabled && (
+            <div className={styles.row}>
+              <div className={outreach.formGroup}>
+                <label>Follow-up message</label>
+                <input className={outreach.input} value={config.followUpMessage} maxLength={500}
+                  onChange={(e) => update('followUpMessage', e.target.value)} />
+              </div>
+              <div className={outreach.formGroup}>
+                <label>Send it after</label>
+                <div className={styles.radio}>
+                  <input type="number" className={`${outreach.input} ${styles.smallNumber}`} min={1} max={120}
+                    value={config.followUpMinutes} onChange={(e) => update('followUpMinutes', parseInt(e.target.value, 10) || 1)} />
+                  <span>minutes</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <p className={styles.hint}>
+            The follow-up appears in the chat once the visitor is back on your site, and the agent reads their answer with that context, so it can
+            help anyone who got stuck.
+          </p>
         </section>
 
         <section className={styles.section}>
@@ -411,8 +472,8 @@ const WebsiteChatAgent = () => {
                 <input className={outreach.input} value={config.formPageUrl} maxLength={1000}
                   onChange={(e) => update('formPageUrl', e.target.value)} placeholder="e.g., https://yourgym.com/free-trial" />
                 <span className={styles.hint}>
-                  The page on your site that has the trial signup form. Leave blank to use the page the visitor is on. It has to be on the same
-                  domain as the chat.
+                  A page on this agent's website that has your signup or contact form. Leave blank to use the page the visitor is on. Browsers
+                  don't let one website fill in another site's form, so a page elsewhere (like a booking system) goes in Booking link instead.
                 </span>
               </div>
               <button type="button" className={styles.linkBtn} onClick={() => setShowAdvanced(v => !v)}>
@@ -465,15 +526,17 @@ const WebsiteChatAgent = () => {
             </select>
           )}
           <button className={`${styles.filterBtn} ${filter === 'all' ? styles.filterActive : ''}`} onClick={() => setFilter('all')}>All</button>
-          <button className={`${styles.filterBtn} ${filter === 'lead_captured' ? styles.filterActive : ''}`} onClick={() => setFilter('lead_captured')}>Signups</button>
+          <button className={`${styles.filterBtn} ${filter === 'booked' ? styles.filterActive : ''}`} onClick={() => setFilter('booked')}>Clicked to book</button>
+          <button className={`${styles.filterBtn} ${filter === 'lead_captured' ? styles.filterActive : ''}`} onClick={() => setFilter('lead_captured')}>Leads</button>
           <button className={styles.filterBtn} onClick={loadChats}>Refresh</button>
         </div>
       </div>
 
       <div className={styles.stats}>
         <div className={styles.stat}><span className={styles.statValue}>{stats.chats}</span><span className={styles.statLabel}>Chats (30 days)</span></div>
-        <div className={styles.stat}><span className={styles.statValue}>{stats.signups}</span><span className={styles.statLabel}>Signups</span></div>
-        <div className={styles.stat}><span className={styles.statValue}>{stats.chats ? Math.round((stats.signups / stats.chats) * 100) : 0}%</span><span className={styles.statLabel}>Chat to signup</span></div>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.bookings}</span><span className={styles.statLabel}>Booking link clicks</span></div>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.chats ? Math.round((stats.bookings / stats.chats) * 100) : 0}%</span><span className={styles.statLabel}>Chat to booking</span></div>
+        <div className={styles.stat}><span className={styles.statValue}>{stats.signups}</span><span className={styles.statLabel}>Leads captured</span></div>
         <div className={styles.stat}><span className={styles.statValue}>{stats.nativeSubmitted}</span><span className={styles.statLabel}>Site forms submitted</span></div>
         <div className={styles.stat}><span className={`${styles.statValue} ${stats.nativeFailed ? styles.bad : ''}`}>{stats.nativeFailed}</span><span className={styles.statLabel}>Site forms failed</span></div>
       </div>
@@ -499,9 +562,14 @@ const WebsiteChatAgent = () => {
                     <td>{c.userTurns}</td>
                     <td>
                       <div className={styles.badges}>
-                        <span className={`${outreach.badge} ${c.status === 'lead_captured' ? outreach.active : outreach.draft}`}>
-                          {c.status === 'lead_captured' ? 'Signed up' : 'Chatting'}
-                        </span>
+                        {c.bookingClickedAt ? (
+                          <span className={`${outreach.badge} ${outreach.active}`}>Clicked to book</span>
+                        ) : (
+                          <span className={`${outreach.badge} ${c.status === 'lead_captured' ? outreach.completed : outreach.draft}`}>
+                            {c.status === 'lead_captured' ? 'Lead' : 'Chatting'}
+                          </span>
+                        )}
+                        {c.followUpSentAt && <span className={`${outreach.badge} ${outreach.paused}`}>Followed up</span>}
                         {c.nativeStatus && (
                           <span className={`${outreach.badge} ${c.nativeStatus === 'submitted' ? outreach.completed : c.nativeStatus === 'failed' ? styles.failedBadge : outreach.paused}`}>
                             {NATIVE_LABEL[c.nativeStatus]}
