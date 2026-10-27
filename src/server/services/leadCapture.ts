@@ -12,6 +12,7 @@ export interface LeadInput {
   membershipAge?: string | null;
   notes?: string | null;
   locationId?: number | null;
+  companyName?: string | null;
   source?: string | null;
   visitorId?: string | null;
   trackingToken?: string | null;
@@ -32,6 +33,7 @@ export async function captureLead(input: LeadInput): Promise<LeadResult> {
     firstName, lastName, email, phone, programType, membershipAge,
     notes, locationId, source, visitorId, trackingToken,
   } = input;
+  const companyName = input.companyName || null;
 
   if (!firstName || !lastName || !email) {
     return { ok: false, error: 'First name, last name, and email are required' };
@@ -58,9 +60,10 @@ export async function captureLead(input: LeadInput): Promise<LeadResult> {
           membershipAge = COALESCE(?, membershipAge),
           notes = COALESCE(?, notes),
           locationId = COALESCE(?, locationId),
+          "companyName" = COALESCE(?, "companyName"),
           updatedAt = CURRENT_TIMESTAMP
         WHERE id = ?`,
-        [firstName, lastName, phone, programType, membershipAge, notes, locationId, existing.id]
+        [firstName, lastName, phone, programType, membershipAge, notes, locationId, companyName, existing.id]
       );
     }
   } else {
@@ -69,13 +72,14 @@ export async function captureLead(input: LeadInput): Promise<LeadResult> {
       `INSERT INTO members (
         firstName, lastName, email, phone,
         accountStatus, accountType, programType, membershipAge,
-        ranking, notes, locationId, tags
-      ) VALUES (?, ?, ?, ?, 'lead', 'basic', ?, ?, 'White Belt', ?, ?, ?)`,
+        ranking, notes, locationId, tags, "companyName"
+      ) VALUES (?, ?, ?, ?, 'lead', 'basic', ?, ?, 'White Belt', ?, ?, ?, ?)`,
       [
         firstName, lastName, normalizedEmail, phone || null,
         programType || 'Adult BJJ', membershipAge || 'Adult',
         notes || null, locationId || null,
         source ? JSON.stringify([source]) : JSON.stringify(['Web Form']),
+        companyName,
       ]
     );
     memberId = result.id;

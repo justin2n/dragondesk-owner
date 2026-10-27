@@ -246,6 +246,12 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     try{
       if(el.id){var l=doc.querySelector('label[for="'+(w.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]');if(l)parts.push(l.textContent);}
       var pl=el.closest('label');if(pl)parts.push(pl.textContent);
+      /* A label beside the input but not linked to it (common on hand-built
+         forms): the only label in the input's own wrapper. */
+      else if(el.parentElement){
+        var ls=el.parentElement.querySelectorAll('label'),fs=el.parentElement.querySelectorAll('input,select,textarea');
+        if(ls.length===1&&fs.length===1&&!ls[0].htmlFor)parts.push(ls[0].textContent);
+      }
       /* A dropdown's placeholder option often names it ("Programs *"). */
       if(el.tagName==='SELECT'&&el.options.length&&!el.options[0].value)parts.push(el.options[0].text);
     }catch(e){}
@@ -256,12 +262,15 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     phone:function(el,s){return el.type==='tel'||/phone|mobile|cell|\btel\b/.test(s);},
     firstName:function(el,s){return /given-name/.test(s)||/first|fname|given/.test(s);},
     lastName:function(el,s){return /family-name/.test(s)||/last|lname|surname|family/.test(s);},
-    fullName:function(el,s){return el.tagName!=='TEXTAREA'&&el.tagName!=='SELECT'&&/(^|[^a-z])(full ?|your ?)?name([^a-z]|$)/.test(s)&&!/first|last|user|company|business|e-?mail/.test(s);},
-    program:function(el,s){return /program|class|interest|service|course|style|discipline|practice ?area/.test(s);},
-    location:function(el,s){return /location|branch|campus|studio|venue/.test(s);},
+    fullName:function(el,s){return el.tagName!=='TEXTAREA'&&el.tagName!=='SELECT'&&/(^|[^a-z])(full ?|your ?)?name([^a-z]|$)/.test(s)&&!/first|last|user|company|business|studio|organi[sz]ation|e-?mail/.test(s);},
+    program:function(el,s){return el.tagName!=='TEXTAREA'&&/program|class|interest|service|course|style|discipline|practice ?area/.test(s);},
+    /* A dropdown of studios is a location; a typed-in studio name is the visitor's business. */
+    /* Never a text box: "How many locations?" in a message placeholder isn't a location field. */
+    location:function(el,s){return el.tagName!=='TEXTAREA'&&(/location|branch|campus|venue/.test(s)||(el.tagName==='SELECT'&&/studio/.test(s)));},
+    company:function(el,s){return el.tagName!=='SELECT'&&el.tagName!=='TEXTAREA'&&/company|business|organi[sz]ation|studio|academy|school name|gym name/.test(s);},
     message:function(el,s){return el.tagName==='TEXTAREA'||/message|comment|question|note|goal/.test(s);}
   };
-  var ORDER=['email','phone','firstName','lastName','fullName','location','program','message'];
+  var ORDER=['email','phone','firstName','lastName','company','fullName','location','program','message'];
   function mapFields(box,doc){
     var map={},used=[],els=[].slice.call(box.querySelectorAll(FIELD_TYPES));
     var pins=CFG.fieldMap||{};
@@ -340,6 +349,7 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     if(m.phone)setValue(m.phone,f.phone,win);
     if(m.program)setValue(m.program,f.program,win);
     if(m.location)setValue(m.location,f.location,win);
+    if(m.company)setValue(m.company,f.company,win);
     /* Any other required dropdown still empty: try the program, then the location. */
     [].slice.call(box.querySelectorAll('select[required]')).forEach(function(sel){
       if(sel.value||sel===m.program||sel===m.location)return;
@@ -347,7 +357,7 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
       if(o)setValue(sel,o.text,win);
     });
     if(m.message){
-      var note=['Trial signup via website chat.',f.program?'Program: '+f.program+'.':'',f.location?'Location: '+f.location+'.':'',f.notes||''].filter(Boolean).join(' ');
+      var note=['Sent from the website chat.',f.program?'Program: '+f.program+'.':'',f.location?'Location: '+f.location+'.':'',f.notes||''].filter(Boolean).join(' ');
       setValue(m.message,note,win);
     }
     return m;

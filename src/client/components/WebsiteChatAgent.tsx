@@ -9,7 +9,7 @@ import { useLiveChats } from '../hooks/useLiveChats';
 // DragonDesk: Outreach — inbound website chat agents (one per website, or a
 // catch-all), their settings, and conversations.
 
-type FieldKey = 'firstName' | 'lastName' | 'fullName' | 'email' | 'phone' | 'program' | 'location' | 'message';
+type FieldKey = 'firstName' | 'lastName' | 'fullName' | 'email' | 'phone' | 'company' | 'program' | 'location' | 'message';
 
 interface AgentConfig {
   id: number;
@@ -73,6 +73,7 @@ const FIELD_LABELS: { key: FieldKey; label: string }[] = [
   { key: 'fullName', label: 'Full name (single field)' },
   { key: 'email', label: 'Email' },
   { key: 'phone', label: 'Phone' },
+  { key: 'company', label: 'Business / studio name' },
   { key: 'program', label: 'Program / interest' },
   { key: 'location', label: 'Location' },
   { key: 'message', label: 'Message / notes' },
