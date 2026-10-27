@@ -1,4 +1,5 @@
 import { pool } from '../models/database';
+import { visitorInAudience } from './audienceMatch';
 
 // Outreach website chat agents. An instance can run several (one per website,
 // say); each lists the domains it appears on. The widget picks the agent whose
@@ -34,8 +35,14 @@ export interface InboundAgentConfig {
   followUpMinutes: number;
   followUpMessage: string;
   requirePhone: boolean;
+  audienceId: number | null;
+  purpose: AgentPurpose;
   updatedAt: string;
 }
+
+// 'signup': win new visitors (trial signup tool). 'support': help existing
+// customers with questions and scheduling (no signup tool).
+export type AgentPurpose = 'signup' | 'support';
 
 export const DEFAULT_BOOKING_LABEL = 'Pick your first class';
 export const DEFAULT_FOLLOW_UP = "Were you able to pick a class and get started? If anything got in the way, I'm happy to help.";
@@ -100,6 +107,8 @@ function normalize(row: any): InboundAgentConfig {
     followUpMinutes: clampInt(row.followUpMinutes, 1, 120, 3),
     followUpMessage: row.followUpMessage || DEFAULT_FOLLOW_UP,
     requirePhone: row.requirePhone !== false,
+    audienceId: row.audienceId ?? null,
+    purpose: row.purpose === 'support' ? 'support' : 'signup',
     updatedAt: row.updatedAt,
   };
 }
@@ -164,6 +173,9 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
     followUpMinutes: input.followUpMinutes === undefined ? current.followUpMinutes : clampInt(input.followUpMinutes, 1, 120, current.followUpMinutes),
     followUpMessage: str(input.followUpMessage, 500) || current.followUpMessage,
     requirePhone: typeof input.requirePhone === 'boolean' ? input.requirePhone : current.requirePhone,
+    audienceId: input.audienceId === undefined ? current.audienceId
+      : (Number.isInteger(Number(input.audienceId)) && Number(input.audienceId) > 0 ? Number(input.audienceId) : null),
+    purpose: input.purpose === 'support' || input.purpose === 'signup' ? input.purpose : current.purpose,
   };
 
   const result = await pool.query(
@@ -173,7 +185,7 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
        "formPageUrl"=$12, "formSelector"=$13, "fieldMap"=$14, "updatedBy"=$15,
        "autoOpen"=$17, "autoOpenDelay"=$18, "autoOpenScroll"=$19,
        "bookingUrl"=$20, "bookingLabel"=$21, "followUpEnabled"=$22, "followUpMinutes"=$23,
-       "followUpMessage"=$24, "requirePhone"=$25,
+       "followUpMessage"=$24, "requirePhone"=$25, "audienceId"=$26, purpose=$27,
        "updatedAt"=CURRENT_TIMESTAMP
      WHERE id=$16 RETURNING *`,
     [next.name, next.domains.join(','), next.enabled, next.agentName, next.businessName, next.greeting,
@@ -181,7 +193,7 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
      next.formPageUrl, next.formSelector, JSON.stringify(fieldMap), userId, id,
      next.autoOpen, next.autoOpenDelay, next.autoOpenScroll,
      next.bookingUrl, next.bookingLabel, next.followUpEnabled, next.followUpMinutes,
-     next.followUpMessage, next.requirePhone]
+     next.followUpMessage, next.requirePhone, next.audienceId, next.purpose]
   );
   return normalize(result.rows[0]);
 }
@@ -191,14 +203,25 @@ export async function deleteAgent(id: number): Promise<boolean> {
   return (result.rowCount || 0) > 0;
 }
 
-// The agent for a page: an enabled agent listing its domain, else an enabled
-// agent with no domains (the catch-all). Mirrors the widget's own choice, for
-// chats sent by scripts cached from before an agent id was included.
-export function pickAgentForHost(agents: InboundAgentConfig[], host: string): InboundAgentConfig | null {
-  const live = agents.filter(a => a.enabled);
-  return live.find(a => a.domains.length && domainMatches(host, a.domains))
-    || live.find(a => !a.domains.length)
-    || null;
+// The agent a particular visitor sees on a page. Agents assigned to this
+// website come first, then the catch-all agents; within each, an agent for an
+// audience the visitor is in wins (oldest first), else the one for everyone.
+export async function pickAgentForVisitor(
+  agents: InboundAgentConfig[], host: string, visitorId: string | null, token: string,
+): Promise<InboundAgentConfig | null> {
+  const live = agents.filter(a => a.enabled).sort((a, b) => a.id - b.id);
+  const groups = [
+    live.filter(a => a.domains.length && domainMatches(host, a.domains)),
+    live.filter(a => !a.domains.length),
+  ];
+  for (const group of groups) {
+    for (const a of group.filter(x => x.audienceId)) {
+      if (await visitorInAudience(a.audienceId!, visitorId, token)) return a;
+    }
+    const everyone = group.find(x => !x.audienceId);
+    if (everyone) return everyone;
+  }
+  return null;
 }
 
 // What the widget needs in the browser. Never includes the prompt material.
@@ -219,6 +242,9 @@ export function publicAgentConfig(cfg: InboundAgentConfig) {
     bookingUrl: cfg.bookingUrl,
     followUpEnabled: cfg.followUpEnabled,
     followUpMinutes: cfg.followUpMinutes,
+    // Shown only to an audience: the widget asks the server whether this
+    // visitor qualifies (the audience itself stays server-side).
+    targeted: !!cfg.audienceId,
   };
 }
 

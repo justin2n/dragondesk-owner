@@ -6,6 +6,7 @@ import { parseUtms } from '../utils/attribution';
 import { verifyClickSignature } from '../utils/emailClickTracking';
 import { listAgents, publicAgentConfig } from '../services/inboundAgent';
 import { buildInboundAgentWidget } from '../services/inboundAgentWidget';
+import { checkBehaviorAudience } from '../services/audienceMatch';
 
 const router = Router();
 
@@ -593,47 +594,6 @@ function matchesUrlTarget(
     case 'startsWith': return h.startsWith(v);
     default: return h.includes(v); // 'contains'
   }
-}
-
-async function checkBehaviorAudience(
-  visitorId: string,
-  token: string,
-  rules: any[],
-  operator: 'any' | 'all'
-): Promise<boolean> {
-  const results = await Promise.all(rules.map(async (rule) => {
-    if (rule.type === 'clicked_selector') {
-      const r = await pool.query(
-        `SELECT 1 FROM tracking_events WHERE "visitorId"=$1 AND token=$2 AND "eventType"='click' AND selector LIKE $3 LIMIT 1`,
-        [visitorId, token, `%${rule.value}%`]
-      );
-      return r.rows.length > 0;
-    }
-    if (rule.type === 'visited_page') {
-      const r = await pool.query(
-        `SELECT 1 FROM tracking_events WHERE "visitorId"=$1 AND token=$2 AND "eventType"='pageview' AND "pagePath" ILIKE $3 LIMIT 1`,
-        [visitorId, token, `%${rule.value}%`]
-      );
-      return r.rows.length > 0;
-    }
-    if (rule.type === 'submitted_form') {
-      const r = await pool.query(
-        `SELECT 1 FROM tracking_events WHERE "visitorId"=$1 AND token=$2 AND "eventType"='form_submit' LIMIT 1`,
-        [visitorId, token]
-      );
-      return r.rows.length > 0;
-    }
-    if (rule.type === 'min_pages') {
-      const r = await pool.query(
-        `SELECT COUNT(*) as cnt FROM tracking_events WHERE "visitorId"=$1 AND token=$2 AND "eventType"='pageview'`,
-        [visitorId, token]
-      );
-      return parseInt(r.rows[0].cnt) >= parseInt(rule.value);
-    }
-    return false;
-  }));
-
-  return operator === 'all' ? results.every(Boolean) : results.some(Boolean);
 }
 
 // ─── Authenticated management endpoints ─────────────────────────────────────

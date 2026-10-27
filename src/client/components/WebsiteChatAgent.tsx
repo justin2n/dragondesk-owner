@@ -36,9 +36,12 @@ interface AgentConfig {
   followUpMinutes: number;
   followUpMessage: string;
   requirePhone: boolean;
+  audienceId: number | null;
+  purpose: 'signup' | 'support';
 }
 
 interface AgentRow extends AgentConfig {
+  audienceName: string | null;
   stats: { chats: number; signups: number; bookings: number };
 }
 
@@ -96,6 +99,7 @@ const pathOf = (url: string | null) => {
 const WebsiteChatAgent = () => {
   const { toast, confirm } = useToast();
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [audiences, setAudiences] = useState<{ id: number; name: string }[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [config, setConfig] = useState<AgentConfig | null>(null);
   const [domainsText, setDomainsText] = useState('');
@@ -123,6 +127,7 @@ const WebsiteChatAgent = () => {
     setAgents(data.agents);
     setTrackingToken(data.trackingToken);
     setAiConfigured(data.aiConfigured);
+    setAudiences(data.audiences || []);
     const want = data.agents.find((a: AgentRow) => a.id === (selectId ?? selectedId)) || data.agents[0];
     if (want) select(want);
   };
@@ -257,6 +262,9 @@ const WebsiteChatAgent = () => {
               <span className={`${styles.status} ${a.enabled ? styles.live : ''}`}><span className={styles.dot} />{a.enabled ? 'Live' : 'Off'}</span>
             </span>
             <span className={styles.agentCardSites}>{a.domains.length ? a.domains.join(', ') : 'All other websites'}</span>
+            <span className={styles.agentCardSites}>
+              {a.audienceName ? `Only: ${a.audienceName}` : 'Everyone'}{a.purpose === 'support' ? ' · Helps customers' : ' · Signs up visitors'}
+            </span>
             <span className={styles.agentCardStats}>{a.stats.chats} chats, {a.stats.bookings} booking clicks (30 days)</span>
           </button>
         ))}
@@ -319,6 +327,33 @@ const WebsiteChatAgent = () => {
               </span>
             </div>
           </div>
+          <div className={styles.row}>
+            <div className={outreach.formGroup}>
+              <label>Audience</label>
+              <select className={outreach.input} value={config.audienceId ?? ''}
+                onChange={(e) => update('audienceId', e.target.value ? parseInt(e.target.value, 10) : null)}>
+                <option value="">Everyone</option>
+                {audiences.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <span className={styles.hint}>
+                Show this agent only to visitors in an audience, such as current customers. Everyone else on these websites sees the agent set
+                to Everyone. Visitors count as contacts once they've filled in a form or signed up in the chat on that browser.
+              </span>
+            </div>
+            <div className={outreach.formGroup}>
+              <label>Purpose</label>
+              <div className={styles.radioGroup}>
+                <label className={styles.radio}>
+                  <input type="radio" name="purpose" checked={config.purpose === 'signup'} onChange={() => update('purpose', 'signup')} />
+                  <span>Sign up new visitors for your offer</span>
+                </label>
+                <label className={styles.radio}>
+                  <input type="radio" name="purpose" checked={config.purpose === 'support'} onChange={() => update('purpose', 'support')} />
+                  <span>Help existing customers with questions and scheduling</span>
+                </label>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className={styles.section}>
@@ -355,12 +390,12 @@ const WebsiteChatAgent = () => {
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>What the agent knows</h3>
-          <div className={outreach.formGroup}>
+          {config.purpose === 'signup' && <div className={outreach.formGroup}>
             <label>Trial offer</label>
             <textarea className={outreach.textarea} rows={3} value={config.trialOffer} maxLength={2000}
               onChange={(e) => update('trialOffer', e.target.value)}
               placeholder="e.g., One free week of unlimited classes for new adults, including a free uniform. Kids get two free classes." />
-          </div>
+          </div>}
           <div className={outreach.formGroup}>
             <label>About the business</label>
             <textarea className={outreach.textarea} rows={8} value={config.businessInfo} maxLength={8000}
@@ -373,24 +408,27 @@ const WebsiteChatAgent = () => {
               onChange={(e) => update('aiInstructions', e.target.value)}
               placeholder="e.g., Mention that beginners are welcome in every class. If someone asks about competition team, say coach Mike will reach out." />
           </div>
-          <label className={styles.checkbox}>
-            <input type="checkbox" checked={config.requirePhone}
-              onChange={(e) => update('requirePhone', e.target.checked)} />
-            Require a phone number to sign up
-          </label>
-          <span className={styles.hint}>Turn this on if your website's signup form requires a phone number, or that form will fail.</span>
+          {config.purpose === 'signup' && <>
+            <label className={styles.checkbox}>
+              <input type="checkbox" checked={config.requirePhone}
+                onChange={(e) => update('requirePhone', e.target.checked)} />
+              Require a phone number to sign up
+            </label>
+            <span className={styles.hint}>Turn this on if your website's signup form requires a phone number, or that form will fail.</span>
+          </>}
         </section>
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Booking link and follow-up</h3>
           <div className={styles.row}>
             <div className={outreach.formGroup}>
-              <label>Booking link</label>
+              <label>{config.purpose === 'support' ? 'Scheduling link' : 'Booking link'}</label>
               <input className={outreach.input} value={config.bookingUrl} maxLength={1000}
                 onChange={(e) => update('bookingUrl', e.target.value)} placeholder="e.g., https://cp.mystudio.io/t/..." />
               <span className={styles.hint}>
-                Where visitors pick their first class. The agent shares it as a button right after signup, and clicks on it are this
-                agent's main result. It can be on any website.
+                {config.purpose === 'support'
+                  ? "Where customers book or change classes. The agent shares it as a button whenever they want to schedule, and clicks on it are this agent's main result. It can be on any website."
+                  : "Where visitors pick their first class. The agent shares it as a button right after signup, and clicks on it are this agent's main result. It can be on any website."}
               </span>
             </div>
             <div className={outreach.formGroup}>
@@ -457,6 +495,7 @@ const WebsiteChatAgent = () => {
           </p>
         </section>
 
+        {config.purpose === 'signup' && (
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Your website's signup form</h3>
           <label className={styles.checkbox}>
@@ -507,6 +546,7 @@ const WebsiteChatAgent = () => {
             </>
           )}
         </section>
+        )}
 
         <div className={styles.saveRow}>
           <button type="submit" className={outreach.saveBtn} disabled={isSaving}>
