@@ -40,7 +40,10 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
   var C=CFG.accentColor||'#dc2626';
   var host=d.createElement('div');
   host.id='dd-agent';
-  host.style.cssText='position:fixed;bottom:0;right:0;width:0;height:0;z-index:2147483645;';
+  /* Above Optimize promo bars (2147483646): on phones the open chat is full
+     screen, and a bar on top would hide its header and close button. Offer
+     modals share this level and, added later, still show over the chat. */
+  host.style.cssText='position:fixed;bottom:0;right:0;width:0;height:0;z-index:2147483647;';
   var root=host.attachShadow?host.attachShadow({mode:'open'}):host;
   var ICON_CHAT='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   var ICON_X='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
