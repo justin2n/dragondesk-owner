@@ -305,6 +305,7 @@ publicRouter.post('/chat', async (req: Request, res: Response) => {
          "leadData" = COALESCE($4::jsonb, "leadData"),
          "nativeStatus" = CASE WHEN $5 THEN 'pending' ELSE "nativeStatus" END,
          "followUpPending" = false,
+         "lastActiveAt" = NOW(),
          "updatedAt" = CURRENT_TIMESTAMP
        WHERE id = $6`,
       [JSON.stringify(messages), pageUrl, signup?.memberId ?? null,
@@ -399,6 +400,21 @@ publicRouter.post('/followup', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/tracking/agent/ping  { token, chatId, vid }
+// Heartbeat from an open, visible chat window (every 30s), so staff can see
+// who is chatting right now.
+publicRouter.post('/ping', async (req: Request, res: Response) => {
+  try {
+    const chat = await ownChat(req);
+    if (!chat) { res.status(404).json({ error: 'Chat not found' }); return; }
+    await pool.query(`UPDATE inbound_chats SET "lastActiveAt" = NOW() WHERE id = $1`, [chat.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Inbound agent ping error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ─── Admin endpoints (mounted at /api/inbound-agent) ────────────────────────
 
 export const adminRouter = Router();
@@ -424,6 +440,33 @@ adminRouter.get('/agents', async (_req: AuthRequest, res: Response) => {
     });
   } catch (err) {
     console.error('Inbound agent list error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/inbound-agent/live — chats active in the last 90 seconds, with the
+// contact each one belongs to: the lead the chat created, or a known contact
+// recognized from an earlier visit on this browser.
+export const LIVE_WINDOW_SECONDS = 90;
+adminRouter.get('/live', async (_req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.id AS "chatId", c."visitorId", c."agentId", a.name AS "agentLabel", c."lastActiveAt",
+              COALESCE(c."memberId", vi."memberId") AS "memberId"
+         FROM inbound_chats c
+         LEFT JOIN inbound_agent_config a ON a.id = c."agentId"
+         LEFT JOIN LATERAL (
+           SELECT "memberId" FROM visitor_identities
+            WHERE "visitorId" = c."visitorId" AND token = c.token AND "memberId" IS NOT NULL
+            ORDER BY (type = 'email') DESC LIMIT 1
+         ) vi ON true
+        WHERE c."lastActiveAt" > NOW() - make_interval(secs => $1)
+        ORDER BY c."lastActiveAt" DESC`,
+      [LIVE_WINDOW_SECONDS]
+    );
+    res.json({ live: result.rows });
+  } catch (err) {
+    console.error('Inbound agent live error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

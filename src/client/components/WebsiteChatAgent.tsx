@@ -3,6 +3,8 @@ import { api } from '../utils/api';
 import { useToast } from './Toast';
 import outreach from '../pages/DragonDeskOutreach.module.css';
 import styles from './WebsiteChatAgent.module.css';
+import ChattingNowBadge from './ChattingNowBadge';
+import { useLiveChats } from '../hooks/useLiveChats';
 
 // DragonDesk: Outreach — inbound website chat agents (one per website, or a
 // catch-all), their settings, and conversations.
@@ -106,6 +108,7 @@ const WebsiteChatAgent = () => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const liveChats = useLiveChats();
 
   const select = (agent: AgentConfig) => {
     setSelectedId(agent.id);
@@ -562,6 +565,7 @@ const WebsiteChatAgent = () => {
                     <td>{c.userTurns}</td>
                     <td>
                       <div className={styles.badges}>
+                        {liveChats.byChat.has(c.id) && <ChattingNowBadge agentLabel={c.agentLabel} />}
                         {c.bookingClickedAt ? (
                           <span className={`${outreach.badge} ${outreach.active}`}>Clicked to book</span>
                         ) : (

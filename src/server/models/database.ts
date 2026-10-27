@@ -975,6 +975,10 @@ async function initializeDatabase() {
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpSentAt" TIMESTAMP`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpText" TEXT`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpPending" BOOLEAN DEFAULT false`);
+    // Last sign of life from an open chat window (messages and heartbeats),
+    // behind the "Chatting now" badge.
+    await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "lastActiveAt" TIMESTAMP`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_inbound_chats_active ON inbound_chats("lastActiveAt" DESC)`);
 
     const hadAgentId = await client.query(
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'inbound_chats' AND column_name = 'agentId'`

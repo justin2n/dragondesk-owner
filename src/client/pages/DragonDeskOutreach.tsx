@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Campaign, Audience } from '../types';
 import { useToast } from '../components/Toast';
@@ -11,7 +12,8 @@ type Tab = 'calls' | 'website';
 const DragonDeskOutreach = () => {
   const { toast, confirm } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [activeTab, setActiveTab] = useState<Tab>('calls');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(searchParams.get('tab') === 'website' ? 'website' : 'calls');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [isLoading, setIsLoading] = useState(true);
