@@ -20,10 +20,20 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
      else the catch-all with no domains. Same rule as the server. */
   var HOST=location.hostname.toLowerCase().replace(/^www\./,'');
   function covers(a){for(var i=0;i<a.domains.length;i++){var dm=a.domains[i];if(HOST===dm||HOST.slice(-dm.length-1)==='.'+dm)return true;}return false;}
-  var CFG=null;
-  (ALL.agents||[]).forEach(function(a){if(!CFG&&a.domains&&a.domains.length&&covers(a))CFG=a;});
-  if(!CFG)(ALL.agents||[]).forEach(function(a){if(!CFG&&(!a.domains||!a.domains.length))CFG=a;});
-  if(!CFG)return;
+  var LIST=ALL.agents||[];
+  var onSite=LIST.filter(function(a){return a.domains&&a.domains.length&&covers(a);});
+  var catchAll=LIST.filter(function(a){return !a.domains||!a.domains.length;});
+  function forEveryone(g){for(var i=0;i<g.length;i++)if(!g[i].targeted)return g[i];return null;}
+  var fallback=forEveryone(onSite)||forEveryone(catchAll);
+  /* Agents shown only to an audience need the server to say whether this
+     visitor is in it; wait for that so the wrong agent never flashes up. */
+  if(!onSite.concat(catchAll).some(function(a){return a.targeted;})){if(fallback)boot(fallback);return;}
+  fetch(EP+'/agent/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,vid:VID,host:location.hostname}),credentials:'omit'})
+    .then(function(r){return r.json();})
+    .then(function(j){var a=null;LIST.forEach(function(x){if(j&&x.id===j.agentId)a=x;});if(a)boot(a);})
+    .catch(function(){if(fallback)boot(fallback);});
+
+  function boot(CFG){
   var AEP=EP+'/agent';
   var SKEY='_dd_agent_'+CFG.id;
 
@@ -431,6 +441,7 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     setTimeout(function(){if(phase==='loading'){phase='timeout';f.remove();onThisPage('form page took too long to load');}},20000);
     f.src=target.href;
     (d.body||d.documentElement).appendChild(f);
+  }
   }
 })(window,document);
 `;
