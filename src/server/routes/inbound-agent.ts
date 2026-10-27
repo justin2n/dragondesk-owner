@@ -44,6 +44,7 @@ function toolsFor(cfg: InboundAgentConfig): Anthropic.Tool[] {
           phone: { type: 'string', description: cfg.requirePhone ? 'Phone number (required)' : 'Phone number, if the visitor shared one' },
           program: { type: 'string', description: 'The program, class, or service they are interested in, using a name from the list provided when one fits' },
           location: { type: 'string', description: 'Which location they want, when the business has more than one' },
+          company: { type: 'string', description: "The visitor's own business or organization name, when they are signing up on behalf of one (for example a studio owner booking a demo)" },
           notes: { type: 'string', description: 'Anything the staff should know: goals, experience, preferred days or times, questions to follow up on' },
         },
         required: cfg.requirePhone ? ['firstName', 'lastName', 'email', 'phone'] : ['firstName', 'lastName', 'email'],
@@ -76,7 +77,7 @@ How to run the conversation:
 - Keep each reply to one to three short sentences, in a warm, plain, conversational tone. Write plain text: no markdown lists, headings, or bold. The chat window cannot render them.
 - Links are the one exception. The chat window shows a link as a button, so write it as [Button label](https://...) with a short action label of two to five words, like [Pick your first class](https://...), and leave the address out of your sentence. Only share links that appear in the information above; never make one up.
 - Answer from the information above. If something is not covered (exact prices, schedules, policies), do not guess; say a team member will follow up with the details, and keep moving toward the trial.
-- When the visitor is interested, collect their first and last name, email, phone number, and what they are interested in (the program, class, or service), unless the offer makes that obvious. If the business has more than one location, ask which one they want. Ask for one or two things at a time. ${cfg.requirePhone ? 'A phone number is required to sign up; if they hesitate, explain it is how the team confirms their first visit.' : 'Phone is helpful but optional if they would rather not share it.'}
+- When the visitor is interested, collect their first and last name, email, phone number, and what they are interested in (the program, class, or service), unless the offer makes that obvious. If the business has more than one location, ask which one they want. If the visitor is signing up for their own business (for example, a studio owner booking a demo), also ask for the business name. Ask for one or two things at a time. ${cfg.requirePhone ? 'A phone number is required to sign up; if they hesitate, explain it is how the team confirms their first visit.' : 'Phone is helpful but optional if they would rather not share it.'}
 - Before signing them up, repeat the details back once and ask them to confirm. After they confirm, call submit_trial_signup.
 - Only tell the visitor they are signed up after submit_trial_signup has returned success. If it returns an error, explain what needs fixing and ask for it.
 ${cfg.bookingUrl ? `- Booking link: once submit_trial_signup succeeds, give the visitor this button so they can pick their first class: [${cfg.bookingLabel}](${cfg.bookingUrl}). Share it whenever they ask how to book, too.\n` : ''}- A visitor message may start with a line beginning "${FOLLOW_UP_NOTE}". That line comes from the chat system, not the visitor: it repeats a follow-up the chat showed them. Read their reply in that light, and if they could not book, help them finish.
@@ -94,6 +95,7 @@ interface SignupFields {
   phone: string;
   program: string;
   location: string;
+  company: string;
   notes: string;
 }
 
@@ -112,6 +114,7 @@ async function runSignupTool(
     phone: clean(input?.phone, 40),
     program: clean(input?.program, 120),
     location: clean(input?.location, 120),
+    company: clean(input?.company, 120),
     notes: clean(input?.notes, 1000),
   };
   if (!fields.firstName || !fields.lastName || !fields.email) {
@@ -134,6 +137,7 @@ async function runSignupTool(
     'Signed up for the trial through the website chat agent.',
     fields.program ? `Program interest: ${fields.program}.` : '',
     fields.location ? `Location: ${fields.location}.` : '',
+    fields.company ? `Business: ${fields.company}.` : '',
     fields.notes,
   ].filter(Boolean).join(' ');
 
@@ -149,6 +153,7 @@ async function runSignupTool(
     phone: fields.phone || null,
     programType: fields.program || null,
     locationId: loc.rows[0]?.id ?? null,
+    companyName: fields.company || null,
     notes,
     source: 'Website Chat Agent',
     visitorId: chat.visitorId,

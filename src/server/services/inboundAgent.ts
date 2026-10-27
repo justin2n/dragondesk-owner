@@ -6,7 +6,7 @@ import { pool } from '../models/database';
 
 // Lead-form fields the widget knows how to find on the client's site. Each can
 // be pinned to a CSS selector in fieldMap; unmapped fields are auto-detected.
-export const NATIVE_FIELDS = ['firstName', 'lastName', 'fullName', 'email', 'phone', 'program', 'location', 'message'] as const;
+export const NATIVE_FIELDS = ['firstName', 'lastName', 'fullName', 'email', 'phone', 'company', 'program', 'location', 'message'] as const;
 export type NativeField = typeof NATIVE_FIELDS[number];
 
 export interface InboundAgentConfig {
