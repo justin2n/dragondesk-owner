@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import styles from './SalesSignals.module.css';
+import ChattingNowBadge from '../components/ChattingNowBadge';
+import { useLiveChats } from '../hooks/useLiveChats';
 
 interface HotLead {
   visitorId: string;
@@ -32,6 +34,8 @@ const timeAgo = (dateStr: string): string => {
 
 const SalesSignals: React.FC = () => {
   const [leads, setLeads] = useState<HotLead[]>([]);
+  // Visitors chatting with a website chat agent right now.
+  const liveChats = useLiveChats();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(10);
@@ -187,6 +191,11 @@ const SalesSignals: React.FC = () => {
                     )}
                   </div>
                   <div className={styles.badges}>
+                    {(() => {
+                      const live = liveChats.byVisitor.get(lead.visitorId)
+                        || (lead.memberTableId != null ? liveChats.byMember.get(lead.memberTableId) : undefined);
+                      return live ? <ChattingNowBadge agentLabel={live.agentLabel} /> : null;
+                    })()}
                     <span className={`${styles.urgencyBadge} ${urgency.cls}`}>
                       {urgency.label}
                     </span>

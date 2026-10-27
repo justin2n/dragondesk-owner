@@ -9,6 +9,8 @@ import StripeElements from '../components/StripeElements';
 import BeltProgressionCard from '../components/BeltProgressionCard';
 import QRCodeDisplay from '../components/QRCodeDisplay';
 import styles from './Contacts.module.css';
+import ChattingNowBadge from '../components/ChattingNowBadge';
+import { useLiveChats } from '../hooks/useLiveChats';
 
 const RANKINGS: Record<string, string[]> = {
   'No Program Selected': ['N/A'],
@@ -203,6 +205,8 @@ const Contacts = () => {
   // signal DragonDesk: Pulse uses — surfaced here so staff spot hot leads
   // without opening Pulse. Keyed by member id; only "warm+" scores are shown.
   const [intentScores, setIntentScores] = useState<Record<number, number>>({});
+  // Contacts chatting with a website chat agent right now.
+  const liveChats = useLiveChats();
   const [filters, setFilters] = useState({
     accountStatus: '',
     programType: '',
@@ -946,6 +950,7 @@ const Contacts = () => {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {liveChats.byMember.has(member.id) && <ChattingNowBadge agentLabel={liveChats.byMember.get(member.id)!.agentLabel} />}
           {(() => {
             const tier = intentTier(intentScores[member.id]);
             return tier ? (
@@ -1046,6 +1051,7 @@ const Contacts = () => {
       <td>{member.phone}</td>
       <td>
         <span className={`${styles.badge} ${styles[member.accountStatus]}`}>{STAGE_LABELS[member.accountStatus] || member.accountStatus}</span>
+        {liveChats.byMember.has(member.id) && <ChattingNowBadge agentLabel={liveChats.byMember.get(member.id)!.agentLabel} style={{ marginLeft: 6 }} />}
         {(() => {
           const tier = intentTier(intentScores[member.id]);
           return tier ? (

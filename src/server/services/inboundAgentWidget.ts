@@ -212,6 +212,13 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     if(w.innerWidth<=480){if(CFG.greeting){teaser.classList.remove('hide');}}
     else setOpen(true);
   }
+  /* Heartbeat while the chat is open and in view, so staff see "Chatting now". */
+  function ping(){
+    if(state.open&&state.chatId&&!d.hidden)post('/ping',{token:TOKEN,vid:VID,chatId:state.chatId}).catch(function(){});
+  }
+  setInterval(ping,30000);
+  d.addEventListener('visibilitychange',ping);
+  launch.addEventListener('click',function(){setTimeout(ping,0);});
   setInterval(checkFollowUp,10000);
   d.addEventListener('visibilitychange',function(){if(!d.hidden)checkFollowUp();});
   w.addEventListener('focus',checkFollowUp);
