@@ -138,7 +138,7 @@ async function initializeDatabase() {
         "lastCheckInAt" TIMESTAMP,
         "attendanceStreak" INTEGER DEFAULT 0,
         "lastPromotionDate" TIMESTAMP,
-        "pricingPlanId" INTEGER REFERENCES pricing_plans(id) ON DELETE SET NULL,
+        "pricingPlanId" INTEGER,
         "syncedFromMyStudio" BOOLEAN DEFAULT false,
         "companyName" TEXT,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -585,6 +585,16 @@ async function initializeDatabase() {
       )
     `);
 
+    // members is created before pricing_plans, so its pricingPlanId foreign
+    // key is added here. Uses Postgres's default constraint name, so databases
+    // that already have it are left alone.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE members ADD CONSTRAINT "members_pricingPlanId_fkey"
+          FOREIGN KEY ("pricingPlanId") REFERENCES pricing_plans(id) ON DELETE SET NULL;
+      EXCEPTION WHEN others THEN NULL; END $$;
+    `);
+
     // Subscriptions
     await client.query(`
       CREATE TABLE IF NOT EXISTS subscriptions (
@@ -1022,8 +1032,6 @@ async function initializeDatabase() {
     // and for participant→account-holder lookups (used heavily during CSV import).
     await client.query(`CREATE INDEX IF NOT EXISTS idx_members_location ON members("locationId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_status ON members("accountStatus")`);
-    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_member_type ON members("memberType")`);
-    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_holder ON members("accountHolderId")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_members_created_at ON members("createdAt")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_events_start ON events("startDateTime")`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_events_location ON events("locationId")`);
@@ -1184,6 +1192,11 @@ async function initializeDatabase() {
           REFERENCES members(id) ON DELETE SET NULL;
       EXCEPTION WHEN others THEN NULL; END $$;
     `);
+    // Indexes for the two columns above. They must come after the columns:
+    // created earlier, they failed on any database without them yet, which
+    // aborted the rest of startup setup on every boot.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_member_type ON members("memberType")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_members_account_holder ON members("accountHolderId")`);
     // Make email nullable so participants (kids) don't need their own email
     await client.query(`
       DO $$ BEGIN
