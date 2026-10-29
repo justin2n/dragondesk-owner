@@ -38,6 +38,12 @@ interface AgentConfig {
   requirePhone: boolean;
   audienceId: number | null;
   purpose: 'signup' | 'support';
+  formFields: {
+    required: ('lastName' | 'phone' | 'company' | 'program' | 'location')[];
+    options: { program?: string[]; location?: string[] };
+    extras: { key: string; label: string; kind: 'select' | 'checkbox' | 'text'; options: string[] }[];
+  } | null;
+  formFieldsAt: string | null;
 }
 
 interface AgentRow extends AgentConfig {
@@ -165,6 +171,19 @@ const WebsiteChatAgent = () => {
 
   const update = <K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) =>
     setConfig(c => (c ? { ...c, [key]: value } : c));
+
+  // Forget what was read from the form, so the widget reads it again on the
+  // next chat (after the website's form changes, say).
+  const rereadForm = async () => {
+    if (!config) return;
+    try {
+      await api.put(`/inbound-agent/agents/${config.id}`, { rescanForm: true });
+      await loadAgents(config.id);
+      toast('The form will be read again at the start of the next chat.', 'success');
+    } catch (error: any) {
+      toast(error.message || 'Failed to reset the form check', 'error');
+    }
+  };
 
   const save = async (next?: AgentConfig) => {
     const body = next || config;
@@ -510,6 +529,31 @@ const WebsiteChatAgent = () => {
           </p>
           {config.submitNativeForm && (
             <>
+              <div className={styles.advanced}>
+                <strong>What your form asks for</strong>
+                {config.formFields ? (
+                  <>
+                    <p className={styles.hint}>
+                      Besides name and email, your form requires:{' '}
+                      {[
+                        ...config.formFields.required.map(k => {
+                          const label = { lastName: 'last name', phone: 'phone', company: 'business name', program: 'program', location: 'location' }[k];
+                          const opts = (k === 'program' || k === 'location') ? config.formFields!.options[k] : undefined;
+                          return opts?.length ? `${label} (${opts.length} choices)` : label;
+                        }),
+                        ...config.formFields.extras.map(e => e.kind === 'checkbox' ? `"${e.label}" checkbox` : `"${e.label}"`),
+                      ].join(', ') || 'nothing else'}
+                      . The agent collects all of it before signing someone up.
+                    </p>
+                    <span className={styles.hint}>
+                      Read from your form {config.formFieldsAt ? new Date(config.formFieldsAt).toLocaleString() : ''}. It's re-read daily.
+                    </span>
+                  </>
+                ) : (
+                  <p className={styles.hint}>Not read yet. The widget reads your form at the start of the next chat, so the agent knows every required field.</p>
+                )}
+                <button type="button" className={styles.linkBtn} onClick={rereadForm}>Read the form again</button>
+              </div>
               <div className={outreach.formGroup}>
                 <label>Form page URL</label>
                 <input className={outreach.input} value={config.formPageUrl} maxLength={1000}
