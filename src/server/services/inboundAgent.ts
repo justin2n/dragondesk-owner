@@ -1,5 +1,6 @@
 import { pool } from '../models/database';
 import { visitorInAudience } from './audienceMatch';
+import { FormFields, parseStoredFormFields } from './formFields';
 
 // Outreach website chat agents. An instance can run several (one per website,
 // say); each lists the domains it appears on. The widget picks the agent whose
@@ -37,6 +38,8 @@ export interface InboundAgentConfig {
   requirePhone: boolean;
   audienceId: number | null;
   purpose: AgentPurpose;
+  formFields: FormFields | null;
+  formFieldsAt: string | null;
   updatedAt: string;
 }
 
@@ -109,6 +112,8 @@ function normalize(row: any): InboundAgentConfig {
     requirePhone: row.requirePhone !== false,
     audienceId: row.audienceId ?? null,
     purpose: row.purpose === 'support' ? 'support' : 'signup',
+    formFields: parseStoredFormFields(row.formFields),
+    formFieldsAt: row.formFieldsAt ? new Date(row.formFieldsAt).toISOString() : null,
     updatedAt: row.updatedAt,
   };
 }
@@ -178,6 +183,12 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
     purpose: input.purpose === 'support' || input.purpose === 'signup' ? input.purpose : current.purpose,
   };
 
+  // A different form page (or an explicit rescan) means re-reading the form.
+  const resetForm = next.formPageUrl !== current.formPageUrl || (input as any).rescanForm === true;
+  if (resetForm) {
+    await pool.query(`UPDATE inbound_agent_config SET "formFields" = NULL, "formFieldsAt" = NULL WHERE id = $1`, [id]);
+  }
+
   const result = await pool.query(
     `UPDATE inbound_agent_config SET
        name=$1, domains=$2, enabled=$3, "agentName"=$4, "businessName"=$5, greeting=$6, "trialOffer"=$7,
@@ -245,7 +256,18 @@ export function publicAgentConfig(cfg: InboundAgentConfig) {
     // Shown only to an audience: the widget asks the server whether this
     // visitor qualifies (the audience itself stays server-side).
     targeted: !!cfg.audienceId,
+    // When the widget last read the site's form; it re-reads once this is
+    // missing or a day old.
+    formScanAt: cfg.formFieldsAt,
   };
+}
+
+// Store what the widget found on the signup form (already sanitized).
+export async function setFormFields(id: number, fields: FormFields | null): Promise<void> {
+  await pool.query(
+    `UPDATE inbound_agent_config SET "formFields" = $1, "formFieldsAt" = NOW() WHERE id = $2`,
+    [fields ? JSON.stringify(fields) : null, id]
+  );
 }
 
 // '' unless it's an absolute http(s) URL.

@@ -984,6 +984,10 @@ async function initializeDatabase() {
     // its purpose: 'signup' (trial signups) or 'support' (help existing customers).
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "audienceId" INTEGER REFERENCES audiences(id) ON DELETE SET NULL`);
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS purpose TEXT DEFAULT 'signup'`);
+    // What the website's signup form requires (fields, dropdown choices), as
+    // last read by the widget, so the agent collects all of it before signup.
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "formFields" JSONB`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "formFieldsAt" TIMESTAMP`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "linkClicks" INTEGER DEFAULT 0`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "bookingClickedAt" TIMESTAMP`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpSentAt" TIMESTAMP`);

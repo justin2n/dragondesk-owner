@@ -202,6 +202,7 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
   function send(){
     var text=input.value.trim();
     if(!text||busy)return;
+    if(!state.chatId)maybeReadForm();
     input.value='';grow();
     state.msgs.push({r:'v',t:text});busy=true;save();render();
     post('/chat',{token:TOKEN,vid:VID,agentId:CFG.id,chatId:state.chatId,message:text,pageUrl:location.href})
@@ -278,7 +279,9 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
     /* Never a text box: "How many locations?" in a message placeholder isn't a location field. */
     location:function(el,s){return el.tagName!=='TEXTAREA'&&(/location|branch|campus|venue/.test(s)||(el.tagName==='SELECT'&&/studio/.test(s)));},
     company:function(el,s){return el.tagName!=='SELECT'&&el.tagName!=='TEXTAREA'&&/company|business|organi[sz]ation|studio|academy|school name|gym name/.test(s);},
-    message:function(el,s){return el.tagName==='TEXTAREA'||/message|comment|question|note|goal/.test(s);}
+    /* A multi-line box, or a field that's plainly a message. A one-line
+       "Your main goal" is a question of its own, asked by the agent. */
+    message:function(el,s){return el.tagName==='TEXTAREA'||(el.tagName!=='SELECT'&&/message|comment/.test(s));}
   };
   var ORDER=['email','phone','firstName','lastName','company','fullName','location','program','message'];
   function mapFields(box,doc){
@@ -366,11 +369,92 @@ const WIDGET_JS = String.raw`/* DragonDesk Outreach chat agent v1 */
       var o=bestOption(sel,f.program)||bestOption(sel,f.location);
       if(o)setValue(sel,o.text,win);
     });
+    if(f.other)Object.keys(f.other).forEach(function(key){
+      var v=f.other[key],els=[];
+      try{els=[].slice.call(box.querySelectorAll('[name="'+(w.CSS&&CSS.escape?CSS.escape(key):key)+'"]'));}catch(e){}
+      if(!els.length){var byId=doc.getElementById(key);if(byId)els=[byId];}
+      if(!els.length)return;
+      var el=els[0];
+      if(el.type==='checkbox'){if(v===true&&!el.checked)el.click();return;}
+      if(el.type==='radio'){
+        var want=String(v).toLowerCase(),hit=null;
+        els.forEach(function(r){if(!hit&&(labelOf(r,doc).toLowerCase()===want||String(r.value).toLowerCase()===want))hit=r;});
+        if(hit&&!hit.checked)hit.click();
+        return;
+      }
+      setValue(el,v,win);
+    });
     if(m.message){
       var note=['Sent from the website chat.',f.program?'Program: '+f.program+'.':'',f.location?'Location: '+f.location+'.':'',f.notes||''].filter(Boolean).join(' ');
       setValue(m.message,note,win);
     }
     return m;
+  }
+  /* A field's own label, as the visitor would read it. */
+  function labelOf(el,doc){
+    var t=el.getAttribute('aria-label')||'';
+    try{
+      if(!t&&el.id){var l=doc.querySelector('label[for="'+(w.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]');if(l)t=l.textContent;}
+      if(!t){var pl=el.closest('label');if(pl)t=pl.textContent;}
+      if(!t&&el.parentElement){var ls=el.parentElement.querySelectorAll('label');if(ls.length===1&&!ls[0].htmlFor&&el.parentElement.querySelectorAll('input,select,textarea').length===1)t=ls[0].textContent;}
+      if(!t&&el.tagName==='SELECT'&&el.options.length&&!el.options[0].value)t=el.options[0].text;
+    }catch(e){}
+    return String(t||el.getAttribute('placeholder')||el.name||'').replace(/\*/g,'').replace(/\s+/g,' ').trim().slice(0,80);
+  }
+  function optionTexts(sel){return [].slice.call(sel.options).filter(function(o){return o.value&&!o.disabled;}).map(function(o){return o.text.replace(/\s+/g,' ').trim();}).slice(0,40);}
+  function isRequired(el){return el.required||el.getAttribute('aria-required')==='true';}
+  /* What the form needs: which known fields are required, the choices in its
+     program/location dropdowns, and any other required questions. */
+  function readSchema(box,doc){
+    var m=mapFields(box,doc),req=[],options={},extras=[],mapped=[];
+    Object.keys(m).forEach(function(k){
+      var el=m[k];mapped.push(el);
+      if(isRequired(el)&&['lastName','phone','company','program','location'].indexOf(k)>=0)req.push(k);
+      if((k==='program'||k==='location')&&el.tagName==='SELECT')options[k]=optionTexts(el);
+    });
+    var seen={};
+    [].slice.call(box.querySelectorAll('input,select,textarea')).forEach(function(el){
+      var type=(el.type||'').toLowerCase();
+      if(mapped.indexOf(el)>=0||/^(hidden|submit|button|reset|file|password|image)$/.test(type))return;
+      var key=el.name||el.id;if(!key||seen[key])return;
+      if(type==='radio'){
+        var group=[].slice.call(box.querySelectorAll('input[type=radio]')).filter(function(r){return r.name===el.name;});
+        if(!group.some(isRequired))return;
+        seen[key]=1;
+        var fs=el.closest('fieldset'),lg=fs&&fs.querySelector('legend');
+        extras.push({key:key,kind:'select',label:(lg?lg.textContent:key).replace(/\*/g,'').trim().slice(0,80),options:group.map(function(r){return labelOf(r,doc)||r.value;})});
+        return;
+      }
+      if(!isRequired(el))return;
+      seen[key]=1;
+      extras.push({key:key,kind:type==='checkbox'?'checkbox':(el.tagName==='SELECT'?'select':'text'),label:labelOf(el,doc),options:el.tagName==='SELECT'?optionTexts(el):[]});
+    });
+    return {required:req,options:options,extras:extras.slice(0,8)};
+  }
+  /* Read the form once a day (the server remembers it), in the background
+     when the visitor first writes, so the agent knows what to ask for. */
+  function maybeReadForm(){
+    if(!CFG.submitNativeForm||state.formRead)return;
+    if(CFG.formScanAt&&Date.now()-Date.parse(CFG.formScanAt)<864e5)return;
+    state.formRead=1;save();
+    var target;try{target=new URL(CFG.formPageUrl||location.href,location.href);}catch(e){return;}
+    function send(schema){post('/form-fields',{token:TOKEN,agentId:CFG.id,fields:schema}).catch(function(){});}
+    if(target.origin!==location.origin)return;
+    if(target.href.split('#')[0]===location.href.split('#')[0]){var here=findForm(d);if(here)send(readSchema(here,d));return;}
+    var f=d.createElement('iframe'),start=Date.now();
+    f.name='dd-agent-frame';f.setAttribute('aria-hidden','true');f.tabIndex=-1;
+    f.style.cssText='position:fixed;left:-10000px;top:0;width:1024px;height:900px;border:0;opacity:0;pointer-events:none;';
+    function look(){
+      var doc=null;try{doc=f.contentDocument;}catch(e){}
+      var box=doc&&findForm(doc);
+      if(box){send(readSchema(box,doc));f.remove();return;}
+      if(doc&&Date.now()-start<15000){setTimeout(look,400);return;}
+      f.remove();
+    }
+    f.addEventListener('load',function(){look();});
+    setTimeout(function(){try{f.remove();}catch(e){}},25000);
+    f.src=target.href;
+    (d.body||d.documentElement).appendChild(f);
   }
   function invalidFields(box){
     var bad=[].slice.call(box.querySelectorAll(':invalid')).filter(function(el){return el.tagName!=='FORM'&&el.tagName!=='FIELDSET';});
