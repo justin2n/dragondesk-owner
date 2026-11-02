@@ -988,6 +988,29 @@ async function initializeDatabase() {
     // last read by the widget, so the agent collects all of it before signup.
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "formFields" JSONB`);
     await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "formFieldsAt" TIMESTAMP`);
+    // Knowledge from a Google Drive folder: the folder, and the text of each
+    // document in it as of the last sync (see services/knowledgeSync.ts).
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "driveFolderId" TEXT`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "driveFolderUrl" TEXT`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "knowledgeSyncedAt" TIMESTAMP`);
+    await client.query(`ALTER TABLE inbound_agent_config ADD COLUMN IF NOT EXISTS "knowledgeError" TEXT`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS agent_knowledge_files (
+        id SERIAL PRIMARY KEY,
+        "agentId" INTEGER NOT NULL REFERENCES inbound_agent_config(id) ON DELETE CASCADE,
+        "driveFileId" TEXT NOT NULL,
+        name TEXT NOT NULL,
+        path TEXT,
+        "mimeType" TEXT,
+        "modifiedTime" TEXT,
+        content TEXT,
+        chars INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'ok',
+        detail TEXT,
+        "syncedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE ("agentId", "driveFileId")
+      )
+    `);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "linkClicks" INTEGER DEFAULT 0`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "bookingClickedAt" TIMESTAMP`);
     await client.query(`ALTER TABLE inbound_chats ADD COLUMN IF NOT EXISTS "followUpSentAt" TIMESTAMP`);

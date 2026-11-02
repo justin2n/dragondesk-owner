@@ -1,6 +1,7 @@
 import { pool } from '../models/database';
 import { visitorInAudience } from './audienceMatch';
 import { FormFields, parseStoredFormFields } from './formFields';
+import { parseFolderId } from './googleDrive';
 
 // Outreach website chat agents. An instance can run several (one per website,
 // say); each lists the domains it appears on. The widget picks the agent whose
@@ -40,6 +41,10 @@ export interface InboundAgentConfig {
   purpose: AgentPurpose;
   formFields: FormFields | null;
   formFieldsAt: string | null;
+  driveFolderId: string | null;
+  driveFolderUrl: string;
+  knowledgeSyncedAt: string | null;
+  knowledgeError: string | null;
   updatedAt: string;
 }
 
@@ -114,6 +119,10 @@ function normalize(row: any): InboundAgentConfig {
     purpose: row.purpose === 'support' ? 'support' : 'signup',
     formFields: parseStoredFormFields(row.formFields),
     formFieldsAt: row.formFieldsAt ? new Date(row.formFieldsAt).toISOString() : null,
+    driveFolderId: row.driveFolderId || null,
+    driveFolderUrl: row.driveFolderUrl || '',
+    knowledgeSyncedAt: row.knowledgeSyncedAt ? new Date(row.knowledgeSyncedAt).toISOString() : null,
+    knowledgeError: row.knowledgeError || null,
     updatedAt: row.updatedAt,
   };
 }
@@ -182,6 +191,20 @@ export async function saveAgent(id: number, input: Partial<InboundAgentConfig>, 
       : (Number.isInteger(Number(input.audienceId)) && Number(input.audienceId) > 0 ? Number(input.audienceId) : null),
     purpose: input.purpose === 'support' || input.purpose === 'signup' ? input.purpose : current.purpose,
   };
+
+  // A different Drive folder: store it and drop the old folder's documents
+  // (the route starts a sync of the new one).
+  if (input.driveFolderUrl !== undefined) {
+    const url = String(input.driveFolderUrl || '').trim().slice(0, 1000);
+    const folderId = url ? parseFolderId(url) : null;
+    if (folderId !== current.driveFolderId) {
+      await pool.query(`DELETE FROM agent_knowledge_files WHERE "agentId" = $1`, [id]);
+      await pool.query(
+        `UPDATE inbound_agent_config SET "driveFolderId" = $1, "driveFolderUrl" = $2, "knowledgeSyncedAt" = NULL, "knowledgeError" = NULL WHERE id = $3`,
+        [folderId, folderId ? url : null, id]
+      );
+    }
+  }
 
   // A different form page (or an explicit rescan) means re-reading the form.
   const resetForm = next.formPageUrl !== current.formPageUrl || (input as any).rescanForm === true;
