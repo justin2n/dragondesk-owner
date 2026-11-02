@@ -53,6 +53,7 @@ import salesSignalsRoutes from './routes/sales-signals';
 import alertsRoutes from './routes/alerts';
 import { notifyNewLead, requestOrigin } from './services/leadAlerts';
 import notificationsRoutes from './routes/notifications';
+import { startKnowledgeSync } from './services/knowledgeSync';
 import { publicRouter as inboundAgentPublicRoutes, adminRouter as inboundAgentRoutes } from './routes/inbound-agent';
 import { sweepRunningTests } from './services/abSignificance';
 import { authenticateToken, authorizeAdmin } from './middleware/auth';
@@ -545,6 +546,8 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   console.error('[process] uncaughtException:', err);
 });
+
+startKnowledgeSync();
 
 app.listen(PORT, () => {
   console.log(`🐉 DragonDesk CRM server running on port ${PORT}`);

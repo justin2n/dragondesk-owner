@@ -1,55 +1,17 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useToast } from './Toast';
 import outreach from '../pages/DragonDeskOutreach.module.css';
 import styles from './WebsiteChatAgent.module.css';
 import ChattingNowBadge from './ChattingNowBadge';
+import AgentSettings from './AgentSettings';
+import { AgentRow } from './agentTypes';
 import { useLiveChats } from '../hooks/useLiveChats';
 
-// DragonDesk: Outreach — inbound website chat agents (one per website, or a
-// catch-all), their settings, and conversations.
-
-type FieldKey = 'firstName' | 'lastName' | 'fullName' | 'email' | 'phone' | 'company' | 'program' | 'location' | 'message';
-
-interface AgentConfig {
-  id: number;
-  name: string;
-  domains: string[];
-  enabled: boolean;
-  agentName: string;
-  businessName: string;
-  greeting: string;
-  trialOffer: string;
-  businessInfo: string;
-  aiInstructions: string;
-  accentColor: string;
-  submitNativeForm: boolean;
-  formPageUrl: string;
-  formSelector: string;
-  fieldMap: Partial<Record<FieldKey, string>>;
-  autoOpen: 'off' | 'time' | 'scroll';
-  autoOpenDelay: number;
-  autoOpenScroll: number;
-  bookingUrl: string;
-  bookingLabel: string;
-  followUpEnabled: boolean;
-  followUpMinutes: number;
-  followUpMessage: string;
-  requirePhone: boolean;
-  audienceId: number | null;
-  purpose: 'signup' | 'support';
-  formFields: {
-    required: ('lastName' | 'phone' | 'company' | 'program' | 'location')[];
-    options: { program?: string[]; location?: string[] };
-    extras: { key: string; label: string; kind: 'select' | 'checkbox' | 'text'; options: string[] }[];
-  } | null;
-  formFieldsAt: string | null;
-}
-
-interface AgentRow extends AgentConfig {
-  audienceName: string | null;
-  stats: { chats: number; signups: number; bookings: number };
-}
+// DragonDesk: Outreach — website chat agents. The overview lists the agents
+// and their conversations; each agent's settings open on their own screen
+// (?agent=<id>), see AgentSettings.
 
 interface ChatRow {
   id: string;
@@ -76,17 +38,6 @@ interface Transcript extends ChatRow {
   turns: { role: 'visitor' | 'agent' | 'event'; text: string }[];
 }
 
-const FIELD_LABELS: { key: FieldKey; label: string }[] = [
-  { key: 'firstName', label: 'First name' },
-  { key: 'lastName', label: 'Last name' },
-  { key: 'fullName', label: 'Full name (single field)' },
-  { key: 'email', label: 'Email' },
-  { key: 'phone', label: 'Phone' },
-  { key: 'company', label: 'Business / studio name' },
-  { key: 'program', label: 'Program / interest' },
-  { key: 'location', label: 'Location' },
-  { key: 'message', label: 'Message / notes' },
-];
 
 const NATIVE_LABEL: Record<string, string> = {
   pending: 'Form pending',
@@ -103,12 +54,10 @@ const pathOf = (url: string | null) => {
 };
 
 const WebsiteChatAgent = () => {
-  const { toast, confirm } = useToast();
+  const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [audiences, setAudiences] = useState<{ id: number; name: string }[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [config, setConfig] = useState<AgentConfig | null>(null);
-  const [domainsText, setDomainsText] = useState('');
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [chats, setChats] = useState<ChatRow[]>([]);
@@ -116,26 +65,25 @@ const WebsiteChatAgent = () => {
   const [filter, setFilter] = useState<'all' | 'booked' | 'lead_captured'>('all');
   const [agentFilter, setAgentFilter] = useState<number | 'all'>('all');
   const [transcript, setTranscript] = useState<Transcript | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const liveChats = useLiveChats();
 
-  const select = (agent: AgentConfig) => {
-    setSelectedId(agent.id);
-    setConfig({ ...agent, fieldMap: { ...agent.fieldMap } });
-    setDomainsText(agent.domains.join('\n'));
-    setShowAdvanced(Object.values(agent.fieldMap || {}).some(Boolean) || !!agent.formSelector);
+  const openId = parseInt(searchParams.get('agent') || '', 10);
+  const openAgent = agents.find(a => a.id === openId) || null;
+  const openSettings = (id: number | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('agent', String(id)); else next.delete('agent');
+    setSearchParams(next);
+    window.scrollTo(0, 0);
   };
 
-  const loadAgents = async (selectId?: number) => {
+  const loadAgents = async () => {
     const data = await api.get('/inbound-agent/agents');
     setAgents(data.agents);
     setTrackingToken(data.trackingToken);
     setAiConfigured(data.aiConfigured);
     setAudiences(data.audiences || []);
-    const want = data.agents.find((a: AgentRow) => a.id === (selectId ?? selectedId)) || data.agents[0];
-    if (want) select(want);
   };
 
   useEffect(() => {
@@ -153,8 +101,8 @@ const WebsiteChatAgent = () => {
   }, []);
 
   useEffect(() => {
-    loadChats();
-  }, [filter, agentFilter]);
+    if (!openAgent) loadChats();
+  }, [filter, agentFilter, openAgent?.id]);
 
   const loadChats = async () => {
     try {
@@ -169,70 +117,33 @@ const WebsiteChatAgent = () => {
     }
   };
 
-  const update = <K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) =>
-    setConfig(c => (c ? { ...c, [key]: value } : c));
-
-  // Forget what was read from the form, so the widget reads it again on the
-  // next chat (after the website's form changes, say).
-  const rereadForm = async () => {
-    if (!config) return;
+  const toggleLive = async (a: AgentRow) => {
+    setBusyId(a.id);
     try {
-      await api.put(`/inbound-agent/agents/${config.id}`, { rescanForm: true });
-      await loadAgents(config.id);
-      toast('The form will be read again at the start of the next chat.', 'success');
+      const data = await api.put(`/inbound-agent/agents/${a.id}`, { enabled: !a.enabled });
+      await loadAgents();
+      toast(data.agent.enabled ? `"${a.name}" is live.` : `"${a.name}" is off.`, 'success');
     } catch (error: any) {
-      toast(error.message || 'Failed to reset the form check', 'error');
-    }
-  };
-
-  const save = async (next?: AgentConfig) => {
-    const body = next || config;
-    if (!body) return;
-    setIsSaving(true);
-    try {
-      const data = await api.put(`/inbound-agent/agents/${body.id}`, { ...body, domains: domainsText });
-      await loadAgents(data.agent.id);
-      toast(data.agent.enabled ? `Saved. "${data.agent.name}" is live.` : 'Saved.', 'success');
-    } catch (error: any) {
-      toast(error.message || 'Failed to save agent', 'error');
-      if (next) setConfig(c => (c ? { ...c, enabled: !next.enabled } : c));
+      toast(error.message || 'Failed to update agent', 'error');
     } finally {
-      setIsSaving(false);
+      setBusyId(null);
     }
-  };
-
-  const toggleEnabled = () => {
-    if (!config) return;
-    const next = { ...config, enabled: !config.enabled };
-    setConfig(next);
-    save(next);
   };
 
   const addAgent = async () => {
     try {
+      const first = agents[0];
       const data = await api.post('/inbound-agent/agents', {
         name: 'New website',
-        // Start from the current agent's look so a second site isn't built from scratch.
-        accentColor: config?.accentColor,
-        agentName: config?.agentName,
+        // Start from an existing agent's look so a second site isn't built from scratch.
+        accentColor: first?.accentColor,
+        agentName: first?.agentName,
       });
-      await loadAgents(data.agent.id);
-      toast('Agent added. Set its website, fill in what it should know, then go live.', 'success');
+      await loadAgents();
+      openSettings(data.agent.id);
+      toast('Agent added. Set its website and what it should know, then go live.', 'success');
     } catch (error: any) {
       toast(error.message || 'Failed to add agent', 'error');
-    }
-  };
-
-  const removeAgent = async () => {
-    if (!config) return;
-    if (!await confirm({ title: 'Delete Agent', message: `Delete "${config.name}"? Its past conversations are kept.`, confirmLabel: 'Delete', danger: true })) return;
-    try {
-      await api.delete(`/inbound-agent/agents/${config.id}`);
-      setSelectedId(null);
-      await loadAgents(agents.find(a => a.id !== config.id)?.id);
-      if (agentFilter === config.id) setAgentFilter('all');
-    } catch (error: any) {
-      toast(error.message || 'Failed to delete agent', 'error');
     }
   };
 
@@ -248,7 +159,20 @@ const WebsiteChatAgent = () => {
     ? `<script async src="${window.location.origin}/api/tracking/script.js?token=${trackingToken}"></script>`
     : '';
 
-  if (isLoading || !config) return <div className={outreach.loading}>Loading chat agents...</div>;
+  if (isLoading) return <div className={outreach.loading}>Loading chat agents...</div>;
+
+  if (openAgent) {
+    return (
+      <AgentSettings
+        key={openAgent.id}
+        agent={openAgent}
+        audiences={audiences}
+        canDelete={agents.length > 1}
+        onBack={() => openSettings(null)}
+        onChanged={loadAgents}
+      />
+    );
+  }
 
   return (
     <>
@@ -256,7 +180,7 @@ const WebsiteChatAgent = () => {
         <div>
           <h2 className={outreach.pageTitle}>Website Chat Agents</h2>
           <p className={outreach.pageSubtitle}>
-            AI sales reps that chat with visitors on your websites and sign them up for your offer. Use one agent per website.
+            AI sales reps that chat with visitors on your websites. Use one agent per website, or per audience.
           </p>
         </div>
         <button onClick={addAgent} className={outreach.primaryBtn}>+ New Agent</button>
@@ -270,334 +194,43 @@ const WebsiteChatAgent = () => {
 
       <div className={styles.agentCards}>
         {agents.map(a => (
-          <button
-            key={a.id}
-            type="button"
-            className={`${styles.agentCard} ${a.id === selectedId ? styles.agentCardActive : ''}`}
-            onClick={() => select(a)}
-          >
-            <span className={styles.agentCardTop}>
-              <span className={styles.agentCardName}>{a.name}</span>
-              <span className={`${styles.status} ${a.enabled ? styles.live : ''}`}><span className={styles.dot} />{a.enabled ? 'Live' : 'Off'}</span>
-            </span>
-            <span className={styles.agentCardSites}>{a.domains.length ? a.domains.join(', ') : 'All other websites'}</span>
-            <span className={styles.agentCardSites}>
-              {a.audienceName ? `Only: ${a.audienceName}` : 'Everyone'}{a.purpose === 'support' ? ' · Helps customers' : ' · Signs up visitors'}
-            </span>
-            <span className={styles.agentCardStats}>{a.stats.chats} chats, {a.stats.bookings} booking clicks (30 days)</span>
-          </button>
+          <div key={a.id} className={styles.agentCard}>
+            <button type="button" className={styles.agentCardMain} onClick={() => openSettings(a.id)}>
+              <span className={styles.agentCardTop}>
+                <span className={styles.agentCardName}>{a.name}</span>
+                <span className={`${styles.status} ${a.enabled ? styles.live : ''}`}><span className={styles.dot} />{a.enabled ? 'Live' : 'Off'}</span>
+              </span>
+              <span className={styles.agentCardSites}>{a.domains.length ? a.domains.join(', ') : 'All other websites'}</span>
+              <span className={styles.agentCardSites}>
+                {a.audienceName ? `Only: ${a.audienceName}` : 'Everyone'}{a.purpose === 'support' ? ' · Helps customers' : ' · Signs up visitors'}
+                {a.driveFolderId ? ' · Drive folder' : ''}
+              </span>
+              <span className={styles.agentCardStats}>{a.stats.chats} chats, {a.stats.bookings} booking clicks (30 days)</span>
+            </button>
+            <div className={styles.agentCardActions}>
+              <button type="button" className={outreach.editBtn} onClick={() => openSettings(a.id)}>Settings</button>
+              <button type="button" className={a.enabled ? outreach.cancelBtn : outreach.primaryBtn} onClick={() => toggleLive(a)} disabled={busyId === a.id}>
+                {a.enabled ? 'Turn Off' : 'Go Live'}
+              </button>
+            </div>
+          </div>
         ))}
       </div>
 
-      <div className={outreach.info}>
+      <details className={styles.install}>
+        <summary>How to add agents to your website</summary>
         <p className={styles.infoText}>
           Agents run through your DragonDesk tracking snippet. Put the same snippet in the <code>&lt;head&gt;</code> of each website; each page shows the
-          agent assigned to its domain, or the agent with no websites listed if none matches. Changes reach your sites within about 5 minutes.
+          agent assigned to its domain (and audience), or the agent with no websites listed if none matches. Changes reach your sites within about 5 minutes.
         </p>
         {snippet && (
           <div className={styles.snippet}>
             <code>{snippet}</code>
-            <button
-              type="button"
-              className={outreach.editBtn}
-              onClick={() => { navigator.clipboard.writeText(snippet); toast('Snippet copied', 'success'); }}
-            >
-              Copy
-            </button>
+            <button type="button" className={outreach.editBtn}
+              onClick={() => { navigator.clipboard.writeText(snippet); toast('Snippet copied', 'success'); }}>Copy</button>
           </div>
         )}
-      </div>
-
-      <div className={styles.editorBar}>
-        <h3 className={styles.sectionTitle}>{config.name}</h3>
-        <div className={styles.headerActions}>
-          <span className={`${styles.status} ${config.enabled ? styles.live : ''}`}>
-            <span className={styles.dot} />
-            {config.enabled ? 'Live' : 'Off'}
-          </span>
-          <button onClick={toggleEnabled} className={config.enabled ? outreach.cancelBtn : outreach.primaryBtn} disabled={isSaving}>
-            {config.enabled ? 'Turn Off' : 'Go Live'}
-          </button>
-          {agents.length > 1 && (
-            <button onClick={removeAgent} className={outreach.deleteBtn} disabled={isSaving}>Delete</button>
-          )}
-        </div>
-      </div>
-
-      <form
-        className={styles.settings}
-        onSubmit={(e) => { e.preventDefault(); save(); }}
-      >
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Website</h3>
-          <div className={styles.row}>
-            <div className={outreach.formGroup}>
-              <label>Label</label>
-              <input className={outreach.input} value={config.name} maxLength={80}
-                onChange={(e) => update('name', e.target.value)} placeholder="e.g., Dragon Gym website" />
-              <span className={styles.hint}>Only shown here, to tell your agents apart.</span>
-            </div>
-            <div className={outreach.formGroup}>
-              <label>Websites</label>
-              <textarea className={outreach.textarea} rows={2} value={domainsText} style={{ minHeight: 0 }}
-                onChange={(e) => setDomainsText(e.target.value)} placeholder={'dragongym.com'} />
-              <span className={styles.hint}>
-                One domain per line. Covers www and other subdomains. Leave empty to use this agent on any website no other agent claims.
-              </span>
-            </div>
-          </div>
-          <div className={styles.row}>
-            <div className={outreach.formGroup}>
-              <label>Audience</label>
-              <select className={outreach.input} value={config.audienceId ?? ''}
-                onChange={(e) => update('audienceId', e.target.value ? parseInt(e.target.value, 10) : null)}>
-                <option value="">Everyone</option>
-                {audiences.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <span className={styles.hint}>
-                Show this agent only to visitors in an audience, such as current customers. Everyone else on these websites sees the agent set
-                to Everyone. Visitors count as contacts once they've filled in a form or signed up in the chat on that browser.
-              </span>
-            </div>
-            <div className={outreach.formGroup}>
-              <label>Purpose</label>
-              <div className={styles.radioGroup}>
-                <label className={styles.radio}>
-                  <input type="radio" name="purpose" checked={config.purpose === 'signup'} onChange={() => update('purpose', 'signup')} />
-                  <span>Sign up new visitors for your offer</span>
-                </label>
-                <label className={styles.radio}>
-                  <input type="radio" name="purpose" checked={config.purpose === 'support'} onChange={() => update('purpose', 'support')} />
-                  <span>Help existing customers with questions and scheduling</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Agent</h3>
-          <div className={styles.row}>
-            <div className={outreach.formGroup}>
-              <label>Agent name</label>
-              <input className={outreach.input} value={config.agentName} maxLength={80}
-                onChange={(e) => update('agentName', e.target.value)} placeholder="e.g., Dragon Gym Assistant" />
-            </div>
-            <div className={outreach.formGroup}>
-              <label>Business name</label>
-              <input className={outreach.input} value={config.businessName} maxLength={120}
-                onChange={(e) => update('businessName', e.target.value)} placeholder="e.g., Dragon Gym" />
-            </div>
-          </div>
-          <div className={styles.row}>
-            <div className={outreach.formGroup}>
-              <label>Greeting</label>
-              <input className={outreach.input} value={config.greeting} maxLength={500}
-                onChange={(e) => update('greeting', e.target.value)} />
-              <span className={styles.hint}>Shown when the chat opens, and as a small prompt next to the chat button.</span>
-            </div>
-            <div className={`${outreach.formGroup} ${styles.colorGroup}`}>
-              <label>Color</label>
-              <div className={styles.colorRow}>
-                <input type="color" value={config.accentColor} onChange={(e) => update('accentColor', e.target.value)} className={styles.colorInput} />
-                <input className={outreach.input} value={config.accentColor} maxLength={9}
-                  onChange={(e) => update('accentColor', e.target.value)} />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>What the agent knows</h3>
-          {config.purpose === 'signup' && <div className={outreach.formGroup}>
-            <label>Trial offer</label>
-            <textarea className={outreach.textarea} rows={3} value={config.trialOffer} maxLength={2000}
-              onChange={(e) => update('trialOffer', e.target.value)}
-              placeholder="e.g., One free week of unlimited classes for new adults, including a free uniform. Kids get two free classes." />
-          </div>}
-          <div className={outreach.formGroup}>
-            <label>About the business</label>
-            <textarea className={outreach.textarea} rows={8} value={config.businessInfo} maxLength={8000}
-              onChange={(e) => update('businessInfo', e.target.value)}
-              placeholder={'Location, hours, class schedule, programs, pricing you are happy to share, parking, what to bring, FAQs...\n\nThe agent only answers from what you write here. Anything else, it says the team will follow up.'} />
-          </div>
-          <div className={outreach.formGroup}>
-            <label>Extra instructions</label>
-            <textarea className={outreach.textarea} rows={4} value={config.aiInstructions} maxLength={4000}
-              onChange={(e) => update('aiInstructions', e.target.value)}
-              placeholder="e.g., Mention that beginners are welcome in every class. If someone asks about competition team, say coach Mike will reach out." />
-          </div>
-          {config.purpose === 'signup' && <>
-            <label className={styles.checkbox}>
-              <input type="checkbox" checked={config.requirePhone}
-                onChange={(e) => update('requirePhone', e.target.checked)} />
-              Require a phone number to sign up
-            </label>
-            <span className={styles.hint}>Turn this on if your website's signup form requires a phone number, or that form will fail.</span>
-          </>}
-        </section>
-
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Booking link and follow-up</h3>
-          <div className={styles.row}>
-            <div className={outreach.formGroup}>
-              <label>{config.purpose === 'support' ? 'Scheduling link' : 'Booking link'}</label>
-              <input className={outreach.input} value={config.bookingUrl} maxLength={1000}
-                onChange={(e) => update('bookingUrl', e.target.value)} placeholder="e.g., https://cp.mystudio.io/t/..." />
-              <span className={styles.hint}>
-                {config.purpose === 'support'
-                  ? "Where customers book or change classes. The agent shares it as a button whenever they want to schedule, and clicks on it are this agent's main result. It can be on any website."
-                  : "Where visitors pick their first class. The agent shares it as a button right after signup, and clicks on it are this agent's main result. It can be on any website."}
-              </span>
-            </div>
-            <div className={outreach.formGroup}>
-              <label>Button label</label>
-              <input className={outreach.input} value={config.bookingLabel} maxLength={40}
-                onChange={(e) => update('bookingLabel', e.target.value)} placeholder="Pick your first class" />
-            </div>
-          </div>
-          <label className={styles.checkbox}>
-            <input type="checkbox" checked={config.followUpEnabled}
-              onChange={(e) => update('followUpEnabled', e.target.checked)} />
-            Follow up after they click the booking link
-          </label>
-          {config.followUpEnabled && (
-            <div className={styles.row}>
-              <div className={outreach.formGroup}>
-                <label>Follow-up message</label>
-                <input className={outreach.input} value={config.followUpMessage} maxLength={500}
-                  onChange={(e) => update('followUpMessage', e.target.value)} />
-              </div>
-              <div className={outreach.formGroup}>
-                <label>Send it after</label>
-                <div className={styles.radio}>
-                  <input type="number" className={`${outreach.input} ${styles.smallNumber}`} min={1} max={120}
-                    value={config.followUpMinutes} onChange={(e) => update('followUpMinutes', parseInt(e.target.value, 10) || 1)} />
-                  <span>minutes</span>
-                </div>
-              </div>
-            </div>
-          )}
-          <p className={styles.hint}>
-            The follow-up appears in the chat once the visitor is back on your site, and the agent reads their answer with that context, so it can
-            help anyone who got stuck.
-          </p>
-        </section>
-
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>When the chat opens</h3>
-          <div className={styles.radioGroup}>
-            <label className={styles.radio}>
-              <input type="radio" name="autoOpen" checked={config.autoOpen === 'off'} onChange={() => update('autoOpen', 'off')} />
-              <span>Only when the visitor clicks the chat button <span className={styles.hint}>(the greeting pops up next to the button after 8 seconds)</span></span>
-            </label>
-            <label className={styles.radio}>
-              <input type="radio" name="autoOpen" checked={config.autoOpen === 'time'} onChange={() => update('autoOpen', 'time')} />
-              <span>Open automatically after</span>
-              <input type="number" className={`${outreach.input} ${styles.smallNumber}`} min={1} max={600}
-                value={config.autoOpenDelay} disabled={config.autoOpen !== 'time'}
-                onChange={(e) => update('autoOpenDelay', parseInt(e.target.value, 10) || 1)} />
-              <span>seconds on a page</span>
-            </label>
-            <label className={styles.radio}>
-              <input type="radio" name="autoOpen" checked={config.autoOpen === 'scroll'} onChange={() => update('autoOpen', 'scroll')} />
-              <span>Open automatically after the visitor scrolls</span>
-              <input type="number" className={`${outreach.input} ${styles.smallNumber}`} min={5} max={100}
-                value={config.autoOpenScroll} disabled={config.autoOpen !== 'scroll'}
-                onChange={(e) => update('autoOpenScroll', parseInt(e.target.value, 10) || 5)} />
-              <span>% of the page</span>
-            </label>
-          </div>
-          <p className={styles.hint}>
-            Opens at most once per visit, and never again once the visitor closes it. On phones, where the chat fills the screen, it shows the
-            greeting next to the button instead of opening.
-          </p>
-        </section>
-
-        {config.purpose === 'signup' && (
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Your website's signup form</h3>
-          <label className={styles.checkbox}>
-            <input type="checkbox" checked={config.submitNativeForm}
-              onChange={(e) => update('submitNativeForm', e.target.checked)} />
-            Also submit my website's own signup form for each new trial signup
-          </label>
-          <p className={styles.hint}>
-            Every signup is added to DragonDesk as a lead. With this on, the agent also fills in and submits the form on your site in the
-            background, so the signup reaches everything that form already feeds (email notifications, other software). Each conversation
-            shows whether the form went through.
-          </p>
-          {config.submitNativeForm && (
-            <>
-              <div className={styles.advanced}>
-                <strong>What your form asks for</strong>
-                {config.formFields ? (
-                  <>
-                    <p className={styles.hint}>
-                      Besides name and email, your form requires:{' '}
-                      {[
-                        ...config.formFields.required.map(k => {
-                          const label = { lastName: 'last name', phone: 'phone', company: 'business name', program: 'program', location: 'location' }[k];
-                          const opts = (k === 'program' || k === 'location') ? config.formFields!.options[k] : undefined;
-                          return opts?.length ? `${label} (${opts.length} choices)` : label;
-                        }),
-                        ...config.formFields.extras.map(e => e.kind === 'checkbox' ? `"${e.label}" checkbox` : `"${e.label}"`),
-                      ].join(', ') || 'nothing else'}
-                      . The agent collects all of it before signing someone up.
-                    </p>
-                    <span className={styles.hint}>
-                      Read from your form {config.formFieldsAt ? new Date(config.formFieldsAt).toLocaleString() : ''}. It's re-read daily.
-                    </span>
-                  </>
-                ) : (
-                  <p className={styles.hint}>Not read yet. The widget reads your form at the start of the next chat, so the agent knows every required field.</p>
-                )}
-                <button type="button" className={styles.linkBtn} onClick={rereadForm}>Read the form again</button>
-              </div>
-              <div className={outreach.formGroup}>
-                <label>Form page URL</label>
-                <input className={outreach.input} value={config.formPageUrl} maxLength={1000}
-                  onChange={(e) => update('formPageUrl', e.target.value)} placeholder="e.g., https://yourgym.com/free-trial" />
-                <span className={styles.hint}>
-                  A page on this agent's website that has your signup or contact form. Leave blank to use the page the visitor is on. Browsers
-                  don't let one website fill in another site's form, so a page elsewhere (like a booking system) goes in Booking link instead.
-                </span>
-              </div>
-              <button type="button" className={styles.linkBtn} onClick={() => setShowAdvanced(v => !v)}>
-                {showAdvanced ? 'Hide' : 'Show'} field matching (advanced)
-              </button>
-              {showAdvanced && (
-                <div className={styles.advanced}>
-                  <p className={styles.hint}>
-                    The agent finds the form and its fields automatically. If it picks the wrong ones, pin them with CSS selectors here.
-                  </p>
-                  <div className={outreach.formGroup}>
-                    <label>Form selector</label>
-                    <input className={outreach.input} value={config.formSelector} maxLength={300}
-                      onChange={(e) => update('formSelector', e.target.value)} placeholder="e.g., #trial-form" />
-                  </div>
-                  <div className={styles.fieldGrid}>
-                    {FIELD_LABELS.map(f => (
-                      <div key={f.key} className={outreach.formGroup}>
-                        <label>{f.label}</label>
-                        <input className={outreach.input} value={config.fieldMap[f.key] || ''} maxLength={300} placeholder="Auto-detect"
-                          onChange={(e) => update('fieldMap', { ...config.fieldMap, [f.key]: e.target.value })} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </section>
-        )}
-
-        <div className={styles.saveRow}>
-          <button type="submit" className={outreach.saveBtn} disabled={isSaving}>
-            {isSaving ? 'Saving...' : 'Save Settings'}
-          </button>
-        </div>
-      </form>
+      </details>
 
       <div className={styles.chatsHeader}>
         <h3 className={styles.sectionTitle}>Conversations</h3>
